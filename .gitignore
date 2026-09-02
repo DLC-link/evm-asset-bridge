@@ -2,3 +2,6 @@
 cache/
 out/
 broadcast/
+
+# Local-only design docs (superpowers specs and plans)
+docs/superpowers/
