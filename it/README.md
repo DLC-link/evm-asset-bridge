@@ -32,8 +32,13 @@ path `m/44'/60'/0'/0/{index}`) that anvil uses by default with no
 | 4 | attestor #2 | `0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65` |
 | 5 | attestor #3 | `0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc` |
 | 6 | test user | `0x976EA74026E726554dB657fA54763abd0C3a0aa9` |
+| 7 | attestor #4 | `0x14dC79964da2C08b23698B3D3cc7Ca32193d9955` |
+| 8 | attestor #5 | `0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f` |
 
-Threshold: 2 of 3 attestors. Asset: `address(0)` (native ETH). No deposit or
+Attestors #4 and #5 use indices 7 and 8, after the test user, so indices
+0-6 stay stable for consumers that already hold those keys.
+
+Threshold: 3 of 5 attestors. Asset: `address(0)` (native ETH). No deposit or
 withdraw limits (`Limits(0, type(uint256).max)` both ways).
 
 ## Fixed contract addresses
