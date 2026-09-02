@@ -14,8 +14,10 @@ contract BridgeTestBase is Test {
     address internal proxyOwner = makeAddr("proxyOwner");
     address internal user = makeAddr("user");
 
-    // Attestor private keys. vm.addr derives the addresses; _sortedAttestorPks
-    // orders them by address so signatures come out strictly ascending.
+    // Attestor private keys. vm.addr derives the addresses; sorting them by
+    // address is just a fixture convenience for deterministic ordering in
+    // tests -- the contract itself does not require any particular signer
+    // order.
     uint256[] internal attestorPks;
     address[] internal attestors;
 

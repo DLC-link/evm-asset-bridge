@@ -4,6 +4,7 @@ pragma solidity 0.8.34;
 import {BridgeTestBase} from "./BridgeTestBase.t.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {ForceSend} from "./mocks/ForceSend.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
@@ -183,5 +184,44 @@ contract RolesTest is BridgeTestBase {
         vm.expectRevert(BitSafeEvmAssetBridge.InvalidAddress.selector);
         vm.prank(bridgeAdmin);
         bridge.rescueERC20(address(stray), address(0), 5 ether);
+    }
+
+    function test_rescueETH_rescuesForcedEth() public {
+        MockERC20 token = new MockERC20();
+        BitSafeEvmAssetBridge erc20Bridge = _deployBridge(address(token));
+        ForceSend force = new ForceSend{value: 3 ether}();
+        force.boom(payable(address(erc20Bridge)));
+        assertEq(address(erc20Bridge).balance, 3 ether);
+
+        vm.prank(bridgeAdmin);
+        erc20Bridge.rescueETH(user, 3 ether);
+        assertEq(address(erc20Bridge).balance, 0);
+        assertEq(user.balance, 3 ether);
+    }
+
+    function test_rescueETH_blocksBridgedAsset() public {
+        vm.expectRevert(BitSafeEvmAssetBridge.CannotRescueBridgedAsset.selector);
+        vm.prank(bridgeAdmin);
+        bridge.rescueETH(user, 1 ether);
+    }
+
+    function test_rescueETH_zeroTo_reverts() public {
+        MockERC20 token = new MockERC20();
+        BitSafeEvmAssetBridge erc20Bridge = _deployBridge(address(token));
+        ForceSend force = new ForceSend{value: 1 ether}();
+        force.boom(payable(address(erc20Bridge)));
+
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidAddress.selector);
+        vm.prank(bridgeAdmin);
+        erc20Bridge.rescueETH(address(0), 1 ether);
+    }
+
+    function test_rescueETH_requiresBridgeAdmin() public {
+        MockERC20 token = new MockERC20();
+        BitSafeEvmAssetBridge erc20Bridge = _deployBridge(address(token));
+        bytes32 role = erc20Bridge.BRIDGE_ADMIN_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+        vm.prank(user);
+        erc20Bridge.rescueETH(user, 1 ether);
     }
 }

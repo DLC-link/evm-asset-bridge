@@ -62,24 +62,25 @@ contract WithdrawTest is BridgeTestBase {
     }
 
     function test_withdraw_duplicateSigner_reverts() public {
-        // dlc-solidity PR #116: same key signing twice must not satisfy the threshold
+        // The same key signing twice must not satisfy the threshold.
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
         bytes[] memory sigs = new bytes[](2);
         sigs[0] = _sign(attestorPks[0], digest);
         sigs[1] = _sign(attestorPks[0], digest); // identical signer
-        vm.expectRevert(BitSafeEvmAssetBridge.InvalidSignatureOrder.selector);
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.DuplicateSigner.selector, attestors[0]));
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
     }
 
-    function test_withdraw_unorderedSigners_reverts() public {
+    function test_withdraw_unorderedSigners_succeeds() public {
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
         bytes[] memory sigs = new bytes[](2);
         sigs[0] = _sign(attestorPks[1], digest);
         sigs[1] = _sign(attestorPks[0], digest); // descending order
-        vm.expectRevert(BitSafeEvmAssetBridge.InvalidSignatureOrder.selector);
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+        assertEq(destination.balance, 1 ether);
+        assertTrue(bridge.isWithdrawRequestUsed(REQUEST_ID));
     }
 
     function test_withdraw_nonAttestorSigner_reverts() public {
@@ -89,35 +90,39 @@ contract WithdrawTest is BridgeTestBase {
         bytes[] memory sigs = new bytes[](2);
         sigs[0] = _sign(attestorPks[0], digest);
         sigs[1] = _sign(roguePk, digest);
-        // order the two by signer address
-        if (vm.addr(roguePk) < attestors[0]) (sigs[0], sigs[1]) = (sigs[1], sigs[0]);
         vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, vm.addr(roguePk)));
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
     }
 
     function test_withdraw_extraRogueSignatureAfterValidThreshold_reverts() public {
-        // Every provided signature must be valid -- no early exit once the
-        // threshold count is reached. Two real attestor signatures plus a
-        // third from a rogue key must still fail on the rogue signer, even
+        // Every provided signature must be validated -- no early exit once
+        // the threshold count is reached. Two real attestor signatures plus
+        // a third from a rogue key must still fail on the rogue signer, even
         // when the rogue signature comes AFTER the threshold count of valid
         // ones (index 2, not index 0) -- a regression that only checks the
         // first `threshold` signatures must not pass this test.
-        uint256 roguePk;
-        address rogueAddr;
-        for (uint256 i = 1;; ++i) {
-            (rogueAddr, roguePk) = makeAddrAndKey(string.concat("rogue", vm.toString(i)));
-            if (rogueAddr > attestors[1]) break;
-        }
-        assertGt(uint256(uint160(rogueAddr)), uint256(uint160(attestors[1]))); // pin the property the test depends on
+        (address rogueAddr, uint256 roguePk) = makeAddrAndKey("rogue");
 
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
         bytes[] memory sigs = new bytes[](3);
         sigs[0] = _sign(attestorPks[0], digest);
         sigs[1] = _sign(attestorPks[1], digest);
-        sigs[2] = _sign(roguePk, digest); // already ascending; rogue after the threshold
+        sigs[2] = _sign(roguePk, digest); // rogue after the threshold count
 
         vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, rogueAddr));
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+    }
+
+    function test_withdraw_malformedSignature_reverts() public {
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes memory badSig = _sign(attestorPks[0], digest);
+        badSig[badSig.length - 1] = 0; // corrupt the v byte
+        bytes[] memory sigs = new bytes[](2);
+        sigs[0] = badSig;
+        sigs[1] = _sign(attestorPks[1], digest);
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidSignature.selector);
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
     }
@@ -199,7 +204,7 @@ contract WithdrawTest is BridgeTestBase {
     }
 
     function test_withdraw_degenerateThresholdZero_reverts() public {
-        // Ronin 2024-08: a zeroed quorum must not open the bridge.
+        // A zeroed quorum must not open the bridge.
         // threshold is the second word of the namespaced struct.
         bytes32 slot = bytes32(uint256(bridge.BRIDGE_STORAGE_LOCATION()) + 1);
         vm.store(address(bridge), slot, bytes32(0));
@@ -341,9 +346,8 @@ contract WithdrawTest is BridgeTestBase {
     }
 
     function testFuzz_withdraw_signerPermutations(uint8 permSeed) public {
-        // The 6 permutations of 3 sorted attestor indices. Only the identity
-        // (ascending) permutation is strictly increasing; every other one
-        // must be rejected by the ordering check.
+        // The 6 permutations of 3 attestor indices. Signer order does not
+        // matter, so every permutation must succeed.
         uint256[3][6] memory perms = [
             [uint256(0), 1, 2],
             [uint256(0), 2, 1],
@@ -361,18 +365,10 @@ contract WithdrawTest is BridgeTestBase {
             sigs[i] = _sign(attestorPks[perm[i]], digest);
         }
 
-        if (permIndex == 0) {
-            vm.prank(attestors[0]);
-            bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
-            assertEq(destination.balance, 1 ether);
-            assertTrue(bridge.isWithdrawRequestUsed(REQUEST_ID));
-        } else {
-            vm.expectRevert(BitSafeEvmAssetBridge.InvalidSignatureOrder.selector);
-            vm.prank(attestors[0]);
-            bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
-            assertEq(destination.balance, 0);
-            assertFalse(bridge.isWithdrawRequestUsed(REQUEST_ID));
-        }
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+        assertEq(destination.balance, 1 ether);
+        assertTrue(bridge.isWithdrawRequestUsed(REQUEST_ID));
     }
 
     function _deployBridgeWithWithdrawLimits(uint256 minAmount, uint256 maxAmount)

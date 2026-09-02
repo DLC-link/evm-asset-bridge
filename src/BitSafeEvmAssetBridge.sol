@@ -74,7 +74,8 @@ contract BitSafeEvmAssetBridge is
     error WithdrawRequestAlreadyUsed();
     error InvalidDestination();
     error NotEnoughSignatures();
-    error InvalidSignatureOrder();
+    error InvalidSignature();
+    error DuplicateSigner(address signer);
     error SignerIsNotAttestor(address signer);
     error AttestorCannotRenounce();
     error UnexpectedBalanceChange();
@@ -193,7 +194,16 @@ contract BitSafeEvmAssetBridge is
         IERC20(token).safeTransfer(to, amount);
     }
 
-    /// @dev Attestors leave only through revokeRole (dlc-solidity PR #115 lesson).
+    /// @notice Rescues stray ETH (for example forced in via selfdestruct).
+    ///         Only callable when the bridged asset is not ETH.
+    function rescueETH(address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) {
+        if (_getBridgeStorage().asset == address(0)) revert CannotRescueBridgedAsset();
+        if (to == address(0)) revert InvalidAddress();
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) revert EthTransferFailed();
+    }
+
+    /// @dev Attestors leave only through revokeRole.
     function renounceRole(bytes32 role, address callerConfirmation) public virtual override {
         if (role == ATTESTOR_ROLE) revert AttestorCannotRenounce();
         super.renounceRole(role, callerConfirmation);
@@ -288,8 +298,8 @@ contract BitSafeEvmAssetBridge is
     }
 
     /// @notice Releases `amount` of the bridged asset to `destinationAddress`.
-    /// @dev Requires `threshold` valid attestor signatures over the EIP-712
-    ///      digest, with recovered signers in strictly ascending order.
+    /// @dev Requires `threshold` valid, distinct attestor signatures over the
+    ///      EIP-712 digest. Signer order does not matter.
     function withdraw(
         bytes calldata withdrawRequestId,
         address destinationAddress,
@@ -298,8 +308,7 @@ contract BitSafeEvmAssetBridge is
     ) external onlyRole(ATTESTOR_ROLE) whenNotPaused nonReentrant {
         BridgeStorage storage $ = _getBridgeStorage();
 
-        // Checks. The threshold guard makes a degenerate (uninitialized or
-        // corrupted) threshold unexploitable — see the Ronin 2024-08 incident.
+        // Checks. A degenerate (zero) threshold must never open the bridge.
         uint256 threshold_ = $.threshold;
         if (threshold_ < MIN_THRESHOLD) revert ThresholdOutOfBounds();
         if (withdrawRequestId.length == 0) revert EmptyId();
@@ -312,12 +321,15 @@ contract BitSafeEvmAssetBridge is
         if (signatures.length < threshold_) revert NotEnoughSignatures();
 
         bytes32 digest = withdrawalDigest(withdrawRequestId, destinationAddress, amount);
-        address lastSigner;
+        address[] memory seenSigners = new address[](signatures.length);
         for (uint256 i; i < signatures.length; ++i) {
-            address signer = ECDSA.recover(digest, signatures[i]);
-            if (signer <= lastSigner) revert InvalidSignatureOrder();
+            (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signatures[i]);
+            if (err != ECDSA.RecoverError.NoError || signer == address(0)) revert InvalidSignature();
             if (!hasRole(ATTESTOR_ROLE, signer)) revert SignerIsNotAttestor(signer);
-            lastSigner = signer;
+            for (uint256 j; j < i; ++j) {
+                if (seenSigners[j] == signer) revert DuplicateSigner(signer);
+            }
+            seenSigners[i] = signer;
         }
 
         // Effect before interaction: consume the request id.

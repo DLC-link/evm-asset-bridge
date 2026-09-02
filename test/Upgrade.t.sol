@@ -4,6 +4,7 @@ pragma solidity 0.8.34;
 import {BridgeTestBase} from "./BridgeTestBase.t.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 import {BridgeV2Mock} from "./mocks/BridgeV2Mock.sol";
+import {ForceSend} from "./mocks/ForceSend.sol";
 import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 import {ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
@@ -83,13 +84,5 @@ contract UpgradeTest is BridgeTestBase {
         bytes[] memory sigs = _attestorSignatures(digest, 2);
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
-    }
-}
-
-contract ForceSend {
-    constructor() payable {}
-
-    function boom(address payable target) external {
-        selfdestruct(target);
     }
 }
