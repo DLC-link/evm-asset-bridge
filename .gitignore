@@ -5,3 +5,6 @@ broadcast/
 
 # Local-only design docs (superpowers specs and plans)
 docs/superpowers/
+
+# Local test-run deployment artifacts
+deployments/*.31337.json

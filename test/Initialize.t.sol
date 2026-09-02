@@ -13,7 +13,10 @@ contract InitializeTest is BridgeTestBase {
         assertEq(bridge.asset(), address(0));
         assertEq(bridge.threshold(), THRESHOLD);
         assertEq(bridge.getAttestors().length, 3);
-        assertTrue(bridge.hasRole(bridge.ATTESTOR_ROLE(), attestors[0]));
+        bytes32 attestorRole = bridge.ATTESTOR_ROLE();
+        assertTrue(bridge.hasRole(attestorRole, attestors[0]));
+        assertTrue(bridge.hasRole(attestorRole, attestors[1]));
+        assertTrue(bridge.hasRole(attestorRole, attestors[2]));
         assertTrue(bridge.hasRole(bridge.BRIDGE_ADMIN_ROLE(), bridgeAdmin));
         assertEq(bridge.defaultAdmin(), defaultAdmin);
     }
@@ -85,6 +88,45 @@ contract InitializeTest is BridgeTestBase {
             BitSafeEvmAssetBridge.initialize,
             (address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, attestors, THRESHOLD,
              BitSafeEvmAssetBridge.Limits(0, 0),
+             BitSafeEvmAssetBridge.Limits(0, type(uint256).max))
+        );
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidLimits.selector);
+        new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
+    }
+
+    function test_initialize_zeroAddressAttestor_reverts() public {
+        address[] memory withZero = new address[](2);
+        withZero[0] = attestors[0];
+        withZero[1] = address(0);
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
+        bytes memory initData = abi.encodeCall(
+            BitSafeEvmAssetBridge.initialize,
+            (address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, withZero, 2,
+             BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
+             BitSafeEvmAssetBridge.Limits(0, type(uint256).max))
+        );
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidAddress.selector);
+        new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
+    }
+
+    function test_initialize_zeroAddressBridgeAdmin_reverts() public {
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
+        bytes memory initData = abi.encodeCall(
+            BitSafeEvmAssetBridge.initialize,
+            (address(0), defaultAdmin, ADMIN_DELAY, address(0), attestors, THRESHOLD,
+             BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
+             BitSafeEvmAssetBridge.Limits(0, type(uint256).max))
+        );
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidAddress.selector);
+        new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
+    }
+
+    function test_initialize_depositLimitsMinAboveMax_reverts() public {
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
+        bytes memory initData = abi.encodeCall(
+            BitSafeEvmAssetBridge.initialize,
+            (address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, attestors, THRESHOLD,
+             BitSafeEvmAssetBridge.Limits(10 ether, 1 ether),
              BitSafeEvmAssetBridge.Limits(0, type(uint256).max))
         );
         vm.expectRevert(BitSafeEvmAssetBridge.InvalidLimits.selector);

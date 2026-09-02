@@ -254,6 +254,7 @@ contract BitSafeEvmAssetBridge is
         if (IERC20(asset_).balanceOf(address(this)) - balanceBefore != amount) {
             revert UnexpectedBalanceChange();
         }
+        // Emitted after the transfer: the amount is only confirmed by the balance-delta check above.
         emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, amount);
     }
 

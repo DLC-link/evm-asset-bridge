@@ -28,5 +28,7 @@ contract DeployTest is Test {
         address proxy = vm.parseJsonAddress(json, ".proxy");
         assertEq(BitSafeEvmAssetBridge(payable(proxy)).threshold(), 2);
         assertEq(BitSafeEvmAssetBridge(payable(proxy)).getAttestors().length, 3);
+        assertEq(vm.parseJsonString(json, ".compiler"), "0.8.34");
+        assertEq(vm.parseJsonString(json, ".gitCommit"), "unknown");
     }
 }

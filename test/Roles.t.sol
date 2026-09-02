@@ -136,4 +136,52 @@ contract RolesTest is BridgeTestBase {
         bridge.rescueERC20(address(stray), user, 5 ether);
         assertEq(stray.balanceOf(user), 5 ether);
     }
+
+    function test_pause_requiresBridgeAdmin() public {
+        bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(
+            IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+        vm.prank(user);
+        bridge.pause();
+    }
+
+    function test_unpause_requiresBridgeAdmin() public {
+        bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(
+            IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+        vm.prank(user);
+        bridge.unpause();
+    }
+
+    function test_setDepositLimits_requiresBridgeAdmin() public {
+        bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(
+            IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+        vm.prank(user);
+        bridge.setDepositLimits(BitSafeEvmAssetBridge.Limits(0, type(uint256).max));
+    }
+
+    function test_setWithdrawLimits_requiresBridgeAdmin() public {
+        bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(
+            IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+        vm.prank(user);
+        bridge.setWithdrawLimits(BitSafeEvmAssetBridge.Limits(0, type(uint256).max));
+    }
+
+    function test_rescueERC20_requiresBridgeAdmin() public {
+        bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(
+            IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+        vm.prank(user);
+        bridge.rescueERC20(address(0x1), user, 1 ether);
+    }
+
+    function test_rescueERC20_zeroTo_reverts() public {
+        MockERC20 stray = new MockERC20();
+        stray.mint(address(bridge), 5 ether); // ETH instance, any ERC20 is foreign
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidAddress.selector);
+        vm.prank(bridgeAdmin);
+        bridge.rescueERC20(address(stray), address(0), 5 ether);
+    }
 }

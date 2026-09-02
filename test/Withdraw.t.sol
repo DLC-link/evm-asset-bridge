@@ -6,6 +6,7 @@ import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {ReentrantReceiver} from "./mocks/ReentrantReceiver.sol";
 import {IBridgeWithdraw} from "./mocks/ReentrantReceiver.sol";
+import {RejectingReceiver} from "./mocks/RejectingReceiver.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {TransparentUpgradeableProxy} from
@@ -313,6 +314,61 @@ contract WithdrawTest is BridgeTestBase {
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, amount, sigs);
         assertEq(destination.balance, amount);
+    }
+
+    function test_withdraw_zeroAmount_reverts() public {
+        // ZeroAmount is checked before the signature-count check -- an empty
+        // signature array must still surface ZeroAmount, not NotEnoughSignatures.
+        bytes[] memory noSigs = new bytes[](0);
+        vm.expectRevert(BitSafeEvmAssetBridge.ZeroAmount.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 0, noSigs);
+    }
+
+    function test_withdraw_ethTransferFailure_leavesRequestUnused() public {
+        RejectingReceiver rejecting = new RejectingReceiver();
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, address(rejecting), 1 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        vm.expectRevert(BitSafeEvmAssetBridge.EthTransferFailed.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, address(rejecting), 1 ether, sigs);
+        // The failed send must not consume the request id: it must stay retriable.
+        assertFalse(bridge.isWithdrawRequestUsed(REQUEST_ID));
+    }
+
+    function testFuzz_withdraw_signerPermutations(uint8 permSeed) public {
+        // The 6 permutations of 3 sorted attestor indices. Only the identity
+        // (ascending) permutation is strictly increasing; every other one
+        // must be rejected by the ordering check.
+        uint256[3][6] memory perms = [
+            [uint256(0), 1, 2],
+            [uint256(0), 2, 1],
+            [uint256(1), 0, 2],
+            [uint256(1), 2, 0],
+            [uint256(2), 0, 1],
+            [uint256(2), 1, 0]
+        ];
+        uint256 permIndex = permSeed % 6;
+        uint256[3] memory perm = perms[permIndex];
+
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes[] memory sigs = new bytes[](3);
+        for (uint256 i; i < 3; ++i) {
+            sigs[i] = _sign(attestorPks[perm[i]], digest);
+        }
+
+        if (permIndex == 0) {
+            vm.prank(attestors[0]);
+            bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+            assertEq(destination.balance, 1 ether);
+            assertTrue(bridge.isWithdrawRequestUsed(REQUEST_ID));
+        } else {
+            vm.expectRevert(BitSafeEvmAssetBridge.InvalidSignatureOrder.selector);
+            vm.prank(attestors[0]);
+            bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+            assertEq(destination.balance, 0);
+            assertFalse(bridge.isWithdrawRequestUsed(REQUEST_ID));
+        }
     }
 
     function _deployBridgeWithWithdrawLimits(uint256 minAmount, uint256 maxAmount)

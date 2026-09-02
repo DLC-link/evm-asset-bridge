@@ -49,7 +49,9 @@ contract Deploy is Script {
         vm.serializeUint(json, "depositMax", dep.maxAmount);
         vm.serializeUint(json, "withdrawMin", wit.minAmount);
         vm.serializeUint(json, "withdrawMax", wit.maxAmount);
-        string memory out = vm.serializeUint(json, "chainId", block.chainid);
+        vm.serializeUint(json, "chainId", block.chainid);
+        vm.serializeString(json, "compiler", "0.8.34");
+        string memory out = vm.serializeString(json, "gitCommit", vm.envOr("GIT_COMMIT", string("unknown")));
         vm.writeJson(out, string.concat(
             "deployments/BitSafeEvmAssetBridge.", vm.toString(block.chainid), ".json"));
     }
