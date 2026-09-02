@@ -38,7 +38,9 @@ contract RolesTest is BridgeTestBase {
         bytes32 role = bridge.ATTESTOR_ROLE();
         address newAttestor = makeAddr("attestor4");
         address[] memory expected = new address[](4);
-        for (uint256 i; i < 3; ++i) expected[i] = attestors[i];
+        for (uint256 i; i < 3; ++i) {
+            expected[i] = attestors[i];
+        }
         expected[3] = newAttestor;
         vm.expectEmit(false, false, false, true);
         emit BitSafeEvmAssetBridge.AttestorSetChanged(expected, THRESHOLD);
@@ -69,8 +71,11 @@ contract RolesTest is BridgeTestBase {
     }
 
     function test_setThreshold_requiresBridgeAdmin() public {
-        vm.expectRevert(abi.encodeWithSelector(
-            IAccessControl.AccessControlUnauthorizedAccount.selector, user, bridge.BRIDGE_ADMIN_ROLE()));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, user, bridge.BRIDGE_ADMIN_ROLE()
+            )
+        );
         vm.prank(user);
         bridge.setThreshold(2);
     }
@@ -139,40 +144,35 @@ contract RolesTest is BridgeTestBase {
 
     function test_pause_requiresBridgeAdmin() public {
         bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
-        vm.expectRevert(abi.encodeWithSelector(
-            IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
         vm.prank(user);
         bridge.pause();
     }
 
     function test_unpause_requiresBridgeAdmin() public {
         bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
-        vm.expectRevert(abi.encodeWithSelector(
-            IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
         vm.prank(user);
         bridge.unpause();
     }
 
     function test_setDepositLimits_requiresBridgeAdmin() public {
         bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
-        vm.expectRevert(abi.encodeWithSelector(
-            IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
         vm.prank(user);
         bridge.setDepositLimits(BitSafeEvmAssetBridge.Limits(0, type(uint256).max));
     }
 
     function test_setWithdrawLimits_requiresBridgeAdmin() public {
         bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
-        vm.expectRevert(abi.encodeWithSelector(
-            IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
         vm.prank(user);
         bridge.setWithdrawLimits(BitSafeEvmAssetBridge.Limits(0, type(uint256).max));
     }
 
     function test_rescueERC20_requiresBridgeAdmin() public {
         bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
-        vm.expectRevert(abi.encodeWithSelector(
-            IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
         vm.prank(user);
         bridge.rescueERC20(address(0x1), user, 1 ether);
     }

@@ -5,8 +5,9 @@ import {BridgeTestBase} from "./BridgeTestBase.t.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 // Proxy constructor reverts bubble the inner error; this alias keeps intent readable.
-import {TransparentUpgradeableProxy as TransparentUpgradeableProxyHarness} from
-    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {
+    TransparentUpgradeableProxy as TransparentUpgradeableProxyHarness
+} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 contract InitializeTest is BridgeTestBase {
     function test_initialState() public view {
@@ -22,9 +23,8 @@ contract InitializeTest is BridgeTestBase {
     }
 
     function test_storageLocation_matchesErc7201Formula() public view {
-        bytes32 expected = keccak256(
-            abi.encode(uint256(keccak256("bitsafe.storage.BitSafeEvmAssetBridge")) - 1)
-        ) & ~bytes32(uint256(0xff));
+        bytes32 expected = keccak256(abi.encode(uint256(keccak256("bitsafe.storage.BitSafeEvmAssetBridge")) - 1))
+            & ~bytes32(uint256(0xff));
         assertEq(bridge.BRIDGE_STORAGE_LOCATION(), expected);
     }
 
@@ -32,7 +32,12 @@ contract InitializeTest is BridgeTestBase {
         address[] memory a = attestors;
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         bridge.initialize(
-            address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, a, THRESHOLD,
+            address(0),
+            defaultAdmin,
+            ADMIN_DELAY,
+            bridgeAdmin,
+            a,
+            THRESHOLD,
             BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
             BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
         );
@@ -42,7 +47,12 @@ contract InitializeTest is BridgeTestBase {
         address[] memory a = attestors;
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         implementation.initialize(
-            address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, a, THRESHOLD,
+            address(0),
+            defaultAdmin,
+            ADMIN_DELAY,
+            bridgeAdmin,
+            a,
+            THRESHOLD,
             BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
             BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
         );
@@ -55,9 +65,16 @@ contract InitializeTest is BridgeTestBase {
         BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
-            (address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, dup, 2,
-             BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
-             BitSafeEvmAssetBridge.Limits(0, type(uint256).max))
+            (
+                address(0),
+                defaultAdmin,
+                ADMIN_DELAY,
+                bridgeAdmin,
+                dup,
+                2,
+                BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
+                BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
+            )
         );
         vm.expectRevert(BitSafeEvmAssetBridge.InvalidAddress.selector);
         new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
@@ -74,9 +91,16 @@ contract InitializeTest is BridgeTestBase {
         BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
-            (address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, attestors, threshold_,
-             BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
-             BitSafeEvmAssetBridge.Limits(0, type(uint256).max))
+            (
+                address(0),
+                defaultAdmin,
+                ADMIN_DELAY,
+                bridgeAdmin,
+                attestors,
+                threshold_,
+                BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
+                BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
+            )
         );
         vm.expectRevert(selector);
         new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
@@ -86,9 +110,16 @@ contract InitializeTest is BridgeTestBase {
         BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
-            (address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, attestors, THRESHOLD,
-             BitSafeEvmAssetBridge.Limits(0, 0),
-             BitSafeEvmAssetBridge.Limits(0, type(uint256).max))
+            (
+                address(0),
+                defaultAdmin,
+                ADMIN_DELAY,
+                bridgeAdmin,
+                attestors,
+                THRESHOLD,
+                BitSafeEvmAssetBridge.Limits(0, 0),
+                BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
+            )
         );
         vm.expectRevert(BitSafeEvmAssetBridge.InvalidLimits.selector);
         new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
@@ -101,9 +132,16 @@ contract InitializeTest is BridgeTestBase {
         BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
-            (address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, withZero, 2,
-             BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
-             BitSafeEvmAssetBridge.Limits(0, type(uint256).max))
+            (
+                address(0),
+                defaultAdmin,
+                ADMIN_DELAY,
+                bridgeAdmin,
+                withZero,
+                2,
+                BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
+                BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
+            )
         );
         vm.expectRevert(BitSafeEvmAssetBridge.InvalidAddress.selector);
         new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
@@ -113,9 +151,16 @@ contract InitializeTest is BridgeTestBase {
         BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
-            (address(0), defaultAdmin, ADMIN_DELAY, address(0), attestors, THRESHOLD,
-             BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
-             BitSafeEvmAssetBridge.Limits(0, type(uint256).max))
+            (
+                address(0),
+                defaultAdmin,
+                ADMIN_DELAY,
+                address(0),
+                attestors,
+                THRESHOLD,
+                BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
+                BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
+            )
         );
         vm.expectRevert(BitSafeEvmAssetBridge.InvalidAddress.selector);
         new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
@@ -125,9 +170,16 @@ contract InitializeTest is BridgeTestBase {
         BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
-            (address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, attestors, THRESHOLD,
-             BitSafeEvmAssetBridge.Limits(10 ether, 1 ether),
-             BitSafeEvmAssetBridge.Limits(0, type(uint256).max))
+            (
+                address(0),
+                defaultAdmin,
+                ADMIN_DELAY,
+                bridgeAdmin,
+                attestors,
+                THRESHOLD,
+                BitSafeEvmAssetBridge.Limits(10 ether, 1 ether),
+                BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
+            )
         );
         vm.expectRevert(BitSafeEvmAssetBridge.InvalidLimits.selector);
         new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);

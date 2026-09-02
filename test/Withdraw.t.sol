@@ -9,8 +9,7 @@ import {IBridgeWithdraw} from "./mocks/ReentrantReceiver.sol";
 import {RejectingReceiver} from "./mocks/RejectingReceiver.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {TransparentUpgradeableProxy} from
-    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 contract WithdrawTest is BridgeTestBase {
     address internal destination = makeAddr("destination");
@@ -92,8 +91,7 @@ contract WithdrawTest is BridgeTestBase {
         sigs[1] = _sign(roguePk, digest);
         // order the two by signer address
         if (vm.addr(roguePk) < attestors[0]) (sigs[0], sigs[1]) = (sigs[1], sigs[0]);
-        vm.expectRevert(abi.encodeWithSelector(
-            BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, vm.addr(roguePk)));
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, vm.addr(roguePk)));
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
     }
@@ -119,8 +117,7 @@ contract WithdrawTest is BridgeTestBase {
         sigs[1] = _sign(attestorPks[1], digest);
         sigs[2] = _sign(roguePk, digest); // already ascending; rogue after the threshold
 
-        vm.expectRevert(abi.encodeWithSelector(
-            BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, rogueAddr));
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, rogueAddr));
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
     }
@@ -143,8 +140,7 @@ contract WithdrawTest is BridgeTestBase {
         bytes32 role = bridge.ATTESTOR_ROLE();
         vm.prank(defaultAdmin);
         bridge.revokeRole(role, attestors[0]);
-        vm.expectRevert(abi.encodeWithSelector(
-            BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, attestors[0]));
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, attestors[0]));
         vm.prank(attestors[1]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
     }
@@ -160,8 +156,11 @@ contract WithdrawTest is BridgeTestBase {
     function test_withdraw_callerWithoutAttestorRole_reverts() public {
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
-        vm.expectRevert(abi.encodeWithSelector(
-            IAccessControl.AccessControlUnauthorizedAccount.selector, user, bridge.ATTESTOR_ROLE()));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, user, bridge.ATTESTOR_ROLE()
+            )
+        );
         vm.prank(user);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
     }
@@ -281,8 +280,9 @@ contract WithdrawTest is BridgeTestBase {
         bounded.depositETH{value: 50 ether}(DEPOSIT_ID);
         bytes32 digest = bounded.withdrawalDigest(REQUEST_ID, destination, 11 ether);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
-        vm.expectRevert(abi.encodeWithSelector(
-            BitSafeEvmAssetBridge.AmountOutsideLimits.selector, 11 ether, 1 ether, 10 ether));
+        vm.expectRevert(
+            abi.encodeWithSelector(BitSafeEvmAssetBridge.AmountOutsideLimits.selector, 11 ether, 1 ether, 10 ether)
+        );
         vm.prank(attestors[0]);
         bounded.withdraw(REQUEST_ID, destination, 11 ether, sigs);
     }
@@ -290,19 +290,23 @@ contract WithdrawTest is BridgeTestBase {
     function test_digest_matchesManualEip712Construction() public view {
         // Independent re-derivation without OZ helpers: the reference vector
         // for the Rust attestor stack.
-        bytes32 domainSeparator = keccak256(abi.encode(
-            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-            keccak256(bytes("BitSafeEvmAssetBridge")),
-            keccak256(bytes("1")),
-            block.chainid,
-            address(bridge)
-        ));
-        bytes32 structHash = keccak256(abi.encode(
-            keccak256("Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount)"),
-            keccak256(REQUEST_ID),
-            destination,
-            uint256(3 ether)
-        ));
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256(bytes("BitSafeEvmAssetBridge")),
+                keccak256(bytes("1")),
+                block.chainid,
+                address(bridge)
+            )
+        );
+        bytes32 structHash = keccak256(
+            abi.encode(
+                keccak256("Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount)"),
+                keccak256(REQUEST_ID),
+                destination,
+                uint256(3 ether)
+            )
+        );
         bytes32 expected = keccak256(abi.encodePacked(hex"1901", domainSeparator, structHash));
         assertEq(bridge.withdrawalDigest(REQUEST_ID, destination, 3 ether), expected);
     }
@@ -372,16 +376,26 @@ contract WithdrawTest is BridgeTestBase {
     }
 
     function _deployBridgeWithWithdrawLimits(uint256 minAmount, uint256 maxAmount)
-        internal returns (BitSafeEvmAssetBridge)
+        internal
+        returns (BitSafeEvmAssetBridge)
     {
         BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
-            (address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, attestors, THRESHOLD,
-             BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
-             BitSafeEvmAssetBridge.Limits(minAmount, maxAmount))
+            (
+                address(0),
+                defaultAdmin,
+                ADMIN_DELAY,
+                bridgeAdmin,
+                attestors,
+                THRESHOLD,
+                BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
+                BitSafeEvmAssetBridge.Limits(minAmount, maxAmount)
+            )
         );
-        return BitSafeEvmAssetBridge(payable(address(
-            new TransparentUpgradeableProxy(address(impl2), proxyOwner, initData))));
+        return
+            BitSafeEvmAssetBridge(
+                payable(address(new TransparentUpgradeableProxy(address(impl2), proxyOwner, initData)))
+            );
     }
 }

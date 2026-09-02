@@ -12,8 +12,12 @@ contract DeployTest is Test {
         vm.setEnv("ADMIN_DELAY", "172800");
         vm.setEnv("BRIDGE_ADMIN", vm.toString(makeAddr("ba")));
         vm.setEnv("PROXY_OWNER", vm.toString(makeAddr("po")));
-        vm.setEnv("ATTESTORS", string.concat(
-            vm.toString(makeAddr("a1")), ",", vm.toString(makeAddr("a2")), ",", vm.toString(makeAddr("a3"))));
+        vm.setEnv(
+            "ATTESTORS",
+            string.concat(
+                vm.toString(makeAddr("a1")), ",", vm.toString(makeAddr("a2")), ",", vm.toString(makeAddr("a3"))
+            )
+        );
         vm.setEnv("THRESHOLD", "2");
         vm.setEnv("DEPOSIT_MIN", "0");
         vm.setEnv("DEPOSIT_MAX", vm.toString(type(uint256).max));
@@ -22,8 +26,7 @@ contract DeployTest is Test {
 
         new Deploy().run();
 
-        string memory path = string.concat(
-            "deployments/BitSafeEvmAssetBridge.", vm.toString(block.chainid), ".json");
+        string memory path = string.concat("deployments/BitSafeEvmAssetBridge.", vm.toString(block.chainid), ".json");
         string memory json = vm.readFile(path);
         address proxy = vm.parseJsonAddress(json, ".proxy");
         assertEq(BitSafeEvmAssetBridge(payable(proxy)).threshold(), 2);

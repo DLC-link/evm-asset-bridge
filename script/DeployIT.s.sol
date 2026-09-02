@@ -3,8 +3,7 @@ pragma solidity 0.8.34;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
-import {TransparentUpgradeableProxy} from
-    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 /// @title DeployIT
 /// @notice Fixed-ordering deployment of one BitSafeEvmAssetBridge (ETH) for

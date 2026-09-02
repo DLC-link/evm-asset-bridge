@@ -19,14 +19,17 @@ contract ReentrantReceiver {
         requestId = id;
         amount = amount_;
         delete sigs;
-        for (uint256 i; i < sigs_.length; ++i) sigs.push(sigs_[i]);
+        for (uint256 i; i < sigs_.length; ++i) {
+            sigs.push(sigs_[i]);
+        }
     }
 
     receive() external payable {
         reentered = true;
         try bridge.withdraw(requestId, address(this), amount, sigs) {
-            // must never succeed
-        } catch (bytes memory data) {
+        // must never succeed
+        }
+        catch (bytes memory data) {
             reentryRevertData = data;
         }
     }

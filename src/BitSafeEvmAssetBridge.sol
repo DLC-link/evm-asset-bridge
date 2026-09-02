@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {AccessControlDefaultAdminRulesUpgradeable} from
-    "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
+import {
+    AccessControlDefaultAdminRulesUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
@@ -50,10 +51,13 @@ contract BitSafeEvmAssetBridge is
     bytes32 public constant BRIDGE_STORAGE_LOCATION =
         0xe9e5dc9730c787910ca70d94c5f8cdb143fd0b13ee96336e56e945dc2a3d2500;
 
-    event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId,
-                  address indexed sender, uint256 amount);
-    event Withdraw(bytes32 indexed withdrawRequestIdHash, bytes withdrawRequestId,
-                   address indexed destinationAddress, uint256 amount);
+    event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
+    event Withdraw(
+        bytes32 indexed withdrawRequestIdHash,
+        bytes withdrawRequestId,
+        address indexed destinationAddress,
+        uint256 amount
+    );
     event AttestorSetChanged(address[] attestors, uint256 threshold);
     event ThresholdSet(uint256 newThreshold);
     event DepositLimitsSet(uint256 minAmount, uint256 maxAmount);
@@ -183,9 +187,7 @@ contract BitSafeEvmAssetBridge is
     }
 
     /// @notice Rescues tokens sent to the bridge by mistake. Never the bridged asset.
-    function rescueERC20(address token, address to, uint256 amount)
-        external onlyRole(BRIDGE_ADMIN_ROLE)
-    {
+    function rescueERC20(address token, address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) {
         if (token == _getBridgeStorage().asset) revert CannotRescueBridgedAsset();
         if (to == address(0)) revert InvalidAddress();
         IERC20(token).safeTransfer(to, amount);
@@ -258,9 +260,7 @@ contract BitSafeEvmAssetBridge is
         emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, amount);
     }
 
-    function _validateDeposit(bytes calldata depositAccountId, uint256 amount, BridgeStorage storage $)
-        internal view
-    {
+    function _validateDeposit(bytes calldata depositAccountId, uint256 amount, BridgeStorage storage $) internal view {
         if (depositAccountId.length == 0) revert EmptyId();
         if (amount == 0) revert ZeroAmount();
         _checkLimits(amount, $.depositLimits);
@@ -277,17 +277,14 @@ contract BitSafeEvmAssetBridge is
     // ----------------------------------------------------------- withdrawals
 
     /// @notice The exact EIP-712 digest attestors must sign for a withdrawal.
-    function withdrawalDigest(
-        bytes calldata withdrawRequestId,
-        address destinationAddress,
-        uint256 amount
-    ) public view returns (bytes32) {
-        return _hashTypedDataV4(keccak256(abi.encode(
-            WITHDRAWAL_TYPEHASH,
-            keccak256(withdrawRequestId),
-            destinationAddress,
-            amount
-        )));
+    function withdrawalDigest(bytes calldata withdrawRequestId, address destinationAddress, uint256 amount)
+        public
+        view
+        returns (bytes32)
+    {
+        return _hashTypedDataV4(
+            keccak256(abi.encode(WITHDRAWAL_TYPEHASH, keccak256(withdrawRequestId), destinationAddress, amount))
+        );
     }
 
     /// @notice Releases `amount` of the bridged asset to `destinationAddress`.
