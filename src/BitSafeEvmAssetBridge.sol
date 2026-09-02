@@ -195,4 +195,44 @@ contract BitSafeEvmAssetBridge is
     function _validateLimits(Limits calldata limits) internal pure {
         if (limits.maxAmount == 0 || limits.minAmount > limits.maxAmount) revert InvalidLimits();
     }
+
+    // -------------------------------------------------------------- deposits
+
+    /// @notice Locks ETH for the Canton deposit account named by depositAccountId.
+    function depositETH(bytes calldata depositAccountId) external payable whenNotPaused {
+        BridgeStorage storage $ = _getBridgeStorage();
+        if ($.asset != address(0)) revert AssetIsNotEther();
+        _validateDeposit(depositAccountId, msg.value, $);
+        emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, msg.value);
+    }
+
+    /// @notice Locks the configured ERC20 asset. Requires prior approval.
+    function depositERC20(uint256 amount, bytes calldata depositAccountId) external whenNotPaused {
+        BridgeStorage storage $ = _getBridgeStorage();
+        address asset_ = $.asset;
+        if (asset_ == address(0)) revert AssetIsNotERC20();
+        _validateDeposit(depositAccountId, amount, $);
+        uint256 balanceBefore = IERC20(asset_).balanceOf(address(this));
+        IERC20(asset_).safeTransferFrom(msg.sender, address(this), amount);
+        if (IERC20(asset_).balanceOf(address(this)) - balanceBefore != amount) {
+            revert UnexpectedBalanceChange();
+        }
+        emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, amount);
+    }
+
+    function _validateDeposit(bytes calldata depositAccountId, uint256 amount, BridgeStorage storage $)
+        internal view
+    {
+        if (depositAccountId.length == 0) revert EmptyId();
+        if (amount == 0) revert ZeroAmount();
+        _checkLimits(amount, $.depositLimits);
+    }
+
+    receive() external payable {
+        revert DirectEthTransferNotAllowed();
+    }
+
+    fallback() external payable {
+        revert DirectEthTransferNotAllowed();
+    }
 }
