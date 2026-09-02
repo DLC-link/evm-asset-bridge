@@ -1,0 +1,331 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.34;
+
+import {BridgeTestBase} from "./BridgeTestBase.t.sol";
+import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
+import {MockERC20} from "./mocks/MockERC20.sol";
+import {ReentrantReceiver} from "./mocks/ReentrantReceiver.sol";
+import {IBridgeWithdraw} from "./mocks/ReentrantReceiver.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {TransparentUpgradeableProxy} from
+    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+
+contract WithdrawTest is BridgeTestBase {
+    address internal destination = makeAddr("destination");
+
+    function setUp() public override {
+        super.setUp();
+        vm.deal(user, 1_000 ether);
+        vm.prank(user);
+        bridge.depositETH{value: 100 ether}(DEPOSIT_ID);
+    }
+
+    function _withdraw(bytes memory id, address dest, uint256 amount, uint256 sigCount) internal {
+        bytes32 digest = bridge.withdrawalDigest(id, dest, amount);
+        bytes[] memory sigs = _attestorSignatures(digest, sigCount);
+        vm.prank(attestors[0]);
+        bridge.withdraw(id, dest, amount, sigs);
+    }
+
+    function test_withdrawETH_transfersAndEmits() public {
+        vm.expectEmit(true, true, false, true);
+        emit BitSafeEvmAssetBridge.Withdraw(keccak256(REQUEST_ID), REQUEST_ID, destination, 5 ether);
+        _withdraw(REQUEST_ID, destination, 5 ether, 2);
+        assertEq(destination.balance, 5 ether);
+        assertTrue(bridge.isWithdrawRequestUsed(REQUEST_ID));
+    }
+
+    function test_withdrawERC20_transfers() public {
+        MockERC20 token = new MockERC20();
+        BitSafeEvmAssetBridge erc20Bridge = _deployBridge(address(token));
+        token.mint(user, 100 ether);
+        vm.startPrank(user);
+        token.approve(address(erc20Bridge), 50 ether);
+        erc20Bridge.depositERC20(50 ether, DEPOSIT_ID);
+        vm.stopPrank();
+
+        bytes32 digest = erc20Bridge.withdrawalDigest(REQUEST_ID, destination, 7 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        vm.prank(attestors[0]);
+        erc20Bridge.withdraw(REQUEST_ID, destination, 7 ether, sigs);
+        assertEq(token.balanceOf(destination), 7 ether);
+    }
+
+    function test_withdraw_replay_reverts() public {
+        _withdraw(REQUEST_ID, destination, 1 ether, 2);
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        vm.expectRevert(BitSafeEvmAssetBridge.WithdrawRequestAlreadyUsed.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+    }
+
+    function test_withdraw_duplicateSigner_reverts() public {
+        // dlc-solidity PR #116: same key signing twice must not satisfy the threshold
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes[] memory sigs = new bytes[](2);
+        sigs[0] = _sign(attestorPks[0], digest);
+        sigs[1] = _sign(attestorPks[0], digest); // identical signer
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidSignatureOrder.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+    }
+
+    function test_withdraw_unorderedSigners_reverts() public {
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes[] memory sigs = new bytes[](2);
+        sigs[0] = _sign(attestorPks[1], digest);
+        sigs[1] = _sign(attestorPks[0], digest); // descending order
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidSignatureOrder.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+    }
+
+    function test_withdraw_nonAttestorSigner_reverts() public {
+        (address rogue, uint256 roguePk) = makeAddrAndKey("rogue");
+        rogue; // silence unused
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes[] memory sigs = new bytes[](2);
+        sigs[0] = _sign(attestorPks[0], digest);
+        sigs[1] = _sign(roguePk, digest);
+        // order the two by signer address
+        if (vm.addr(roguePk) < attestors[0]) (sigs[0], sigs[1]) = (sigs[1], sigs[0]);
+        vm.expectRevert(abi.encodeWithSelector(
+            BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, vm.addr(roguePk)));
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+    }
+
+    function test_withdraw_extraRogueSignatureAfterValidThreshold_reverts() public {
+        // Every provided signature must be valid -- no early exit once the
+        // threshold count is reached. Two real attestor signatures plus a
+        // third from a rogue key must still fail on the rogue signer, even
+        // when the rogue signature comes AFTER the threshold count of valid
+        // ones (index 2, not index 0) -- a regression that only checks the
+        // first `threshold` signatures must not pass this test.
+        uint256 roguePk;
+        address rogueAddr;
+        for (uint256 i = 1;; ++i) {
+            (rogueAddr, roguePk) = makeAddrAndKey(string.concat("rogue", vm.toString(i)));
+            if (rogueAddr > attestors[1]) break;
+        }
+        assertGt(uint256(uint160(rogueAddr)), uint256(uint160(attestors[1]))); // pin the property the test depends on
+
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes[] memory sigs = new bytes[](3);
+        sigs[0] = _sign(attestorPks[0], digest);
+        sigs[1] = _sign(attestorPks[1], digest);
+        sigs[2] = _sign(roguePk, digest); // already ascending; rogue after the threshold
+
+        vm.expectRevert(abi.encodeWithSelector(
+            BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, rogueAddr));
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+    }
+
+    function test_withdraw_allAttestorSignatures_succeeds() public {
+        // Threshold is 2, but supplying every attestor's valid signature
+        // (3 of 3) must still succeed -- extra correct signatures are not
+        // penalized, and the loop validates each one it is given.
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 3);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+        assertEq(destination.balance, 1 ether);
+        assertTrue(bridge.isWithdrawRequestUsed(REQUEST_ID));
+    }
+
+    function test_withdraw_revokedAttestorSignature_reverts() public {
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.prank(defaultAdmin);
+        bridge.revokeRole(role, attestors[0]);
+        vm.expectRevert(abi.encodeWithSelector(
+            BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, attestors[0]));
+        vm.prank(attestors[1]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+    }
+
+    function test_withdraw_tooFewSignatures_reverts() public {
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 1);
+        vm.expectRevert(BitSafeEvmAssetBridge.NotEnoughSignatures.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+    }
+
+    function test_withdraw_callerWithoutAttestorRole_reverts() public {
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        vm.expectRevert(abi.encodeWithSelector(
+            IAccessControl.AccessControlUnauthorizedAccount.selector, user, bridge.ATTESTOR_ROLE()));
+        vm.prank(user);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+    }
+
+    function test_withdraw_tamperedField_reverts() public {
+        // signatures over amount 1 ether must not authorize amount 2 ether
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        vm.expectRevert(); // recovered signers are garbage, role check fails
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 2 ether, sigs);
+    }
+
+    function test_withdraw_zeroDestination_reverts() public {
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, address(0), 1 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidDestination.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, address(0), 1 ether, sigs);
+    }
+
+    function test_withdraw_bridgeAsDestination_reverts() public {
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, address(bridge), 1 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidDestination.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, address(bridge), 1 ether, sigs);
+    }
+
+    function test_withdraw_emptyId_reverts() public {
+        bytes32 digest = bridge.withdrawalDigest("", destination, 1 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        vm.expectRevert(BitSafeEvmAssetBridge.EmptyId.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw("", destination, 1 ether, sigs);
+    }
+
+    function test_withdraw_degenerateThresholdZero_reverts() public {
+        // Ronin 2024-08: a zeroed quorum must not open the bridge.
+        // threshold is the second word of the namespaced struct.
+        bytes32 slot = bytes32(uint256(bridge.BRIDGE_STORAGE_LOCATION()) + 1);
+        vm.store(address(bridge), slot, bytes32(0));
+        assertEq(bridge.threshold(), 0);
+        bytes[] memory noSigs = new bytes[](0);
+        vm.expectRevert(BitSafeEvmAssetBridge.ThresholdOutOfBounds.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, noSigs);
+    }
+
+    function test_withdraw_reentrancy_cannotDoubleSpend() public {
+        ReentrantReceiver attacker = new ReentrantReceiver();
+        // Grant ATTESTOR_ROLE to the attacker contract itself so the reentrant
+        // call clears onlyRole and actually reaches nonReentrant -- otherwise
+        // the inner call would die on the role check before ever exercising
+        // the guard. Signatures below still come from real attestor keys;
+        // granting the role only changes who may *call* withdraw.
+        bytes32 attestorRole = bridge.ATTESTOR_ROLE();
+        vm.prank(defaultAdmin);
+        bridge.grantRole(attestorRole, address(attacker));
+
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, address(attacker), 1 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        attacker.arm(IBridgeWithdraw(address(bridge)), REQUEST_ID, 1 ether, sigs);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, address(attacker), 1 ether, sigs);
+        assertTrue(attacker.reentered());
+        assertEq(
+            attacker.reentryRevertData(),
+            abi.encodeWithSelector(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector)
+        );
+        assertEq(address(attacker).balance, 1 ether); // paid exactly once
+        assertTrue(bridge.isWithdrawRequestUsed(REQUEST_ID));
+    }
+
+    function test_withdraw_reentrancy_blocksDifferentValidBundle() public {
+        // A fully valid, distinct bundle (different id, correctly signed,
+        // never used) prepared in advance must still be blocked purely by
+        // nonReentrant -- not by the used-id check, since that id was never
+        // marked used. This isolates the guard from the replay protection.
+        ReentrantReceiver attacker = new ReentrantReceiver();
+        bytes32 attestorRole = bridge.ATTESTOR_ROLE();
+        vm.prank(defaultAdmin);
+        bridge.grantRole(attestorRole, address(attacker));
+
+        bytes memory secondId = hex"aabbccddee";
+        bytes32 outerDigest = bridge.withdrawalDigest(REQUEST_ID, address(attacker), 1 ether);
+        bytes[] memory outerSigs = _attestorSignatures(outerDigest, 2);
+
+        bytes32 innerDigest = bridge.withdrawalDigest(secondId, address(attacker), 1 ether);
+        bytes[] memory innerSigs = _attestorSignatures(innerDigest, 2);
+
+        attacker.arm(IBridgeWithdraw(address(bridge)), secondId, 1 ether, innerSigs);
+
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, address(attacker), 1 ether, outerSigs);
+
+        assertTrue(attacker.reentered());
+        assertEq(
+            attacker.reentryRevertData(),
+            abi.encodeWithSelector(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector)
+        );
+        assertFalse(bridge.isWithdrawRequestUsed(secondId));
+        assertEq(address(attacker).balance, 1 ether); // only the outer payout landed
+
+        // Prove the inner bundle was valid all along: absent reentrancy, it
+        // pays out normally in a follow-up call.
+        vm.prank(attestors[0]);
+        bridge.withdraw(secondId, address(attacker), 1 ether, innerSigs);
+        assertTrue(bridge.isWithdrawRequestUsed(secondId));
+        assertEq(address(attacker).balance, 2 ether);
+    }
+
+    function test_withdrawLimits_enforced() public {
+        // redeploy with a withdraw band and fund it
+        BitSafeEvmAssetBridge bounded = _deployBridgeWithWithdrawLimits(1 ether, 10 ether);
+        vm.prank(user);
+        bounded.depositETH{value: 50 ether}(DEPOSIT_ID);
+        bytes32 digest = bounded.withdrawalDigest(REQUEST_ID, destination, 11 ether);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        vm.expectRevert(abi.encodeWithSelector(
+            BitSafeEvmAssetBridge.AmountOutsideLimits.selector, 11 ether, 1 ether, 10 ether));
+        vm.prank(attestors[0]);
+        bounded.withdraw(REQUEST_ID, destination, 11 ether, sigs);
+    }
+
+    function test_digest_matchesManualEip712Construction() public view {
+        // Independent re-derivation without OZ helpers: the reference vector
+        // for the Rust attestor stack.
+        bytes32 domainSeparator = keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256(bytes("BitSafeEvmAssetBridge")),
+            keccak256(bytes("1")),
+            block.chainid,
+            address(bridge)
+        ));
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount)"),
+            keccak256(REQUEST_ID),
+            destination,
+            uint256(3 ether)
+        ));
+        bytes32 expected = keccak256(abi.encodePacked(hex"1901", domainSeparator, structHash));
+        assertEq(bridge.withdrawalDigest(REQUEST_ID, destination, 3 ether), expected);
+    }
+
+    function testFuzz_withdraw_transfersBoundedAmounts(uint96 amount) public {
+        amount = uint96(bound(amount, 1, 100 ether));
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, amount);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, amount, sigs);
+        assertEq(destination.balance, amount);
+    }
+
+    function _deployBridgeWithWithdrawLimits(uint256 minAmount, uint256 maxAmount)
+        internal returns (BitSafeEvmAssetBridge)
+    {
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
+        bytes memory initData = abi.encodeCall(
+            BitSafeEvmAssetBridge.initialize,
+            (address(0), defaultAdmin, ADMIN_DELAY, bridgeAdmin, attestors, THRESHOLD,
+             BitSafeEvmAssetBridge.Limits(0, type(uint256).max),
+             BitSafeEvmAssetBridge.Limits(minAmount, maxAmount))
+        );
+        return BitSafeEvmAssetBridge(payable(address(
+            new TransparentUpgradeableProxy(address(impl2), proxyOwner, initData))));
+    }
+}

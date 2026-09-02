@@ -235,4 +235,67 @@ contract BitSafeEvmAssetBridge is
     fallback() external payable {
         revert DirectEthTransferNotAllowed();
     }
+
+    // ----------------------------------------------------------- withdrawals
+
+    /// @notice The exact EIP-712 digest attestors must sign for a withdrawal.
+    function withdrawalDigest(
+        bytes calldata withdrawRequestId,
+        address destinationAddress,
+        uint256 amount
+    ) public view returns (bytes32) {
+        return _hashTypedDataV4(keccak256(abi.encode(
+            WITHDRAWAL_TYPEHASH,
+            keccak256(withdrawRequestId),
+            destinationAddress,
+            amount
+        )));
+    }
+
+    /// @notice Releases `amount` of the bridged asset to `destinationAddress`.
+    /// @dev Requires `threshold` valid attestor signatures over the EIP-712
+    ///      digest, with recovered signers in strictly ascending order.
+    function withdraw(
+        bytes calldata withdrawRequestId,
+        address destinationAddress,
+        uint256 amount,
+        bytes[] calldata signatures
+    ) external onlyRole(ATTESTOR_ROLE) whenNotPaused nonReentrant {
+        BridgeStorage storage $ = _getBridgeStorage();
+
+        // Checks. The threshold guard makes a degenerate (uninitialized or
+        // corrupted) threshold unexploitable — see the Ronin 2024-08 incident.
+        uint256 threshold_ = $.threshold;
+        if (threshold_ < MIN_THRESHOLD) revert ThresholdOutOfBounds();
+        if (withdrawRequestId.length == 0) revert EmptyId();
+        if ($.usedWithdrawRequests[withdrawRequestId]) revert WithdrawRequestAlreadyUsed();
+        if (destinationAddress == address(0) || destinationAddress == address(this)) {
+            revert InvalidDestination();
+        }
+        if (amount == 0) revert ZeroAmount();
+        _checkLimits(amount, $.withdrawLimits);
+        if (signatures.length < threshold_) revert NotEnoughSignatures();
+
+        bytes32 digest = withdrawalDigest(withdrawRequestId, destinationAddress, amount);
+        address lastSigner;
+        for (uint256 i; i < signatures.length; ++i) {
+            address signer = ECDSA.recover(digest, signatures[i]);
+            if (signer <= lastSigner) revert InvalidSignatureOrder();
+            if (!hasRole(ATTESTOR_ROLE, signer)) revert SignerIsNotAttestor(signer);
+            lastSigner = signer;
+        }
+
+        // Effect before interaction: consume the request id.
+        $.usedWithdrawRequests[withdrawRequestId] = true;
+
+        // Interaction.
+        address asset_ = $.asset;
+        if (asset_ == address(0)) {
+            (bool ok,) = destinationAddress.call{value: amount}("");
+            if (!ok) revert EthTransferFailed();
+        } else {
+            IERC20(asset_).safeTransfer(destinationAddress, amount);
+        }
+        emit Withdraw(keccak256(withdrawRequestId), withdrawRequestId, destinationAddress, amount);
+    }
 }
