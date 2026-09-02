@@ -7,6 +7,7 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {FeeOnTransferERC20} from "./mocks/FeeOnTransferERC20.sol";
 import {TransparentUpgradeableProxy} from
     "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 contract DepositTest is BridgeTestBase {
     MockERC20 internal token;
@@ -108,6 +109,14 @@ contract DepositTest is BridgeTestBase {
         vm.prank(user);
         (ok,) = address(bridge).call{value: 1 ether}(hex"deadbeef");
         assertFalse(ok);
+    }
+
+    function test_depositETH_whenPaused_reverts() public {
+        vm.prank(bridgeAdmin);
+        bridge.pause();
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.prank(user);
+        bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
     }
 
     function _deployBridgeWithDepositLimits(uint256 minAmount, uint256 maxAmount)

@@ -160,6 +160,43 @@ contract BitSafeEvmAssetBridge is
         }
     }
 
+    // ------------------------------------------------------------- admin
+
+    function pause() external onlyRole(BRIDGE_ADMIN_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(BRIDGE_ADMIN_ROLE) {
+        _unpause();
+    }
+
+    function setThreshold(uint256 newThreshold) external onlyRole(BRIDGE_ADMIN_ROLE) {
+        _setThreshold(newThreshold, _getBridgeStorage().attestors.length());
+    }
+
+    function setDepositLimits(Limits calldata newLimits) external onlyRole(BRIDGE_ADMIN_ROLE) {
+        _setDepositLimits(newLimits);
+    }
+
+    function setWithdrawLimits(Limits calldata newLimits) external onlyRole(BRIDGE_ADMIN_ROLE) {
+        _setWithdrawLimits(newLimits);
+    }
+
+    /// @notice Rescues tokens sent to the bridge by mistake. Never the bridged asset.
+    function rescueERC20(address token, address to, uint256 amount)
+        external onlyRole(BRIDGE_ADMIN_ROLE)
+    {
+        if (token == _getBridgeStorage().asset) revert CannotRescueBridgedAsset();
+        if (to == address(0)) revert InvalidAddress();
+        IERC20(token).safeTransfer(to, amount);
+    }
+
+    /// @dev Attestors leave only through revokeRole (dlc-solidity PR #115 lesson).
+    function renounceRole(bytes32 role, address callerConfirmation) public virtual override {
+        if (role == ATTESTOR_ROLE) revert AttestorCannotRenounce();
+        super.renounceRole(role, callerConfirmation);
+    }
+
     // ---------------------------------------------------- internal helpers
 
     function _getBridgeStorage() internal pure returns (BridgeStorage storage $) {
