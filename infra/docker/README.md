@@ -149,9 +149,12 @@ make it-down      # stop and remove the container
 script as its gate before any push. Every check runs inside the
 container. The host therefore needs no Foundry install.
 
-CI publishes the image on a pull request and on a push to `main`. A
-pull request publishes only the sha tag. A push to `main` also moves
-`latest`.
+CI builds the image and runs this same gate on every pull request. A
+pull request publishes nothing.
+
+A push to `main` publishes. It publishes the `beth-<short-sha>` tag. It
+also moves `latest`. Every published tag therefore names a commit on
+`main`.
 
 The workflow assumes the IAM role `gh-oidc-build-evm-asset-bridge`. The
 image name matches this repository's name on purpose. The org names a

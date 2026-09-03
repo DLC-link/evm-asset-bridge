@@ -1,18 +1,23 @@
 # Builds and publishes the evm-asset-bridge image (see infra/docker/README.md).
 #
-# The triggers below match DLC-link/canton's own image workflow.
+# A pull request builds the image and runs the smoke gate. It publishes
+# nothing. It needs no AWS credentials. It therefore never requests an
+# identity token.
 #
-# The push step assumes the IAM role gh-oidc-build-evm-asset-bridge.
+# A push to main publishes. A manual dispatch publishes too. A push to
+# main also moves `latest`.
+#
+# The publish job assumes the IAM role gh-oidc-build-evm-asset-bridge.
 # The org names a build role after the ECR repository. That role allows
 # pushes to that one repository only. The image name must therefore
 # equal this repository's name. Do not rename either one on its own.
 #
-# A pull request publishes only the sha tag. A push to main also moves
-# `latest`. The tag rules below key on the ref, not the event.
-#
 # A run that cannot assume the role means the role does not exist.
 # Someone with IAM access must then create it. It must trust
 # repo:DLC-link/evm-asset-bridge. It also needs public-ECR push rights.
+#
+# The Trivy scan runs after a publish. A pull request gets no scan,
+# because no image reaches the registry for the scan to read.
 name: Build and push evm-asset-bridge
 
 on:
@@ -26,8 +31,49 @@ on:
 permissions: {}
 
 jobs:
-  build-and-push:
-    name: Build, smoke test and push
+  # This job runs on every event, and it needs no credentials. It is the
+  # hard gate: a broken image fails here before any publish starts.
+  build:
+    name: Build and smoke test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Extract git SHA
+        id: git-sha
+        run: echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # This job builds amd64 only, so it needs no QEMU. The publish job
+      # builds arm64 as well, and it sets QEMU up for that.
+      - name: Build amd64 image for the smoke test
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./infra/docker/Dockerfile
+          load: true
+          tags: evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      - name: Smoke test the image
+        run: bash infra/docker/smoke-eth.sh evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
+
+  # This job never runs on a pull request. Publishing an image built from
+  # unmerged code would put untested tags in a public registry.
+  publish:
+    name: Publish to public ECR
+    needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -67,25 +113,6 @@ jobs:
           registry-type: public
           mask-password: true
 
-      # This step builds an amd64 image and loads it locally. The smoke
-      # test then runs it before anything reaches the registry.
-      - name: Build amd64 image for the smoke test
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: ./infra/docker/Dockerfile
-          load: true
-          tags: evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
-          platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: false
-          sbom: false
-
-      # Hard gate: a broken image never reaches the registry.
-      - name: Smoke test the image
-        run: bash infra/docker/smoke-eth.sh evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
-
       # `main` also moves `latest`. The condition keys on the ref, not
       # the event. A manual run on main therefore behaves like a push.
       - name: Resolve image tags
@@ -103,8 +130,9 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # provenance and sbom must stay false. Public ECR rejects the buildx
-      # attestation manifests.
+      # The amd64 layers come from the build job's cache. provenance and
+      # sbom must stay false. Public ECR rejects the buildx attestation
+      # manifests.
       - name: Build and push the multi-arch image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -136,15 +164,12 @@ jobs:
 
   scan-image:
     name: Trivy scan
-    # This job activates when the pull_request trigger returns. The note
-    # at the top of this file explains that. The reusable workflow posts
-    # a sticky pull-request comment. It therefore needs a pull request.
-    if: github.event_name == 'pull_request'
-    needs: build-and-push
+    if: github.event_name != 'pull_request'
+    needs: publish
     uses: DLC-link/dlc-infra/.github/workflows/trivy-image-scan.yaml@main
     with:
       image_name: evm-asset-bridge
-      image_tag: ${{ needs.build-and-push.outputs.version_tag }}
+      image_tag: ${{ needs.publish.outputs.version_tag }}
       registry_type: public
       registry: public.ecr.aws/dlc-link
     permissions:
