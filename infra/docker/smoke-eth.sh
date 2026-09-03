@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# This script is the acceptance gate for the eth-sandbox image. A
+# This script is the acceptance gate for the evm-asset-bridge image. A
 # developer runs it through `make it-verify`. CI runs it against a
 # locally built amd64 image before it pushes anything.
 #
@@ -30,7 +30,7 @@ RPC=http://127.0.0.1:8545
 TEST_USER_KEY=0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e
 # keccak256("Deposit(bytes32,bytes,address,uint256)")
 DEPOSIT_TOPIC0=0xacaea730ea841fae3326f72a7ff746b6e06c646840526bcaf5dabee5fd887ef8
-CONTAINER="eth-sandbox-smoke-$$"
+CONTAINER="evm-asset-bridge-smoke-$$"
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
     echo "image not present locally: $IMAGE" >&2

@@ -1,5 +1,5 @@
 #!/bin/sh
-# This script is the healthcheck for the eth-sandbox image. Healthy means
+# This script is the healthcheck for the image. Healthy means that
 # the bridge proxy holds code. Code at that address also proves
 # initialize() ran. The proxy constructor calls initialize() in the same
 # transaction as the CREATE.

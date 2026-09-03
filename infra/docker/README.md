@@ -1,4 +1,4 @@
-# eth-sandbox
+# evm-asset-bridge
 
 One container runs a local anvil chain and deploys one
 `BitSafeEvmAssetBridge` (native ETH) into it. A consumer starts the
@@ -12,8 +12,8 @@ service.
 ## Where to get it
 
 ```
-public.ecr.aws/dlc-link/eth-sandbox:beth-<short-sha>
-public.ecr.aws/dlc-link/eth-sandbox:latest
+public.ecr.aws/dlc-link/evm-asset-bridge:beth-<short-sha>
+public.ecr.aws/dlc-link/evm-asset-bridge:latest
 ```
 
 The registry is public. A pull needs no login.
@@ -23,17 +23,17 @@ DLC-link/evm-asset-bridge. The publishing workflow prints the exact tag
 in its run summary. List the published tags with:
 
 ```
-aws ecr-public describe-images --repository-name eth-sandbox \
+aws ecr-public describe-images --repository-name evm-asset-bridge \
     --region us-east-1 --query 'imageDetails[].imageTags'
 ```
 
 ## How a consumer adds it
 
 ```yaml
-  eth-sandbox:
-    image: public.ecr.aws/dlc-link/eth-sandbox:beth-<short-sha>
-    container_name: eth-sandbox
-    hostname: eth-sandbox
+  evm-asset-bridge:
+    image: public.ecr.aws/dlc-link/evm-asset-bridge:beth-<short-sha>
+    container_name: evm-asset-bridge
+    hostname: evm-asset-bridge
     ports:
       - '8545:8545'
     healthcheck:
@@ -47,11 +47,11 @@ A service that needs the bridge waits for it:
 
 ```yaml
     depends_on:
-      eth-sandbox:
+      evm-asset-bridge:
         condition: service_healthy
 ```
 
-The chain answers at `http://eth-sandbox:8545` inside compose, and at
+The chain answers at `http://evm-asset-bridge:8545` inside compose, and at
 `http://localhost:8545` from the host.
 
 ## The healthcheck
@@ -149,8 +149,14 @@ make it-down      # stop and remove the container
 script as its gate before any push. Every check runs inside the
 container. The host therefore needs no Foundry install.
 
-CI cannot publish the image yet. The workflow needs an AWS role that
-nobody has created yet. Its header comment records the change to make.
+CI publishes the image on a pull request and on a push to `main`. A
+pull request publishes only the sha tag. A push to `main` also moves
+`latest`.
+
+The workflow assumes the IAM role `gh-oidc-build-evm-asset-bridge`. The
+image name matches this repository's name on purpose. The org names a
+build role after the ECR repository. That role allows pushes to that
+one repository only. Do not rename either one on its own.
 
 ## Safety
 

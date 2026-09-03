@@ -156,7 +156,7 @@ sol! {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    // Values for the local eth-sandbox container (see infra/docker/README.md).
+    // Values for the local evm-asset-bridge container (see infra/docker/README.md).
     // For another deployment, use its RPC URL and its proxy address.
     let provider = ProviderBuilder::new().connect("http://localhost:8545").await?;
     let bridge_proxy = address!("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512");

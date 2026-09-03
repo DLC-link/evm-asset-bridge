@@ -1,26 +1,26 @@
-# Builds and publishes the eth-sandbox image (see infra/docker/README.md).
+# Builds and publishes the evm-asset-bridge image (see infra/docker/README.md).
 #
-# TRIGGER: this workflow runs on workflow_dispatch only, on purpose.
+# The triggers below match DLC-link/canton's own image workflow.
+#
 # The push step assumes the IAM role gh-oidc-build-evm-asset-bridge.
-# That role does not exist yet. A push or pull_request trigger would
-# fail on every run. It would also mark every pull request red.
+# The org names a build role after the ECR repository. That role allows
+# pushes to that one repository only. The image name must therefore
+# equal this repository's name. Do not rename either one on its own.
 #
-# Restore the real triggers once infra creates that role. Replace the
-# `on:` block with:
+# A pull request publishes only the sha tag. A push to main also moves
+# `latest`. The tag rules below key on the ref, not the event.
 #
-#   on:
-#     push:
-#       branches: [main]
-#     pull_request:
-#       branches: ["**"]
-#       types: [opened, reopened, synchronize]
-#     workflow_dispatch:
-#
-# The tag rules below already handle both events. That is the only
-# change you need.
-name: Build and push eth-sandbox
+# A run that cannot assume the role means the role does not exist.
+# Someone with IAM access must then create it. It must trust
+# repo:DLC-link/evm-asset-bridge. It also needs public-ECR push rights.
+name: Build and push evm-asset-bridge
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["**"]
+    types: [opened, reopened, synchronize]
   workflow_dispatch:
 
 permissions: {}
@@ -75,7 +75,7 @@ jobs:
           context: .
           file: ./infra/docker/Dockerfile
           load: true
-          tags: eth-sandbox-smoke:${{ steps.git-sha.outputs.sha }}
+          tags: evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -84,7 +84,7 @@ jobs:
 
       # Hard gate: a broken image never reaches the registry.
       - name: Smoke test the image
-        run: bash infra/docker/smoke-eth.sh eth-sandbox-smoke:${{ steps.git-sha.outputs.sha }}
+        run: bash infra/docker/smoke-eth.sh evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
 
       # `main` also moves `latest`. The condition keys on the ref, not
       # the event. A manual run on main therefore behaves like a push.
@@ -96,9 +96,9 @@ jobs:
         run: |
           {
             echo "tags<<EOF"
-            echo "public.ecr.aws/dlc-link/eth-sandbox:beth-$SHA"
+            echo "public.ecr.aws/dlc-link/evm-asset-bridge:beth-$SHA"
             if [ "$REF" = "refs/heads/main" ]; then
-              echo "public.ecr.aws/dlc-link/eth-sandbox:latest"
+              echo "public.ecr.aws/dlc-link/evm-asset-bridge:latest"
             fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
@@ -125,7 +125,7 @@ jobs:
           TAGS: ${{ steps.tags.outputs.tags }}
         run: |
           {
-            echo "### eth-sandbox pushed"
+            echo "### evm-asset-bridge pushed"
             echo
             echo "Consumers pin one of these:"
             echo
@@ -143,7 +143,7 @@ jobs:
     needs: build-and-push
     uses: DLC-link/dlc-infra/.github/workflows/trivy-image-scan.yaml@main
     with:
-      image_name: eth-sandbox
+      image_name: evm-asset-bridge
       image_tag: ${{ needs.build-and-push.outputs.version_tag }}
       registry_type: public
       registry: public.ecr.aws/dlc-link

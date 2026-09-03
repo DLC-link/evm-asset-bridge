@@ -1,7 +1,7 @@
 # evm-asset-bridge IT keys
 
 This directory holds the attestor key handoff file for the integration
-test stack. The stack itself is one Docker image called `eth-sandbox`.
+test stack. The stack itself is one Docker image called `evm-asset-bridge`.
 
 - The image, its addresses, its accounts and its chain flags:
   `../infra/docker/README.md`

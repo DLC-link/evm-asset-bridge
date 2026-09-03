@@ -1,15 +1,15 @@
 # Makefile
 #
-# This Makefile has convenience targets for the eth-sandbox
+# This Makefile has convenience targets for the evm-asset-bridge
 # integration-test image: one container that runs anvil and deploys the
 # BETH bridge into it. See infra/docker/README.md.
 
-IT_IMAGE     := eth-sandbox:local
-IT_CONTAINER := eth-sandbox
+IT_IMAGE     := evm-asset-bridge:local
+IT_CONTAINER := evm-asset-bridge
 
 .PHONY: it-build it-up it-down it-logs it-verify
 
-## Build the eth-sandbox image.
+## Build the evm-asset-bridge image.
 it-build:
 	docker build -f infra/docker/Dockerfile -t $(IT_IMAGE) .
 

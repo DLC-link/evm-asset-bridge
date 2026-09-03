@@ -1,5 +1,5 @@
 #!/bin/sh
-# This script is the entrypoint for the eth-sandbox image. The script
+# This script is the entrypoint for the evm-asset-bridge image. The script
 # starts anvil, deploys the bridge with script/DeployIT.s.sol, and then
 # waits on anvil.
 #
@@ -30,7 +30,7 @@ i=0
 until cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; do
     i=$((i + 1))
     if [ "$i" -ge 60 ]; then
-        echo "eth-sandbox: anvil did not answer within 60s" >&2
+        echo "evm-asset-bridge: anvil did not answer within 60s" >&2
         exit 1
     fi
     sleep 1
@@ -40,6 +40,6 @@ done
 # DeployIT asserts both contract addresses and fails loudly on drift.
 forge script script/DeployIT.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
 
-echo "eth-sandbox: bridge ready; anvil serves on :8545"
+echo "evm-asset-bridge: bridge ready; anvil serves on :8545"
 
 wait "$ANVIL_PID"

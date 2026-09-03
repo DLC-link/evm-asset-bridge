@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# eth-sandbox is one container that runs a local anvil chain AND deploys
+# This image is one container that runs a local anvil chain AND deploys
 # one BitSafeEvmAssetBridge (ETH) into it. Consumers start it and use it.
 # They run no deploy step of their own. The healthcheck reports healthy
 # only after the bridge exists. A compose service that waits on
