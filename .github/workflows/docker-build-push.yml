@@ -1,0 +1,153 @@
+# Builds and publishes the eth-sandbox image (see infra/docker/README.md).
+#
+# TRIGGER: this workflow runs on workflow_dispatch only, on purpose.
+# The push step assumes the IAM role gh-oidc-build-evm-asset-bridge.
+# That role does not exist yet. A push or pull_request trigger would
+# fail on every run. It would also mark every pull request red.
+#
+# Restore the real triggers once infra creates that role. Replace the
+# `on:` block with:
+#
+#   on:
+#     push:
+#       branches: [main]
+#     pull_request:
+#       branches: ["**"]
+#       types: [opened, reopened, synchronize]
+#     workflow_dispatch:
+#
+# The tag rules below already handle both events. That is the only
+# change you need.
+name: Build and push eth-sandbox
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build-and-push:
+    name: Build, smoke test and push
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      version_tag: beth-${{ steps.git-sha.outputs.sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Extract git SHA
+        id: git-sha
+        run: echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # The role name derives from the repository name by org convention.
+      # Do not rename the repository without updating the role's trust
+      # policy.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: arn:aws:iam::903295530547:role/gh-oidc-build-${{ github.event.repository.name }}
+          aws-region: us-east-1
+          role-session-name: gha-${{ github.run_id }}
+
+      # Public ECR authenticates only in us-east-1.
+      - name: Login to Amazon ECR Public
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
+        with:
+          registry-type: public
+          mask-password: true
+
+      # This step builds an amd64 image and loads it locally. The smoke
+      # test then runs it before anything reaches the registry.
+      - name: Build amd64 image for the smoke test
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./infra/docker/Dockerfile
+          load: true
+          tags: eth-sandbox-smoke:${{ steps.git-sha.outputs.sha }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      # Hard gate: a broken image never reaches the registry.
+      - name: Smoke test the image
+        run: bash infra/docker/smoke-eth.sh eth-sandbox-smoke:${{ steps.git-sha.outputs.sha }}
+
+      # `main` also moves `latest`. The condition keys on the ref, not
+      # the event. A manual run on main therefore behaves like a push.
+      - name: Resolve image tags
+        id: tags
+        env:
+          SHA: ${{ steps.git-sha.outputs.sha }}
+          REF: ${{ github.ref }}
+        run: |
+          {
+            echo "tags<<EOF"
+            echo "public.ecr.aws/dlc-link/eth-sandbox:beth-$SHA"
+            if [ "$REF" = "refs/heads/main" ]; then
+              echo "public.ecr.aws/dlc-link/eth-sandbox:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # provenance and sbom must stay false. Public ECR rejects the buildx
+      # attestation manifests.
+      - name: Build and push the multi-arch image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./infra/docker/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      # Canton's workflow does not print the tag. A consumer must then
+      # read the tag out of the build log. This step prints it instead.
+      - name: Report the pushed tags
+        env:
+          TAGS: ${{ steps.tags.outputs.tags }}
+        run: |
+          {
+            echo "### eth-sandbox pushed"
+            echo
+            echo "Consumers pin one of these:"
+            echo
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  scan-image:
+    name: Trivy scan
+    # This job activates when the pull_request trigger returns. The note
+    # at the top of this file explains that. The reusable workflow posts
+    # a sticky pull-request comment. It therefore needs a pull request.
+    if: github.event_name == 'pull_request'
+    needs: build-and-push
+    uses: DLC-link/dlc-infra/.github/workflows/trivy-image-scan.yaml@main
+    with:
+      image_name: eth-sandbox
+      image_tag: ${{ needs.build-and-push.outputs.version_tag }}
+      registry_type: public
+      registry: public.ecr.aws/dlc-link
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
