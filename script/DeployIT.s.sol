@@ -18,7 +18,7 @@ import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transpa
 ///
 ///          test test test test test test test test test test test junk
 ///
-///      at path m/44'/60'/0'/0/{index}. All nine accounts used below are
+///      at path m/44'/60'/0'/0/{index}. All seven accounts used below are
 ///      PUBLIC, well-known test keys — see it/attestor-keys.env. NEVER send
 ///      real funds to any of them.
 ///
@@ -31,12 +31,9 @@ import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transpa
 ///        2 = bridgeAdmin         (BRIDGE_ADMIN_ROLE)
 ///        3 = attestor #1
 ///        4 = attestor #2
-///        5 = attestor #3
+///        5 = attestor #3         (3 attestors, threshold 2)
 ///        6 = test user           (unused here; reserved for IT scenarios
 ///                                  that deposit/withdraw as an end user)
-///        7 = attestor #4         (attestors #4/#5 sit after the test user
-///        8 = attestor #5          so indices 0-6 stay stable for existing
-///                                  consumers; 5 attestors, threshold 3)
 ///
 ///      With a fresh chain (deployer nonce 0) this script deploys, in order:
 ///        nonce 0 -> implementation   = 0x5FbDB2315678afecb367f032d93F642f64180aa3
@@ -57,11 +54,9 @@ contract DeployIT is Script {
     uint256 internal constant ATTESTOR_2_PK = 0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a; // index 4
     uint256 internal constant ATTESTOR_3_PK = 0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba; // index 5
     uint256 internal constant TEST_USER_PK = 0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e; // index 6
-    uint256 internal constant ATTESTOR_4_PK = 0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356; // index 7
-    uint256 internal constant ATTESTOR_5_PK = 0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97; // index 8
 
     uint48 internal constant ADMIN_DELAY = 0; // IT: no timelock friction on the default-admin handover
-    uint256 internal constant THRESHOLD = 3;
+    uint256 internal constant THRESHOLD = 2;
 
     // Expected addresses on a fresh anvil chain (deployer nonce starts at 0).
     // See the contract-level natspec for how these were derived.
@@ -74,12 +69,10 @@ contract DeployIT is Script {
         address bridgeAdmin = vm.addr(BRIDGE_ADMIN_PK);
         address testUser = vm.addr(TEST_USER_PK);
 
-        address[] memory attestors = new address[](5);
+        address[] memory attestors = new address[](3);
         attestors[0] = vm.addr(ATTESTOR_1_PK);
         attestors[1] = vm.addr(ATTESTOR_2_PK);
         attestors[2] = vm.addr(ATTESTOR_3_PK);
-        attestors[3] = vm.addr(ATTESTOR_4_PK);
-        attestors[4] = vm.addr(ATTESTOR_5_PK);
 
         BitSafeEvmAssetBridge.Limits memory noLimits =
             BitSafeEvmAssetBridge.Limits({minAmount: 0, maxAmount: type(uint256).max});
@@ -117,8 +110,6 @@ contract DeployIT is Script {
         console2.log("attestor1 (3):                  ", attestors[0]);
         console2.log("attestor2 (4):                  ", attestors[1]);
         console2.log("attestor3 (5):                  ", attestors[2]);
-        console2.log("attestor4 (7):                  ", attestors[3]);
-        console2.log("attestor5 (8):                  ", attestors[4]);
         console2.log("testUser (6):                   ", testUser);
         console2.log("implementation:                 ", address(implementation));
         console2.log("proxy (bridge):                 ", address(proxy));
