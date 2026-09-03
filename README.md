@@ -6,6 +6,7 @@ BitSafeEvmAssetBridge: an upgradeable EVM contract that locks one asset
 
 - Build: `forge build`
 - Test: `forge test`
+- Integration-test image: `make it-verify` (see `infra/docker/README.md`)
 - The design spec is maintained locally, outside git (not tracked in this repo).
 
 ## Production deploy
@@ -155,7 +156,7 @@ sol! {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    // Values for the local beth-it IT container (see it/README.md).
+    // Values for the local eth-sandbox container (see infra/docker/README.md).
     // For another deployment, use its RPC URL and its proxy address.
     let provider = ProviderBuilder::new().connect("http://localhost:8545").await?;
     let bridge_proxy = address!("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512");
