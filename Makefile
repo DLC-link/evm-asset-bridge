@@ -1,24 +1,32 @@
 # Makefile
 #
-# Convenience targets for the BETH integration-test (IT) image: one
-# self-contained container that runs anvil and deploys the bridge.
-# See Dockerfile.beth-it and it/README.md.
+# This Makefile has convenience targets for the eth-sandbox
+# integration-test image: one container that runs anvil and deploys the
+# BETH bridge into it. See infra/docker/README.md.
 
-IT_IMAGE     := beth-it
-IT_CONTAINER := beth-it
+IT_IMAGE     := eth-sandbox:local
+IT_CONTAINER := eth-sandbox
 
-.PHONY: it-up it-down it-logs
+.PHONY: it-build it-up it-down it-logs it-verify
 
-## Build the beth-it image and start the container in the background.
-it-up:
-	docker build -f Dockerfile.beth-it -t $(IT_IMAGE) .
+## Build the eth-sandbox image.
+it-build:
+	docker build -f infra/docker/Dockerfile -t $(IT_IMAGE) .
+
+## Build the image and start the container in the background.
+it-up: it-build
 	docker run -d --name $(IT_CONTAINER) -p 8545:8545 $(IT_IMAGE)
 
-## Stop and remove the IT container. The `-` keeps the target idempotent
-## when no container exists, like `compose down`.
+## Stop and remove the container. The `-` keeps the target idempotent
+## when no container exists.
 it-down:
 	-docker rm -f $(IT_CONTAINER)
 
-## Follow the IT container logs (Ctrl-C to stop following).
+## Follow the container logs (Ctrl-C to stop following).
 it-logs:
 	docker logs -f $(IT_CONTAINER)
+
+## Build the image and run the acceptance gate against it. CI runs the
+## same script.
+it-verify: it-build
+	bash infra/docker/smoke-eth.sh $(IT_IMAGE)
