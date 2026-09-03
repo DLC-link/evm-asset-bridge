@@ -115,6 +115,19 @@ Rules the contract enforces on submission (`withdraw`):
   `ATTESTOR_ROLE`.
 - Each `withdrawRequestId` executes once, forever.
 
+## Voiding a withdraw request
+
+`voidWithdrawRequest(bytes withdrawRequestId)` (`BRIDGE_ADMIN_ROLE`) marks an
+id used without paying it and emits `WithdrawRequestVoided`. Use it when the
+matching Canton withdraw request is cancelled and the user is credited back
+on Canton: a signed `Withdrawal` bundle has no deadline, so without the void
+it could still pay that id later. It reverts with `EmptyId` or
+`WithdrawRequestAlreadyUsed` exactly as `withdraw` does, so a paid id cannot
+be voided and a voided id cannot be paid. It works while the bridge is
+paused, since a pause is the incident response and the void is part of
+resolving it. Attestors should confirm a Canton cancel only when
+`isWithdrawRequestUsed(id)` is true and no `Withdraw` event exists for the id.
+
 Before rollout, cross-check the encoding against the live contract: the view
 `withdrawalDigest(withdrawRequestId, destinationAddress, amount)` returns the
 exact digest the contract verifies. Assert your locally computed digest equals

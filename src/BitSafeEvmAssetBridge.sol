@@ -58,6 +58,7 @@ contract BitSafeEvmAssetBridge is
         address indexed destinationAddress,
         uint256 amount
     );
+    event WithdrawRequestVoided(bytes32 indexed withdrawRequestIdHash, bytes withdrawRequestId);
     event AttestorSetChanged(address[] attestors, uint256 threshold);
     event ThresholdSet(uint256 newThreshold);
     event DepositLimitsSet(uint256 minAmount, uint256 maxAmount);
@@ -344,5 +345,24 @@ contract BitSafeEvmAssetBridge is
             IERC20(asset_).safeTransfer(destinationAddress, amount);
         }
         emit Withdraw(keccak256(withdrawRequestId), withdrawRequestId, destinationAddress, amount);
+    }
+
+    /// @notice Marks `withdrawRequestId` used without paying it, so no signed
+    ///         `Withdrawal` bundle for that id can ever execute.
+    /// @dev Use when the matching Canton withdraw request is cancelled and the
+    ///      user is credited back on Canton: a bundle collected earlier has no
+    ///      deadline and would otherwise pay the id a second time. Reverts with
+    ///      the same errors as `withdraw` for an empty or already used id, so a
+    ///      paid id cannot be voided and a voided id cannot be paid.
+    ///      Deliberately NOT `whenNotPaused`: a pause is the response to an
+    ///      incident and voiding is part of resolving it, so it must remain
+    ///      available while paused. Same role as `pause`; adds no power the
+    ///      role lacks.
+    function voidWithdrawRequest(bytes calldata withdrawRequestId) external onlyRole(BRIDGE_ADMIN_ROLE) {
+        BridgeStorage storage $ = _getBridgeStorage();
+        if (withdrawRequestId.length == 0) revert EmptyId();
+        if ($.usedWithdrawRequests[withdrawRequestId]) revert WithdrawRequestAlreadyUsed();
+        $.usedWithdrawRequests[withdrawRequestId] = true;
+        emit WithdrawRequestVoided(keccak256(withdrawRequestId), withdrawRequestId);
     }
 }
