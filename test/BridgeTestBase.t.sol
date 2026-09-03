@@ -22,6 +22,7 @@ contract BridgeTestBase is Test {
     address[] internal attestors;
 
     uint48 internal constant ADMIN_DELAY = 2 days;
+    uint8 internal constant DEFAULT_TARGET_DECIMALS = 18;
     uint256 internal constant THRESHOLD = 2;
     bytes internal constant DEPOSIT_ID = hex"00a1b2c3d4";
     bytes internal constant REQUEST_ID = hex"0011deadbeef22";
@@ -54,19 +55,40 @@ contract BridgeTestBase is Test {
         }
     }
 
+    /// Default fixture target precision: equal to ETH, so the deposit unit is 1
+    /// and the granularity check is inert. Decimals.t.sol covers the real case.
     function _deployBridge(address asset) internal returns (BitSafeEvmAssetBridge) {
+        return _deployBridge(asset, DEFAULT_TARGET_DECIMALS);
+    }
+
+    function _deployBridge(address asset, uint8 targetDecimals_) internal returns (BitSafeEvmAssetBridge) {
+        return _deployBridgeWith(
+            asset,
+            targetDecimals_,
+            BitSafeEvmAssetBridge.Limits({minAmount: 0, maxAmount: type(uint256).max}),
+            BitSafeEvmAssetBridge.Limits({minAmount: 0, maxAmount: type(uint256).max})
+        );
+    }
+
+    function _deployBridgeWith(
+        address asset,
+        uint8 targetDecimals_,
+        BitSafeEvmAssetBridge.Limits memory depositLimits_,
+        BitSafeEvmAssetBridge.Limits memory withdrawLimits_
+    ) internal returns (BitSafeEvmAssetBridge) {
         implementation = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
             (
                 asset,
+                targetDecimals_,
                 defaultAdmin,
                 ADMIN_DELAY,
                 bridgeAdmin,
                 attestors,
                 THRESHOLD,
-                BitSafeEvmAssetBridge.Limits({minAmount: 0, maxAmount: type(uint256).max}),
-                BitSafeEvmAssetBridge.Limits({minAmount: 0, maxAmount: type(uint256).max})
+                depositLimits_,
+                withdrawLimits_
             )
         );
         TransparentUpgradeableProxy proxy =

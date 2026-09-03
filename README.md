@@ -18,6 +18,7 @@ configuration entirely from environment variables:
 | Env var | Meaning |
 | --- | --- |
 | `ASSET` | Bridged asset address; `address(0)` for ETH, else the ERC20 address |
+| `TARGET_DECIMALS` | Decimal places the target chain expresses; `10` for Canton |
 | `DEFAULT_ADMIN` | Address granted the default admin role (governs role management) |
 | `ADMIN_DELAY` | Default-admin transfer delay, in seconds |
 | `BRIDGE_ADMIN` | Address granted `BRIDGE_ADMIN_ROLE` (pause, limits, rescue) |
@@ -29,6 +30,10 @@ configuration entirely from environment variables:
 | `WITHDRAW_MIN` | Minimum withdrawal amount (0 = no minimum) |
 | `WITHDRAW_MAX` | Maximum withdrawal amount (`type(uint256).max` = no maximum) |
 
+The output JSON also records `assetDecimals`, `targetDecimals`, and
+`depositUnit`, so an operator can read the live granularity rule from the
+deployment record.
+
 `GIT_COMMIT` (optional) is recorded in the output JSON alongside the
 compiler version for provenance; it defaults to `"unknown"` when unset.
 
@@ -37,6 +42,40 @@ Run with:
 ```
 forge script script/Deploy.s.sol:Deploy --rpc-url <RPC_URL> --broadcast
 ```
+
+## Deposit granularity
+
+Canton expresses 10 decimal places. ETH has 18. A deposit of 1 wei therefore has
+no Canton representation, and the bridge would lock ETH that it can never mint.
+The contract blocks this at the source.
+
+`initialize` takes `targetDecimals` and reads the asset's own decimals. For ETH
+it uses 18, because ETH has no contract to ask. For an ERC20 it calls
+`decimals()`. That function is OPTIONAL in EIP-20, so a token without it cannot
+be bridged; `initialize` reverts.
+
+From the two values the contract derives the deposit unit:
+
+```
+depositUnit = 10 ** (assetDecimals - targetDecimals)
+```
+
+Every deposit amount must be a whole multiple of that unit. A deposit that is
+not reverts with `AmountNotRepresentable(amount, depositUnit)`. For ETH and
+Canton the unit is `1e8` wei. A frontend reads `depositUnit()` and rounds the
+amount down before it sends the transaction.
+
+Three rules follow from the formula:
+
+- The unit is `1` when `targetDecimals` is at or above `assetDecimals`. Every
+  amount is then representable, and the check accepts everything.
+- `initialize` reverts with `DecimalsOutOfRange` when the asset reports more
+  than 77 decimals, because `10 ** 78` overflows a `uint256`.
+- `setDepositLimits` rejects a band that holds no multiple of the unit. Such a
+  band would block every deposit and warn nobody.
+
+The withdraw path carries no granularity check. Canton cannot burn an amount it
+cannot express, so the release amount is always representable by construction.
 
 ## Attestor signing (Rust)
 

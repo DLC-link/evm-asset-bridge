@@ -8,6 +8,7 @@ import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 contract DeployTest is Test {
     function test_deployScript_producesWorkingBridgeAndJson() public {
         vm.setEnv("ASSET", "0x0000000000000000000000000000000000000000");
+        vm.setEnv("TARGET_DECIMALS", "10");
         vm.setEnv("DEFAULT_ADMIN", vm.toString(makeAddr("da")));
         vm.setEnv("ADMIN_DELAY", "172800");
         vm.setEnv("BRIDGE_ADMIN", vm.toString(makeAddr("ba")));
@@ -33,5 +34,8 @@ contract DeployTest is Test {
         assertEq(BitSafeEvmAssetBridge(payable(proxy)).getAttestors().length, 3);
         assertEq(vm.parseJsonString(json, ".compiler"), "0.8.34");
         assertEq(vm.parseJsonString(json, ".gitCommit"), "unknown");
+        assertEq(vm.parseJsonUint(json, ".assetDecimals"), 18);
+        assertEq(vm.parseJsonUint(json, ".targetDecimals"), 10);
+        assertEq(vm.parseJsonUint(json, ".depositUnit"), 1e8);
     }
 }

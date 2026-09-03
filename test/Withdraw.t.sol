@@ -380,6 +380,7 @@ contract WithdrawTest is BridgeTestBase {
             BitSafeEvmAssetBridge.initialize,
             (
                 address(0),
+                DEFAULT_TARGET_DECIMALS,
                 defaultAdmin,
                 ADMIN_DELAY,
                 bridgeAdmin,

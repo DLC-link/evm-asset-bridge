@@ -124,23 +124,11 @@ contract DepositTest is BridgeTestBase {
         internal
         returns (BitSafeEvmAssetBridge)
     {
-        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
-        bytes memory initData = abi.encodeCall(
-            BitSafeEvmAssetBridge.initialize,
-            (
-                address(0),
-                defaultAdmin,
-                ADMIN_DELAY,
-                bridgeAdmin,
-                attestors,
-                THRESHOLD,
-                BitSafeEvmAssetBridge.Limits(minAmount, maxAmount),
-                BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
-            )
+        return _deployBridgeWith(
+            address(0),
+            DEFAULT_TARGET_DECIMALS,
+            BitSafeEvmAssetBridge.Limits(minAmount, maxAmount),
+            BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
         );
-        return
-            BitSafeEvmAssetBridge(
-                payable(address(new TransparentUpgradeableProxy(address(impl2), proxyOwner, initData)))
-            );
     }
 }
