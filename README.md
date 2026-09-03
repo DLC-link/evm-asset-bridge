@@ -121,3 +121,62 @@ exact digest the contract verifies. Assert your locally computed digest equals
 it. Note for raw-key or KMS setups: sign the digest bytes directly (no
 `personal_sign` / Ethereum Signed Message prefix — the EIP-712 `\x19\x01`
 envelope is already inside the digest).
+
+## Watching Deposit events (Rust)
+
+Both `depositETH` and `depositERC20` emit the same event:
+
+```solidity
+event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
+```
+
+- `topic0` (the event signature hash) is
+  `0xacaea730ea841fae3326f72a7ff746b6e06c646840526bcaf5dabee5fd887ef8`,
+  which is `keccak256("Deposit(bytes32,bytes,address,uint256)")`.
+- `depositAccountIdHash` (`topic1`) is `keccak256(depositAccountId)`. Filter
+  on it to follow one Canton deposit account.
+- `sender` (`topic2`) is the EVM account that paid the deposit.
+- The data part carries the raw `depositAccountId` bytes (the Canton deposit
+  account id) and `amount` (wei for ETH, base units for an ERC20 asset).
+
+Emit address: always the bridge PROXY address, never the implementation.
+
+Complete Rust flow with [Alloy](https://docs.rs/alloy):
+
+```rust
+use alloy_primitives::address;
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types::Filter;
+use alloy_sol_types::{sol, SolEvent};
+
+sol! {
+    event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
+}
+
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
+    // Values for the local beth-it IT container (see it/README.md).
+    // For another deployment, use its RPC URL and its proxy address.
+    let provider = ProviderBuilder::new().connect("http://localhost:8545").await?;
+    let bridge_proxy = address!("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512");
+
+    let filter = Filter::new()
+        .address(bridge_proxy)
+        .event_signature(Deposit::SIGNATURE_HASH)
+        .from_block(0u64);
+
+    for log in provider.get_logs(&filter).await? {
+        let deposit = log.log_decode::<Deposit>()?.inner.data;
+        println!(
+            "deposit: account_id={} sender={} amount={}",
+            deposit.depositAccountId, // Bytes prints as 0x-prefixed hex
+            deposit.sender,
+            deposit.amount,
+        );
+    }
+    Ok(())
+}
+```
+
+A poller advances `from_block` past the last block it saw. A pubsub setup
+subscribes with `subscribe_logs` over WebSocket instead of `get_logs`.

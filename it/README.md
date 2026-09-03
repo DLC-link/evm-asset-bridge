@@ -45,7 +45,12 @@ The image lives in the private ECR repository:
 903295530547.dkr.ecr.us-east-1.amazonaws.com/beth-it
 ```
 
-Tags: the 7-char git SHA of the source commit, plus `latest`.
+Tags: the 7-char git SHA of the source commit, plus `latest`. Pull the
+newest image (after `docker login` to the registry, see below):
+
+```
+docker pull 903295530547.dkr.ecr.us-east-1.amazonaws.com/beth-it:latest
+```
 
 The repository name differs from the GitHub repository name, so the
 auto-provisioned `gh-oidc-build-*` role cannot push to it from CI. Push
@@ -82,6 +87,13 @@ Example service for `dlc-attestor-stack/it/docker-compose.yml`:
 A service that needs the bridge gates on it with
 `depends_on: { beth-chain: { condition: service_healthy } }` and reaches
 the chain at `http://beth-chain:8545`.
+
+## Watching Deposit events
+
+The top-level `README.md` documents the `Deposit` event signature and a
+Rust (alloy) sample that reads the events. Against this container the RPC
+is `http://localhost:8545` (or `http://beth-chain:8545` inside compose)
+and the bridge proxy is `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512`.
 
 ## Accounts
 
