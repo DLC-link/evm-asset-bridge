@@ -75,7 +75,7 @@ echo "smoke: bridge is deployed at $PROXY"
 threshold=$(docker exec "$CONTAINER" cast call --rpc-url "$RPC" "$PROXY" "threshold()(uint256)")
 [ "$threshold" = 2 ] || fail "threshold is '$threshold', want 2"
 
-attestors=$(docker exec "$CONTAINER" cast call --rpc-url "$RPC" "$PROXY" "getAttestors()(address[])")
+attestors=$(docker exec "$CONTAINER" cast call --rpc-url "$RPC" "$PROXY" "getAttestors()(address[])" || true)
 count=$(printf '%s' "$attestors" | tr ',' '\n' | grep -c '0x' || true)
 [ "$count" = 3 ] || fail "attestor count is $count, want 3 (got: $attestors)"
 echo "smoke: threshold 2 with 3 attestors"

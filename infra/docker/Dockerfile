@@ -15,9 +15,10 @@
 
 # ---- solc fetch stage ----
 # forge downloads solc itself when the binary is missing. That download
-# has no timeout. It once stalled an image build for over two hours.
-# This stage fetches the pinned solc instead. It uses a bounded timeout
-# and bounded retries. A bad mirror then fails the build fast.
+# has no timeout. It once stalled an image build for over two hours on a
+# slow mirror. This stage fetches the pinned solc instead. It uses a
+# bounded timeout and bounded retries. A bad mirror then fails the build
+# fast.
 #
 # mirror.gcr.io is Google's Docker Hub pull-through mirror. It avoids the
 # anonymous docker.io rate limit. Canton uses it for the same reason.

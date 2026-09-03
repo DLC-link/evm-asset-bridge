@@ -149,6 +149,9 @@ make it-down      # stop and remove the container
 script as its gate before any push. Every check runs inside the
 container. The host therefore needs no Foundry install.
 
+CI cannot publish the image yet. The workflow needs an AWS role that
+nobody has created yet. Its header comment records the change to make.
+
 ## Safety
 
 Every key this chain funds is a PUBLIC, well-known Foundry test key.
