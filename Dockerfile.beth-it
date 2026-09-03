@@ -1,0 +1,77 @@
+# syntax=docker/dockerfile:1.7
+#
+# Dockerfile.beth-it
+#
+# Self-contained BETH integration-test (IT) image: one container runs a
+# local anvil chain AND deploys one BitSafeEvmAssetBridge (ETH) into it via
+# script/DeployIT.s.sol. The container healthcheck (it/check-service.sh)
+# reports healthy only after the deploy finished, so a consumer compose
+# service that waits on service_healthy starts against a ready bridge at
+# the fixed addresses (see it/README.md).
+#
+# This mirrors the dlc-solidity IT image pattern used by
+# dlc-attestor-stack/it/docker-compose.yml: chain + deploy + healthcheck in
+# one image, imported as a single compose service.
+#
+# No --mnemonic flag is passed to anvil: its default account derivation
+# already uses the standard, well-known Foundry/Hardhat test mnemonic
+#
+#     test test test test test test test test test test test junk
+#
+# at m/44'/60'/0'/0/{index}. THESE ARE PUBLIC, WELL-KNOWN TEST KEYS (see
+# it/attestor-keys.env). NEVER send real funds to any address this chain
+# funds.
+
+# ---- solc fetch stage ----
+# forge downloads solc itself when it is missing, but that download has no
+# timeout and has stalled builds for hours on a flaky mirror. This stage
+# fetches the pinned solc with a bounded timeout and bounded retries, so a
+# bad mirror fails the build fast instead.
+FROM alpine:3 AS solc
+ARG TARGETARCH
+ARG SOLC_VERSION=0.8.34
+ARG SOLC_COMMIT=80d5c536
+RUN set -e; \
+    url="https://binaries.soliditylang.org/linux-${TARGETARCH}/solc-linux-${TARGETARCH}-v${SOLC_VERSION}+commit.${SOLC_COMMIT}"; \
+    i=0; \
+    until wget -T 60 -q -O /solc "$url"; do \
+        i=$((i + 1)); \
+        if [ "$i" -ge 5 ]; then echo "solc download failed: $url" >&2; exit 1; fi; \
+        sleep 2; \
+    done; \
+    chmod 0555 /solc
+
+# ---- runtime stage ----
+FROM ghcr.io/foundry-rs/foundry:latest
+
+WORKDIR /app
+
+COPY --from=solc /solc /usr/local/bin/solc
+# Point forge at the fetched binary so it never downloads solc itself,
+# neither at image build time nor at container start.
+ENV FOUNDRY_SOLC=/usr/local/bin/solc
+
+# Only the inputs forge needs to build and run the IT script are copied in,
+# so a change to test/ or docs/ does not invalidate this image's cache.
+# --chown: the base image runs as the non-root user `foundry`, and forge
+# writes out/, cache/, and broadcast/ under /app.
+COPY --chown=foundry:foundry foundry.toml remappings.txt ./
+COPY --chown=foundry:foundry lib ./lib
+COPY --chown=foundry:foundry src ./src
+COPY --chown=foundry:foundry script ./script
+
+# Prebuild the contracts so container startup only broadcasts the deploy.
+RUN forge build
+
+COPY --chmod=0555 it/beth-it-entrypoint.sh /usr/local/bin/beth-it-entrypoint.sh
+COPY --chmod=0555 it/check-service.sh /check-service.sh
+
+EXPOSE 8545
+
+# The healthcheck passes only after the entrypoint deployed the bridge.
+HEALTHCHECK --interval=2s --timeout=2s --retries=45 --start-period=5s \
+    CMD ["/check-service.sh"]
+
+# Clear the base image's entrypoint so ours runs directly and unambiguously.
+ENTRYPOINT []
+CMD ["/usr/local/bin/beth-it-entrypoint.sh"]

@@ -1,19 +1,87 @@
 # evm-asset-bridge IT stack
 
-The EVM half of the cross-repo integration-test stack: a local anvil chain
-plus a one-shot deployer that initializes one `BitSafeEvmAssetBridge` behind
-a `TransparentUpgradeableProxy`, with fixed, deterministic addresses so the
-DAML (Canton) and dlc-attestor components can hardcode what they talk to.
+The EVM half of the cross-repo integration-test stack, packed into one
+self-contained image called `beth-it`. The container runs a local anvil
+chain, deploys one `BitSafeEvmAssetBridge` behind a
+`TransparentUpgradeableProxy`, and then keeps the chain up. The contract
+addresses are fixed and deterministic, so the DAML (Canton) and
+dlc-attestor components can hardcode what they talk to.
 
 ## Run it
 
 ```
-make it-up     # build + start anvil and run the deployer once
-make it-logs   # follow logs (the deployer's deploy output included)
-make it-down   # stop, remove volumes and orphans
+make it-up     # build the beth-it image and start the container
+make it-logs   # follow the container logs (anvil + deploy output)
+make it-down   # stop and remove the container
 ```
 
 Anvil's RPC is published at `http://localhost:8545` (chain id 31337).
+
+## The beth-it image
+
+`Dockerfile.beth-it` builds the image:
+
+- `forge build` runs at image build time, so the container never compiles
+  at startup.
+- `it/beth-it-entrypoint.sh` starts anvil, runs `script/DeployIT.s.sol`
+  with broadcast, writes the `/tmp/beth-it-deployed` marker, and then
+  waits on anvil. A deploy failure stops the container with a non-zero
+  exit.
+- `it/check-service.sh` is the container healthcheck. It passes only when
+  the RPC answers and the marker file exists. "Healthy" therefore means
+  "the bridge is deployed at the fixed addresses below", not just "the
+  chain is up".
+
+This mirrors the `dlc-solidity` IT image pattern that
+`dlc-attestor-stack/it/docker-compose.yml` already consumes: chain,
+deploy, and healthcheck in one image, imported as a single compose
+service.
+
+## ECR
+
+The image lives in the private ECR repository:
+
+```
+903295530547.dkr.ecr.us-east-1.amazonaws.com/beth-it
+```
+
+Tags: the 7-char git SHA of the source commit, plus `latest`.
+
+The repository name differs from the GitHub repository name, so the
+auto-provisioned `gh-oidc-build-*` role cannot push to it from CI. Push
+manually:
+
+```
+aws ecr get-login-password --region us-east-1 --profile <profile> | \
+  docker login --username AWS --password-stdin 903295530547.dkr.ecr.us-east-1.amazonaws.com
+docker buildx build -f Dockerfile.beth-it \
+  --platform linux/amd64,linux/arm64 \
+  -t 903295530547.dkr.ecr.us-east-1.amazonaws.com/beth-it:$(git rev-parse --short HEAD) \
+  -t 903295530547.dkr.ecr.us-east-1.amazonaws.com/beth-it:latest \
+  --push .
+```
+
+## Importing the image in a consumer compose
+
+Example service for `dlc-attestor-stack/it/docker-compose.yml`:
+
+```yaml
+  beth-chain:
+    image: 903295530547.dkr.ecr.us-east-1.amazonaws.com/beth-it:${BETH_IMAGE_TAG}
+    container_name: beth-chain
+    hostname: beth-chain
+    ports:
+      - '8547:8545'
+    healthcheck:
+      test: ['CMD', '/check-service.sh']
+      interval: 2s
+      timeout: 2s
+      retries: 45
+```
+
+A service that needs the bridge gates on it with
+`depends_on: { beth-chain: { condition: service_healthy } }` and reaches
+the chain at `http://beth-chain:8545`.
 
 ## Accounts
 

@@ -1,0 +1,11 @@
+.git
+.claude
+.github
+cache
+out
+broadcast
+deployments
+docs
+test
+*.log
+.DS_Store

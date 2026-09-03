@@ -1,21 +1,24 @@
 # Makefile
 #
-# Convenience targets for the evm-asset-bridge Docker-based integration-test
-# (IT) stack (anvil + the one-shot Foundry deployer). See docker-compose.it.yml.
+# Convenience targets for the BETH integration-test (IT) image: one
+# self-contained container that runs anvil and deploys the bridge.
+# See Dockerfile.beth-it and it/README.md.
 
-COMPOSE_IT := docker compose -f docker-compose.it.yml
+IT_IMAGE     := beth-it
+IT_CONTAINER := beth-it
 
 .PHONY: it-up it-down it-logs
 
-## Build the IT images and bring the stack up in the background.
+## Build the beth-it image and start the container in the background.
 it-up:
-	$(COMPOSE_IT) up -d --build
+	docker build -f Dockerfile.beth-it -t $(IT_IMAGE) .
+	docker run -d --name $(IT_CONTAINER) -p 8545:8545 $(IT_IMAGE)
 
-## Tear the IT stack down: stops containers and removes volumes and any
-## orphaned services, so nothing leaks between runs.
+## Stop and remove the IT container. The `-` keeps the target idempotent
+## when no container exists, like `compose down`.
 it-down:
-	$(COMPOSE_IT) down -v --remove-orphans
+	-docker rm -f $(IT_CONTAINER)
 
-## Follow logs for the whole IT stack (Ctrl-C to stop following).
+## Follow the IT container logs (Ctrl-C to stop following).
 it-logs:
-	$(COMPOSE_IT) logs -f
+	docker logs -f $(IT_CONTAINER)
