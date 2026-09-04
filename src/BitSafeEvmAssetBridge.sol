@@ -35,9 +35,8 @@ contract BitSafeEvmAssetBridge is
     bytes32 public constant BRIDGE_ADMIN_ROLE = keccak256("BRIDGE_ADMIN_ROLE");
     bytes32 public constant ATTESTOR_ROLE = keccak256("ATTESTOR_ROLE");
     uint256 public constant MIN_THRESHOLD = 2;
-    /// @dev No serious ERC20 on Ethereum reports more than 18 decimals. A higher
-    ///      value is a misconfiguration, so `initialize` rejects the asset.
-    uint8 public constant MAX_ASSET_DECIMALS = 18;
+    /// @dev 18 is the idiomatic maximum decimal precision.
+    uint8 public constant MAX_DECIMALS = 18;
     bytes32 public constant WITHDRAWAL_TYPEHASH =
         keccak256("Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount)");
 
@@ -250,7 +249,11 @@ contract BitSafeEvmAssetBridge is
         BridgeStorage storage $ = _getBridgeStorage();
         address asset_ = $.asset;
         uint8 assetDecimals_ = asset_ == address(0) ? 18 : IERC20Metadata(asset_).decimals();
-        if (assetDecimals_ > MAX_ASSET_DECIMALS) revert DecimalsOutOfRange();
+        // The target needs the same bound as the asset. A larger value clamps the
+        // unit to 1, which accepts every amount and disables the deposit check.
+        if (assetDecimals_ > MAX_DECIMALS || targetDecimals_ > MAX_DECIMALS) {
+            revert DecimalsOutOfRange();
+        }
         $.assetDecimals = assetDecimals_;
         $.targetDecimals = targetDecimals_;
     }

@@ -18,7 +18,7 @@ configuration entirely from environment variables:
 | Env var | Meaning |
 | --- | --- |
 | `ASSET` | Bridged asset address; `address(0)` for ETH, else the ERC20 address |
-| `TARGET_DECIMALS` | Decimal places the target chain expresses; `10` for Canton |
+| `TARGET_DECIMALS` | Decimal places the target chain expresses; `10` for Canton, 18 maximum |
 | `DEFAULT_ADMIN` | Address granted the default admin role (governs role management) |
 | `ADMIN_DELAY` | Default-admin transfer delay, in seconds |
 | `BRIDGE_ADMIN` | Address granted `BRIDGE_ADMIN_ROLE` (pause, limits, rescue) |
@@ -69,10 +69,11 @@ Three rules follow from the formula:
 
 - The unit is `1` when `targetDecimals` is at or above `assetDecimals`. Every
   amount is then representable, and the check accepts everything.
-- `initialize` reverts with `DecimalsOutOfRange` when the asset reports more
-  than 18 decimals. No serious ERC20 on Ethereum does, so a higher value is a
-  misconfiguration. The deployment then fails loudly instead of setting a
-  deposit unit that no user can meet.
+- `initialize` reverts with `DecimalsOutOfRange` when the asset or the target
+  reports more than 18 decimals. The value 18 is the idiomatic maximum
+  precision, so a larger value is a misconfiguration. A larger `targetDecimals`
+  clamps the unit to 1, which accepts every amount. A typo then disables the
+  check without a warning.
 - `setDepositLimits` rejects a band that holds no multiple of the unit. Such a
   band would block every deposit and warn nobody.
 

@@ -123,6 +123,15 @@ contract DecimalsTest is BridgeTestBase {
         _deployBridge(address(token), CANTON_DECIMALS);
     }
 
+    /// A typo such as 100 for 10 must fail loudly. Without this bound the unit
+    /// clamps to 1, which accepts every amount and strands the dust it exists
+    /// to reject.
+    function testFuzz_initialize_targetDecimalsAboveMax_reverts(uint8 targetDecimals_) public {
+        targetDecimals_ = uint8(bound(targetDecimals_, uint256(ethBridge.MAX_DECIMALS()) + 1, type(uint8).max));
+        vm.expectRevert(BitSafeEvmAssetBridge.DecimalsOutOfRange.selector);
+        _deployBridge(address(0), targetDecimals_);
+    }
+
     function test_initialize_assetDecimalsAtMax_succeeds() public {
         DecimalsERC20 token = new DecimalsERC20(18);
         BitSafeEvmAssetBridge b = _deployBridge(address(token), CANTON_DECIMALS);
