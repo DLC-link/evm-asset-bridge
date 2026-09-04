@@ -56,7 +56,9 @@ contract Deploy is Script {
         require(targetDecimalsRaw <= type(uint8).max, "TARGET_DECIMALS out of range");
         c.targetDecimals = uint8(targetDecimalsRaw);
         c.defaultAdmin = vm.envAddress("DEFAULT_ADMIN");
-        c.adminDelay = uint48(vm.envUint("ADMIN_DELAY"));
+        uint256 adminDelayRaw = vm.envUint("ADMIN_DELAY");
+        require(adminDelayRaw <= type(uint48).max, "ADMIN_DELAY out of range");
+        c.adminDelay = uint48(adminDelayRaw);
         c.bridgeAdmin = vm.envAddress("BRIDGE_ADMIN");
         c.proxyOwner = vm.envAddress("PROXY_OWNER");
         c.attestors = vm.envAddress("ATTESTORS", ",");
