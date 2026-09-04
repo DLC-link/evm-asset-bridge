@@ -38,9 +38,13 @@ contract BitSafeEvmAssetBridge is
     bytes32 public constant BRIDGE_ADMIN_ROLE = keccak256("BRIDGE_ADMIN_ROLE");
     bytes32 public constant ATTESTOR_ROLE = keccak256("ATTESTOR_ROLE");
     uint256 public constant MIN_THRESHOLD = 2;
-    /// @dev 18 is the idiomatic maximum precision for an ERC20. This bounds the
-    ///      asset only. The target chain carries no upper bound.
+    /// @dev 18 is the idiomatic maximum precision for an ERC20.
     uint8 public constant MAX_ASSET_DECIMALS = 18;
+    /// @dev Canton's CIP-56 token standard sets 10 as the maximum precision. This
+    ///      bridge targets Canton, so it accepts no higher value. A wider bound
+    ///      would admit a typo that clamps the deposit unit to 1 and turns the
+    ///      granularity check off without an error.
+    uint8 public constant MAX_TARGET_DECIMALS = 10;
     /// @dev ETH has no contract to ask, so its precision is a convention.
     uint8 private constant ETH_DECIMALS = 18;
     bytes32 public constant WITHDRAWAL_TYPEHASH =
@@ -257,13 +261,9 @@ contract BitSafeEvmAssetBridge is
         uint8 assetDecimals_ = asset_ == address(0) ? ETH_DECIMALS : IERC20Metadata(asset_).decimals();
         // The asset sits in 1 to MAX_ASSET_DECIMALS, because it is an EVM token.
         if (assetDecimals_ == 0 || assetDecimals_ > MAX_ASSET_DECIMALS) revert DecimalsOutOfRange();
-        // The target rejects only 0. It carries NO upper bound on purpose: a
-        // non-EVM target chain can express more than 18 places. Such a target
-        // clamps the unit to 1, which is safe, because it expresses every amount
-        // the asset can hold. The cost is a typo, such as 100 for 10, which then
-        // turns the deposit check off without an error. We accept that risk
-        // rather than reject a legitimate high-precision target.
-        if (targetDecimals_ == 0) revert DecimalsOutOfRange();
+        // The target sits in 1 to MAX_TARGET_DECIMALS, which Canton's CIP-56
+        // standard sets. A deployment for another chain needs a new bound here.
+        if (targetDecimals_ == 0 || targetDecimals_ > MAX_TARGET_DECIMALS) revert DecimalsOutOfRange();
         $.assetDecimals = assetDecimals_;
         $.targetDecimals = targetDecimals_;
     }

@@ -144,12 +144,19 @@ contract DecimalsTest is BridgeTestBase {
         assertEq(token.balanceOf(address(b)), 1);
     }
 
+    /// ETH cannot reach this case now, because the target stops at 10 and ETH
+    /// holds 18. A token that reports the target precision still can.
     function test_targetDecimalsEqualAssetDecimals_acceptsEveryAmount() public {
-        BitSafeEvmAssetBridge b = _deployBridge(address(0), 18);
+        DecimalsERC20 token = new DecimalsERC20(CANTON_DECIMALS);
+        BitSafeEvmAssetBridge b = _deployBridge(address(token), CANTON_DECIMALS);
         assertEq(b.depositUnit(), 1);
-        vm.prank(user);
-        b.depositETH{value: 1}(DEPOSIT_ID);
-        assertEq(address(b).balance, 1);
+        token.mint(user, 1_000);
+
+        vm.startPrank(user);
+        token.approve(address(b), 1_000);
+        b.depositERC20(1, DEPOSIT_ID); // one base unit, the smallest amount possible
+        vm.stopPrank();
+        assertEq(token.balanceOf(address(b)), 1);
     }
 
     // ----------------------------------------------------------- initializer
@@ -160,23 +167,18 @@ contract DecimalsTest is BridgeTestBase {
         _deployBridge(address(token), CANTON_DECIMALS);
     }
 
-    /// A non-EVM target chain can express more than 18 places, so the target
-    /// carries no upper bound. The unit clamps to 1 and the check accepts every
-    /// amount, which is safe: the target expresses more than the asset holds.
-    function test_initialize_targetDecimalsAboveEighteen_succeeds() public {
-        BitSafeEvmAssetBridge b = _deployBridge(address(0), 24);
-        assertEq(b.targetDecimals(), 24);
-        assertEq(b.depositUnit(), 1);
-
-        vm.prank(user);
-        b.depositETH{value: 1}(DEPOSIT_ID); // one wei, the smallest amount possible
-        assertEq(address(b).balance, 1);
+    /// The bridge targets Canton, so it rejects a precision the CIP-56 token
+    /// standard cannot express. A typo such as 100 for 10 fails loudly here.
+    function testFuzz_initialize_targetDecimalsAboveMax_reverts(uint8 targetDecimals_) public {
+        targetDecimals_ = uint8(bound(targetDecimals_, uint256(ethBridge.MAX_TARGET_DECIMALS()) + 1, type(uint8).max));
+        vm.expectRevert(BitSafeEvmAssetBridge.DecimalsOutOfRange.selector);
+        _deployBridge(address(0), targetDecimals_);
     }
 
-    function testFuzz_initialize_targetDecimalsAtOrAboveAsset_clampsUnitToOne(uint8 targetDecimals_) public {
-        targetDecimals_ = uint8(bound(targetDecimals_, ethBridge.assetDecimals(), type(uint8).max));
-        BitSafeEvmAssetBridge b = _deployBridge(address(0), targetDecimals_);
-        assertEq(b.depositUnit(), 1);
+    function test_initialize_targetDecimalsAtMax_succeeds() public {
+        BitSafeEvmAssetBridge b = _deployBridge(address(0), ethBridge.MAX_TARGET_DECIMALS());
+        assertEq(b.targetDecimals(), 10);
+        assertEq(b.depositUnit(), ETH_UNIT);
     }
 
     function test_initialize_assetDecimalsAtMax_succeeds() public {
@@ -313,8 +315,8 @@ contract DecimalsTest is BridgeTestBase {
 
     // --------------------------------------------- the shipped configuration
 
-    // The other suites run with a deposit unit of 1, so these two paths never
-    // meet the granularity check. Both tests use the Canton unit of 1e8.
+    // These two paths meet the granularity check but must not obey it. The pause
+    // rejects a valid multiple, and the rescue moves a non-multiple balance.
 
     function test_depositETH_whenPaused_revertsBeforeTheGranularityCheck() public {
         vm.prank(bridgeAdmin);

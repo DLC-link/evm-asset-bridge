@@ -88,16 +88,21 @@ contract DepositTest is BridgeTestBase {
         vm.stopPrank();
     }
 
-    function testFuzz_depositETH_respectsLimits(uint96 amount) public {
+    /// Every drawn amount is a whole multiple of the deposit unit, so the limits
+    /// band is the only rule under test. Decimals.t.sol fuzzes the granularity
+    /// rule on its own.
+    function testFuzz_depositETH_respectsLimits(uint96 raw) public {
         BitSafeEvmAssetBridge bounded = _deployBridgeWithDepositLimits(1 ether, 10 ether);
-        vm.assume(amount > 0);
+        uint256 amount = bound(uint256(raw), 1, 20 ether / DEFAULT_DEPOSIT_UNIT) * DEFAULT_DEPOSIT_UNIT;
         vm.deal(user, type(uint96).max);
         vm.prank(user);
         if (amount >= 1 ether && amount <= 10 ether) {
             bounded.depositETH{value: amount}(DEPOSIT_ID);
             assertEq(address(bounded).balance, amount);
         } else {
-            vm.expectRevert();
+            vm.expectRevert(
+                abi.encodeWithSelector(BitSafeEvmAssetBridge.AmountOutsideLimits.selector, amount, 1 ether, 10 ether)
+            );
             bounded.depositETH{value: amount}(DEPOSIT_ID);
         }
     }
