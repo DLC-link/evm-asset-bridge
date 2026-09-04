@@ -1,0 +1,178 @@
+# Builds and publishes the evm-asset-bridge image (see infra/docker/README.md).
+#
+# A pull request builds the image and runs the smoke gate. It publishes
+# nothing. It needs no AWS credentials. It therefore never requests an
+# identity token.
+#
+# A push to main publishes. A manual dispatch publishes too. A push to
+# main also moves `latest`.
+#
+# The publish job assumes the IAM role gh-oidc-build-evm-asset-bridge.
+# The org names a build role after the ECR repository. That role allows
+# pushes to that one repository only. The image name must therefore
+# equal this repository's name. Do not rename either one on its own.
+#
+# A run that cannot assume the role means the role does not exist.
+# Someone with IAM access must then create it. It must trust
+# repo:DLC-link/evm-asset-bridge. It also needs public-ECR push rights.
+#
+# The Trivy scan runs after a publish. A pull request gets no scan,
+# because no image reaches the registry for the scan to read.
+name: Build and push evm-asset-bridge
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["**"]
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  # This job runs on every event, and it needs no credentials. It is the
+  # hard gate: a broken image fails here before any publish starts.
+  build:
+    name: Build and smoke test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Extract git SHA
+        id: git-sha
+        run: echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # This job builds amd64 only, so it needs no QEMU. The publish job
+      # builds arm64 as well, and it sets QEMU up for that.
+      - name: Build amd64 image for the smoke test
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./infra/docker/Dockerfile
+          load: true
+          tags: evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      - name: Smoke test the image
+        run: bash infra/docker/smoke-eth.sh evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
+
+  # This job never runs on a pull request. Publishing an image built from
+  # unmerged code would put untested tags in a public registry.
+  publish:
+    name: Publish to public ECR
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      version_tag: beth-${{ steps.git-sha.outputs.sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Extract git SHA
+        id: git-sha
+        run: echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # The role name derives from the repository name by org convention.
+      # Do not rename the repository without updating the role's trust
+      # policy.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: arn:aws:iam::903295530547:role/gh-oidc-build-${{ github.event.repository.name }}
+          aws-region: us-east-1
+          role-session-name: gha-${{ github.run_id }}
+
+      # Public ECR authenticates only in us-east-1.
+      - name: Login to Amazon ECR Public
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
+        with:
+          registry-type: public
+          mask-password: true
+
+      # `main` also moves `latest`. The condition keys on the ref, not
+      # the event. A manual run on main therefore behaves like a push.
+      - name: Resolve image tags
+        id: tags
+        env:
+          SHA: ${{ steps.git-sha.outputs.sha }}
+          REF: ${{ github.ref }}
+        run: |
+          {
+            echo "tags<<EOF"
+            echo "public.ecr.aws/dlc-link/evm-asset-bridge:beth-$SHA"
+            if [ "$REF" = "refs/heads/main" ]; then
+              echo "public.ecr.aws/dlc-link/evm-asset-bridge:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # The amd64 layers come from the build job's cache. provenance and
+      # sbom must stay false. Public ECR rejects the buildx attestation
+      # manifests.
+      - name: Build and push the multi-arch image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./infra/docker/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      # Canton's workflow does not print the tag. A consumer must then
+      # read the tag out of the build log. This step prints it instead.
+      - name: Report the pushed tags
+        env:
+          TAGS: ${{ steps.tags.outputs.tags }}
+        run: |
+          {
+            echo "### evm-asset-bridge pushed"
+            echo
+            echo "Consumers pin one of these:"
+            echo
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  scan-image:
+    name: Trivy scan
+    if: github.event_name != 'pull_request'
+    needs: publish
+    uses: DLC-link/dlc-infra/.github/workflows/trivy-image-scan.yaml@main
+    with:
+      image_name: evm-asset-bridge
+      image_tag: ${{ needs.publish.outputs.version_tag }}
+      registry_type: public
+      registry: public.ecr.aws/dlc-link
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
