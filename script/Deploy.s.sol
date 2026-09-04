@@ -79,7 +79,7 @@ contract Deploy is Script {
         vm.serializeAddress(json, "asset", c.asset);
         // The asset reports its own decimals; the JSON records what the contract read.
         vm.serializeUint(json, "assetDecimals", bridge.assetDecimals());
-        vm.serializeUint(json, "targetDecimals", c.targetDecimals);
+        vm.serializeUint(json, "targetDecimals", bridge.targetDecimals());
         vm.serializeUint(json, "depositUnit", bridge.depositUnit());
         vm.serializeAddress(json, "defaultAdmin", c.defaultAdmin);
         vm.serializeUint(json, "adminDelay", c.adminDelay);
