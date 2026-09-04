@@ -118,15 +118,16 @@ contract DecimalsTest is BridgeTestBase {
     // ----------------------------------------------------------- initializer
 
     function test_initialize_assetDecimalsAboveMax_reverts() public {
-        DecimalsERC20 token = new DecimalsERC20(78);
+        DecimalsERC20 token = new DecimalsERC20(19);
         vm.expectRevert(BitSafeEvmAssetBridge.DecimalsOutOfRange.selector);
         _deployBridge(address(token), CANTON_DECIMALS);
     }
 
     function test_initialize_assetDecimalsAtMax_succeeds() public {
-        DecimalsERC20 token = new DecimalsERC20(77);
+        DecimalsERC20 token = new DecimalsERC20(18);
         BitSafeEvmAssetBridge b = _deployBridge(address(token), CANTON_DECIMALS);
-        assertEq(b.depositUnit(), 10 ** 67);
+        assertEq(b.assetDecimals(), 18);
+        assertEq(b.depositUnit(), ETH_UNIT);
     }
 
     function test_initialize_tokenWithoutDecimalsFunction_reverts() public {

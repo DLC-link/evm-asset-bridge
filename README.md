@@ -70,7 +70,9 @@ Three rules follow from the formula:
 - The unit is `1` when `targetDecimals` is at or above `assetDecimals`. Every
   amount is then representable, and the check accepts everything.
 - `initialize` reverts with `DecimalsOutOfRange` when the asset reports more
-  than 77 decimals, because `10 ** 78` overflows a `uint256`.
+  than 18 decimals. No serious ERC20 on Ethereum does, so a higher value is a
+  misconfiguration. The deployment then fails loudly instead of setting a
+  deposit unit that no user can meet.
 - `setDepositLimits` rejects a band that holds no multiple of the unit. Such a
   band would block every deposit and warn nobody.
 
