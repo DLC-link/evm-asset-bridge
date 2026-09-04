@@ -52,7 +52,9 @@ contract Deploy is Script {
 
     function _readConfig() internal view returns (Config memory c) {
         c.asset = vm.envAddress("ASSET");
-        c.targetDecimals = uint8(vm.envUint("TARGET_DECIMALS"));
+        uint256 targetDecimalsRaw = vm.envUint("TARGET_DECIMALS");
+        require(targetDecimalsRaw <= type(uint8).max, "TARGET_DECIMALS out of range");
+        c.targetDecimals = uint8(targetDecimalsRaw);
         c.defaultAdmin = vm.envAddress("DEFAULT_ADMIN");
         c.adminDelay = uint48(vm.envUint("ADMIN_DELAY"));
         c.bridgeAdmin = vm.envAddress("BRIDGE_ADMIN");
