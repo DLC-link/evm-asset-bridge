@@ -251,11 +251,12 @@ contract BitSafeEvmAssetBridge is
         BridgeStorage storage $ = _getBridgeStorage();
         address asset_ = $.asset;
         uint8 assetDecimals_ = asset_ == address(0) ? ETH_DECIMALS : IERC20Metadata(asset_).decimals();
-        // The target needs the same bound as the asset. A larger value clamps the
-        // unit to 1, which accepts every amount and disables the deposit check.
-        if (assetDecimals_ > MAX_DECIMALS || targetDecimals_ > MAX_DECIMALS) {
-            revert DecimalsOutOfRange();
-        }
+        // Both precisions must sit in 1 to MAX_DECIMALS. A target above the bound
+        // clamps the unit to 1, which accepts every amount and disables the
+        // deposit check. A zero on either side is a misconfiguration, and the
+        // truncating cast in the deploy script can produce one.
+        if (assetDecimals_ == 0 || assetDecimals_ > MAX_DECIMALS) revert DecimalsOutOfRange();
+        if (targetDecimals_ == 0 || targetDecimals_ > MAX_DECIMALS) revert DecimalsOutOfRange();
         $.assetDecimals = assetDecimals_;
         $.targetDecimals = targetDecimals_;
     }

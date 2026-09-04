@@ -190,23 +190,25 @@ contract DecimalsTest is BridgeTestBase {
         _deployBridge(address(token), CANTON_DECIMALS);
     }
 
-    /// The low end of the `targetDecimals` range. The truncating cast in
-    /// `Deploy.s.sol` can produce it, so the behaviour needs a pin.
-    function test_initialize_targetDecimalsZero_demandsWholeEther() public {
-        BitSafeEvmAssetBridge b = _deployBridge(address(0), 0);
-        assertEq(b.depositUnit(), 1 ether);
-
-        vm.expectRevert(
-            abi.encodeWithSelector(BitSafeEvmAssetBridge.AmountNotRepresentable.selector, 1 ether + 1, 1 ether)
-        );
-        vm.prank(user);
-        b.depositETH{value: 1 ether + 1}(DEPOSIT_ID);
+    /// A target of 0 says the chain expresses whole units only. No target chain
+    /// does, so the value is a misconfiguration. The truncating cast in
+    /// `Deploy.s.sol` produces it from a `TARGET_DECIMALS` of 256.
+    function test_initialize_targetDecimalsZero_reverts() public {
+        vm.expectRevert(BitSafeEvmAssetBridge.DecimalsOutOfRange.selector);
+        _deployBridge(address(0), 0);
     }
 
-    function test_initialize_zeroDecimalToken_acceptsEveryAmount() public {
+    function test_initialize_zeroDecimalToken_reverts() public {
         DecimalsERC20 token = new DecimalsERC20(0);
-        BitSafeEvmAssetBridge b = _deployBridge(address(token), CANTON_DECIMALS);
-        assertEq(b.assetDecimals(), 0);
+        vm.expectRevert(BitSafeEvmAssetBridge.DecimalsOutOfRange.selector);
+        _deployBridge(address(token), CANTON_DECIMALS);
+    }
+
+    function test_initialize_bothDecimalsAtMinimum_succeeds() public {
+        DecimalsERC20 token = new DecimalsERC20(1);
+        BitSafeEvmAssetBridge b = _deployBridge(address(token), 1);
+        assertEq(b.assetDecimals(), 1);
+        assertEq(b.targetDecimals(), 1);
         assertEq(b.depositUnit(), 1);
     }
 

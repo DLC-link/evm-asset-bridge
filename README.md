@@ -18,7 +18,7 @@ configuration entirely from environment variables:
 | Env var | Meaning |
 | --- | --- |
 | `ASSET` | Bridged asset address; `address(0)` for ETH, else the ERC20 address |
-| `TARGET_DECIMALS` | Decimal places the target chain expresses; `10` for Canton, 18 maximum |
+| `TARGET_DECIMALS` | Decimal places the target chain expresses; `10` for Canton, 1 to 18 |
 | `DEFAULT_ADMIN` | Address granted the default admin role (governs role management) |
 | `ADMIN_DELAY` | Default-admin transfer delay, in seconds |
 | `BRIDGE_ADMIN` | Address granted `BRIDGE_ADMIN_ROLE` (pause, limits, rescue) |
@@ -65,15 +65,18 @@ not reverts with `AmountNotRepresentable(amount, depositUnit)`. For ETH and
 Canton the unit is `1e8` wei. A frontend reads `depositUnit()` and rounds the
 amount down before it sends the transaction.
 
-Three rules follow from the formula:
+Four rules follow from the formula:
 
 - The unit is `1` when `targetDecimals` is at or above `assetDecimals`. Every
   amount is then representable, and the check accepts everything.
-- `initialize` reverts with `DecimalsOutOfRange` when the asset or the target
-  reports more than 18 decimals. The value 18 is the idiomatic maximum
-  precision, so a larger value is a misconfiguration. A larger `targetDecimals`
-  clamps the unit to 1, which accepts every amount. A typo then disables the
-  check without a warning.
+- `initialize` reverts with `DecimalsOutOfRange` unless both precisions sit in
+  1 to 18. The value 18 is the idiomatic maximum precision, so a larger value
+  is a misconfiguration. A larger `targetDecimals` clamps the unit to 1, which
+  accepts every amount. A typo then disables the check without a warning.
+- A zero on either side is also a misconfiguration. No target chain expresses
+  whole units only, and the bridge does not support a 0-decimal asset. The
+  truncating cast in the deploy script turns a `TARGET_DECIMALS` of 256 into a
+  zero, so the contract rejects it.
 - `setDepositLimits` rejects a band that holds no multiple of the unit. Such a
   band would block every deposit and warn nobody.
 
