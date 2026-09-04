@@ -37,6 +37,8 @@ contract BitSafeEvmAssetBridge is
     uint256 public constant MIN_THRESHOLD = 2;
     /// @dev 18 is the idiomatic maximum decimal precision.
     uint8 public constant MAX_DECIMALS = 18;
+    /// @dev ETH has no contract to ask, so its precision is a convention.
+    uint8 private constant ETH_DECIMALS = 18;
     bytes32 public constant WITHDRAWAL_TYPEHASH =
         keccak256("Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount)");
 
@@ -242,13 +244,13 @@ contract BitSafeEvmAssetBridge is
         }
     }
 
-    /// @dev Reads the asset's own decimals and stores both precisions. It reads
-    ///      the asset from storage, which `initialize` sets first. ETH has no
-    ///      contract to ask, so its 18 places are a convention.
+    /// @dev Reads the asset's own decimals and stores both precisions. It takes
+    ///      the asset from storage, not as a parameter: `initialize` already sits
+    ///      at the EVM stack limit, and one more argument fails to compile.
     function _setDecimals(uint8 targetDecimals_) internal {
         BridgeStorage storage $ = _getBridgeStorage();
         address asset_ = $.asset;
-        uint8 assetDecimals_ = asset_ == address(0) ? 18 : IERC20Metadata(asset_).decimals();
+        uint8 assetDecimals_ = asset_ == address(0) ? ETH_DECIMALS : IERC20Metadata(asset_).decimals();
         // The target needs the same bound as the asset. A larger value clamps the
         // unit to 1, which accepts every amount and disables the deposit check.
         if (assetDecimals_ > MAX_DECIMALS || targetDecimals_ > MAX_DECIMALS) {
@@ -283,10 +285,11 @@ contract BitSafeEvmAssetBridge is
         _validateLimits(newLimits);
         BridgeStorage storage $ = _getBridgeStorage();
         // The band must hold at least one amount the target chain can express.
-        // `largest` is the biggest valid multiple at or below the maximum.
         uint256 unit = _depositUnit($);
-        uint256 largest = (newLimits.maxAmount / unit) * unit;
-        if (largest == 0 || largest < newLimits.minAmount) revert InvalidLimits();
+        uint256 largestValidAmount = (newLimits.maxAmount / unit) * unit;
+        // The first clause is the only guard when `minAmount` is 0, because
+        // `0 < 0` is false. Keep both.
+        if (largestValidAmount == 0 || largestValidAmount < newLimits.minAmount) revert InvalidLimits();
         $.depositLimits = newLimits;
         emit DepositLimitsSet(newLimits.minAmount, newLimits.maxAmount);
     }

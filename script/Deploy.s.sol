@@ -8,7 +8,8 @@ import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transpa
 contract Deploy is Script {
     bytes32 internal constant ADMIN_SLOT = 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
 
-    /// One struct keeps `run` inside the EVM stack limit.
+    /// One struct keeps `run` inside the EVM stack limit without inlining
+    /// every environment read.
     struct Config {
         address asset;
         uint8 targetDecimals;
