@@ -5,6 +5,10 @@ import {BridgeTestBase} from "./BridgeTestBase.t.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 import {DecimalsERC20} from "./mocks/DecimalsERC20.sol";
 import {NoDecimalsToken} from "./mocks/NoDecimalsToken.sol";
+import {RevertingDecimalsERC20} from "./mocks/RevertingDecimalsERC20.sol";
+import {Errors} from "@openzeppelin/contracts/utils/Errors.sol";
+import {ForceSend} from "./mocks/ForceSend.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 /// Canton expresses 10 decimal places. ETH has 18. A deposit must therefore be
 /// a whole multiple of 1e8 wei, or Canton cannot express the minted amount.
@@ -43,7 +47,40 @@ contract DecimalsTest is BridgeTestBase {
         assertEq(uint256(word), expected); // asset is address(0) here
     }
 
+    /// The same claim with a real asset address, so the low 160 bits are not
+    /// all zero. A field reorder or an inserted pad byte fails this test.
+    function test_storageLayout_packsBothDecimalsBesideANonZeroAsset() public {
+        DecimalsERC20 token = new DecimalsERC20(6);
+        BitSafeEvmAssetBridge b = _deployBridge(address(token), CANTON_DECIMALS);
+
+        bytes32 word = vm.load(address(b), b.BRIDGE_STORAGE_LOCATION());
+        uint256 expected = uint256(uint160(address(token))) | (uint256(6) << 160) | (uint256(CANTON_DECIMALS) << 168);
+        assertEq(uint256(word), expected);
+    }
+
     // --------------------------------------------------------------- deposits
+
+    /// An attestor reads this event's `amount` as wei. A bridge that emits
+    /// target units instead under-mints by the whole deposit unit.
+    function test_depositETH_emitsTheWeiAmount() public {
+        vm.expectEmit(true, true, false, true, address(ethBridge));
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether);
+        vm.prank(user);
+        ethBridge.depositETH{value: 1 ether}(DEPOSIT_ID);
+    }
+
+    function test_depositERC20_emitsTheBaseUnitAmount() public {
+        DecimalsERC20 token = new DecimalsERC20(18);
+        BitSafeEvmAssetBridge b = _deployBridge(address(token), CANTON_DECIMALS);
+        token.mint(user, 100 ether);
+
+        vm.startPrank(user);
+        token.approve(address(b), 100 ether);
+        vm.expectEmit(true, true, false, true, address(b));
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether);
+        b.depositERC20(1 ether, DEPOSIT_ID);
+        vm.stopPrank();
+    }
 
     function test_depositETH_multipleOfUnit_succeeds() public {
         vm.prank(user);
@@ -141,8 +178,36 @@ contract DecimalsTest is BridgeTestBase {
 
     function test_initialize_tokenWithoutDecimalsFunction_reverts() public {
         NoDecimalsToken token = new NoDecimalsToken();
-        vm.expectRevert();
+        vm.expectRevert(Errors.FailedCall.selector);
         _deployBridge(address(token), CANTON_DECIMALS);
+    }
+
+    /// The named error proves `initialize` really calls `decimals()` on the
+    /// asset. The generic failure above cannot prove that on its own.
+    function test_initialize_tokenWhoseDecimalsReverts_propagatesTheNamedError() public {
+        RevertingDecimalsERC20 token = new RevertingDecimalsERC20();
+        vm.expectRevert(RevertingDecimalsERC20.DecimalsUnavailable.selector);
+        _deployBridge(address(token), CANTON_DECIMALS);
+    }
+
+    /// The low end of the `targetDecimals` range. The truncating cast in
+    /// `Deploy.s.sol` can produce it, so the behaviour needs a pin.
+    function test_initialize_targetDecimalsZero_demandsWholeEther() public {
+        BitSafeEvmAssetBridge b = _deployBridge(address(0), 0);
+        assertEq(b.depositUnit(), 1 ether);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(BitSafeEvmAssetBridge.AmountNotRepresentable.selector, 1 ether + 1, 1 ether)
+        );
+        vm.prank(user);
+        b.depositETH{value: 1 ether + 1}(DEPOSIT_ID);
+    }
+
+    function test_initialize_zeroDecimalToken_acceptsEveryAmount() public {
+        DecimalsERC20 token = new DecimalsERC20(0);
+        BitSafeEvmAssetBridge b = _deployBridge(address(token), CANTON_DECIMALS);
+        assertEq(b.assetDecimals(), 0);
+        assertEq(b.depositUnit(), 1);
     }
 
     function test_initialize_depositBandHoldsNoValidAmount_reverts() public {
@@ -170,6 +235,33 @@ contract DecimalsTest is BridgeTestBase {
 
         vm.prank(user);
         ethBridge.depositETH{value: ETH_UNIT}(DEPOSIT_ID);
+        assertEq(address(ethBridge).balance, ETH_UNIT);
+    }
+
+    /// A zero minimum reaches only the first clause of the band guard, because
+    /// `0 < 0` is false. Without that clause the bridge accepts this band.
+    function test_setDepositLimits_zeroMinimumAndNoValidAmount_reverts() public {
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidLimits.selector);
+        vm.prank(bridgeAdmin);
+        ethBridge.setDepositLimits(BitSafeEvmAssetBridge.Limits(0, ETH_UNIT - 1));
+    }
+
+    /// A band that sits between two multiples reaches only the second clause.
+    function test_setDepositLimits_bandBetweenTwoMultiples_reverts() public {
+        vm.expectRevert(BitSafeEvmAssetBridge.InvalidLimits.selector);
+        vm.prank(bridgeAdmin);
+        ethBridge.setDepositLimits(BitSafeEvmAssetBridge.Limits(15e7, 19e7));
+    }
+
+    /// A band holding exactly one valid amount must pass. This pins the
+    /// comparison operator, which `<=` would break.
+    function test_setDepositLimits_singleValueBand_succeeds() public {
+        vm.prank(bridgeAdmin);
+        ethBridge.setDepositLimits(BitSafeEvmAssetBridge.Limits(ETH_UNIT, ETH_UNIT));
+
+        vm.prank(user);
+        ethBridge.depositETH{value: ETH_UNIT}(DEPOSIT_ID);
+        assertEq(address(ethBridge).balance, ETH_UNIT);
     }
 
     function test_setWithdrawLimits_ignoresDepositUnit() public {
@@ -204,22 +296,57 @@ contract DecimalsTest is BridgeTestBase {
         vm.prank(attestors[0]);
         ethBridge.withdraw(REQUEST_ID, destination, amount, sigs);
         assertEq(destination.balance, amount);
+        assertTrue(ethBridge.isWithdrawRequestUsed(REQUEST_ID));
+    }
+
+    // --------------------------------------------- the shipped configuration
+
+    // The other suites run with a deposit unit of 1, so these two paths never
+    // meet the granularity check. Both tests use the Canton unit of 1e8.
+
+    function test_depositETH_whenPaused_revertsBeforeTheGranularityCheck() public {
+        vm.prank(bridgeAdmin);
+        ethBridge.pause();
+
+        // The amount is a valid multiple, so only the pause can reject it.
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.prank(user);
+        ethBridge.depositETH{value: ETH_UNIT}(DEPOSIT_ID);
+    }
+
+    /// The rescue path must stay free of the granularity rule. Forced ETH does
+    /// not respect the deposit unit, and the admin must still recover it.
+    function test_rescueETH_movesANonMultipleBalance() public {
+        DecimalsERC20 token = new DecimalsERC20(18);
+        BitSafeEvmAssetBridge b = _deployBridge(address(token), CANTON_DECIMALS);
+        uint256 dust = ETH_UNIT + 1; // not a multiple of the deposit unit
+
+        ForceSend forcer = new ForceSend{value: dust}();
+        forcer.boom(payable(address(b)));
+        assertEq(address(b).balance, dust);
+
+        address recipient = makeAddr("rescueRecipient");
+        vm.prank(bridgeAdmin);
+        b.rescueETH(recipient, dust);
+        assertEq(recipient.balance, dust);
+        assertEq(address(b).balance, 0);
     }
 
     // ------------------------------------------------------------------ fuzz
 
-    function testFuzz_depositETH_onlyMultiplesSucceed(uint256 amount) public {
-        amount = bound(amount, 1, 100 ether);
-        if (amount % ETH_UNIT == 0) {
-            vm.prank(user);
-            ethBridge.depositETH{value: amount}(DEPOSIT_ID);
-            assertEq(address(ethBridge).balance, amount);
-        } else {
-            vm.expectRevert(
-                abi.encodeWithSelector(BitSafeEvmAssetBridge.AmountNotRepresentable.selector, amount, ETH_UNIT)
-            );
-            vm.prank(user);
-            ethBridge.depositETH{value: amount}(DEPOSIT_ID);
-        }
+    /// Fuzz the multiplier, not the wei amount. A raw wei draw is a multiple of
+    /// 1e8 about once in 1e8 tries, so it never really tests the accept path.
+    function testFuzz_depositETH_multiplesSucceed(uint256 raw) public {
+        uint256 amount = bound(raw, 1, 100 ether / ETH_UNIT) * ETH_UNIT;
+        vm.prank(user);
+        ethBridge.depositETH{value: amount}(DEPOSIT_ID);
+        assertEq(address(ethBridge).balance, amount);
+    }
+
+    function testFuzz_depositETH_nonMultiplesRevert(uint256 raw, uint256 offset) public {
+        uint256 amount = bound(raw, 0, 100 ether / ETH_UNIT - 1) * ETH_UNIT + bound(offset, 1, ETH_UNIT - 1);
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.AmountNotRepresentable.selector, amount, ETH_UNIT));
+        vm.prank(user);
+        ethBridge.depositETH{value: amount}(DEPOSIT_ID);
     }
 }
