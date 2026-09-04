@@ -1,0 +1,22 @@
+{
+  "adminDelay": 0,
+  "asset": "0x0000000000000000000000000000000000000000",
+  "attestors": [
+    "0x3355977947F84C2b1CAE7D2903a72958aEE185e2",
+    "0xA2c975F49f578AC3E384Ad21E2126968b82037f5",
+    "0x3fF31dCd8ca84b594e355CfDf913738bFc192a5c"
+  ],
+  "bridgeAdmin": "0xA2c975F49f578AC3E384Ad21E2126968b82037f5",
+  "chainId": 11155111,
+  "compiler": "0.8.34",
+  "defaultAdmin": "0x3355977947F84C2b1CAE7D2903a72958aEE185e2",
+  "depositMax": 1000000000000000000,
+  "depositMin": 0,
+  "gitCommit": "19f0f70",
+  "implementation": "0xbdE697F62676c53E61dD502E2c4b7feeeA8684D3",
+  "proxy": "0x5cC31afb1cCE1C22C1078Ce4d4c67F2e6eA309fc",
+  "proxyAdmin": "0xcc0c84De91fFf4DD24628c5eA75B9b5F21DC19b1",
+  "threshold": 2,
+  "withdrawMax": 1000000000000000000,
+  "withdrawMin": 0
+}
