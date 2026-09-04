@@ -160,13 +160,23 @@ contract DecimalsTest is BridgeTestBase {
         _deployBridge(address(token), CANTON_DECIMALS);
     }
 
-    /// A typo such as 100 for 10 must fail loudly. Without this bound the unit
-    /// clamps to 1, which accepts every amount and strands the dust it exists
-    /// to reject.
-    function testFuzz_initialize_targetDecimalsAboveMax_reverts(uint8 targetDecimals_) public {
-        targetDecimals_ = uint8(bound(targetDecimals_, uint256(ethBridge.MAX_DECIMALS()) + 1, type(uint8).max));
-        vm.expectRevert(BitSafeEvmAssetBridge.DecimalsOutOfRange.selector);
-        _deployBridge(address(0), targetDecimals_);
+    /// A non-EVM target chain can express more than 18 places, so the target
+    /// carries no upper bound. The unit clamps to 1 and the check accepts every
+    /// amount, which is safe: the target expresses more than the asset holds.
+    function test_initialize_targetDecimalsAboveEighteen_succeeds() public {
+        BitSafeEvmAssetBridge b = _deployBridge(address(0), 24);
+        assertEq(b.targetDecimals(), 24);
+        assertEq(b.depositUnit(), 1);
+
+        vm.prank(user);
+        b.depositETH{value: 1}(DEPOSIT_ID); // one wei, the smallest amount possible
+        assertEq(address(b).balance, 1);
+    }
+
+    function testFuzz_initialize_targetDecimalsAtOrAboveAsset_clampsUnitToOne(uint8 targetDecimals_) public {
+        targetDecimals_ = uint8(bound(targetDecimals_, ethBridge.assetDecimals(), type(uint8).max));
+        BitSafeEvmAssetBridge b = _deployBridge(address(0), targetDecimals_);
+        assertEq(b.depositUnit(), 1);
     }
 
     function test_initialize_assetDecimalsAtMax_succeeds() public {
@@ -190,9 +200,9 @@ contract DecimalsTest is BridgeTestBase {
         _deployBridge(address(token), CANTON_DECIMALS);
     }
 
-    /// A target of 0 says the chain expresses whole units only. No target chain
-    /// does, so the value is a misconfiguration. The truncating cast in
-    /// `Deploy.s.sol` produces it from a `TARGET_DECIMALS` of 256.
+    /// Zero is the only value the target rejects. No chain expresses whole units
+    /// only, and the truncating cast in `Deploy.s.sol` produces a zero from a
+    /// `TARGET_DECIMALS` of 256.
     function test_initialize_targetDecimalsZero_reverts() public {
         vm.expectRevert(BitSafeEvmAssetBridge.DecimalsOutOfRange.selector);
         _deployBridge(address(0), 0);
