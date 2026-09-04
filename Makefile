@@ -15,6 +15,7 @@ it-build:
 
 ## Build the image and start the container in the background.
 it-up: it-build
+	-docker rm -f $(IT_CONTAINER)
 	docker run -d --name $(IT_CONTAINER) -p 8545:8545 $(IT_IMAGE)
 
 ## Stop and remove the container. The `-` keeps the target idempotent
