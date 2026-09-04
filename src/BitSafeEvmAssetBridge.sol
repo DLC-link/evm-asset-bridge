@@ -27,9 +27,12 @@ contract BitSafeEvmAssetBridge is
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
 
+    /// Both bounds are inclusive. An amount passes when
+    /// `minAmount <= amount <= maxAmount`, so `minAmount == maxAmount` names
+    /// exactly one legal amount.
     struct Limits {
-        uint256 minAmount; // 0 = no minimum
-        uint256 maxAmount; // type(uint256).max = no maximum
+        uint256 minAmount; // 0 = no minimum. An amount of 0 still reverts with ZeroAmount.
+        uint256 maxAmount; // type(uint256).max = no maximum. No uint256 exceeds it.
     }
 
     bytes32 public constant BRIDGE_ADMIN_ROLE = keccak256("BRIDGE_ADMIN_ROLE");
@@ -301,6 +304,11 @@ contract BitSafeEvmAssetBridge is
         emit WithdrawLimitsSet(newLimits.minAmount, newLimits.maxAmount);
     }
 
+    /// @dev Enforces two rules: the maximum is above 0, and the minimum is at or
+    ///      below the maximum. A zero maximum would reject every amount, so it is
+    ///      always a misconfiguration. `pause` is the tool for blocking traffic.
+    ///      Neither sentinel needs a special case, because 0 is at or below every
+    ///      amount and `type(uint256).max` is at or above every amount.
     function _validateLimits(Limits calldata limits) internal pure {
         if (limits.maxAmount == 0 || limits.minAmount > limits.maxAmount) revert InvalidLimits();
     }
