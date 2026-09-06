@@ -8,3 +8,6 @@ docs/superpowers/
 
 # Local test-run deployment artifacts
 deployments/*.31337.json
+
+# Pending deploy hand-off files; script/record.sh consumes and removes them
+deployments/.pending/
