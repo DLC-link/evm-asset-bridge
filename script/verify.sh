@@ -18,7 +18,7 @@
 #   ETHERSCAN_API_KEY           the fallback key.
 #   VERIFIER_URL_<id>           that chain's explorer host.
 #   VERIFIER_URL                the fallback host. Defaults to Etherscan V2.
-#   CONTRACT                    optional. One role only.
+#   CONTRACT                    optional. One of implementation, proxy, proxyAdmin.
 #   DRY_RUN=1                   print the request and send nothing.
 set -euo pipefail
 
@@ -32,6 +32,17 @@ DRY="${DRY_RUN:-}"
 
 [ -n "$NAME" ]  || { echo "verify.sh: DEPLOYMENT is not set. Example: DEPLOYMENT=BETH" >&2; exit 2; }
 [ -n "$CHAIN" ] || { echo "verify.sh: CHAIN_ID is not set. Example: CHAIN_ID=11155111" >&2; exit 2; }
+
+# CONTRACT limits the run to one role. An unlisted role is likely a typo.
+if [ -n "$ONLY" ]; then
+  case "$ONLY" in
+    implementation|proxy|proxyAdmin) ;;
+    *)
+      echo "verify.sh: CONTRACT must be implementation, proxy, or proxyAdmin. Got '$ONLY'." >&2
+      exit 2
+      ;;
+  esac
+fi
 
 for tool in jq curl; do
   command -v "$tool" >/dev/null || { echo "verify.sh: $tool is not installed" >&2; exit 2; }
@@ -77,12 +88,30 @@ fi
 # `?` or `&` depends on whether the host already carries a query string.
 sep() { case "$1" in *\?*) printf '&' ;; *) printf '?' ;; esac; }
 
+# This escapes backslash and double quote for curl's quoted config-file syntax.
+cfg_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
+# curl_get reads the URL from stdin, not argv, so a local `ps` cannot show the key.
+curl_get() { # curl_get <url> <max-time>
+  curl -sS --connect-timeout 10 --max-time "$2" -K - <<CFG || true
+url = "$(cfg_escape "$1")"
+CFG
+}
+
 FAILED=0
 
 for ROLE in $ROLES; do
   RECORD="deployments/$NAME.$ROLE.$CHAIN.json"
   if [ ! -f "$RECORD" ]; then
-    echo "  SKIP $ROLE: no record at $RECORD"
+    # A missing record means this role was never recorded. That is a
+    # failure, not a skip, because nothing was checked or verified.
+    echo "  FAIL $ROLE: no record at $RECORD"
+    FAILED=$((FAILED + 1))
     continue
   fi
 
@@ -116,25 +145,32 @@ for ROLE in $ROLES; do
   fi
 
   # ---- skip a contract that already has verified source ---------------------
-  ABI_RESPONSE=$(curl -sS "$HOST$(sep "$HOST")module=contract&action=getabi&address=$ADDRESS&apikey=$KEY" || true)
+  ABI_RESPONSE=$(curl_get "$HOST$(sep "$HOST")module=contract&action=getabi&address=$ADDRESS&apikey=$KEY" 30)
   if [ "$(printf '%s' "$ABI_RESPONSE" | jq -r '.status // "0"')" = "1" ]; then
     echo "  SKIP $ROLE $ADDRESS: already verified"
     continue
   fi
 
   echo "  SEND $ROLE $ADDRESS ($FQN)"
-  SUBMIT=$(curl -sS -X POST "$HOST" \
-    --data-urlencode "apikey=$KEY" \
-    --data-urlencode "chainid=$CHAIN" \
-    --data-urlencode "module=contract" \
-    --data-urlencode "action=verifysourcecode" \
-    --data-urlencode "contractaddress=$ADDRESS" \
-    --data-urlencode "sourceCode@$SOLC_INPUT" \
-    --data-urlencode "codeformat=solidity-standard-json-input" \
-    --data-urlencode "contractname=$FQN" \
-    --data-urlencode "compilerversion=v$COMPILER" \
-    --data-urlencode "constructorArguements=$ARGS_NO_PREFIX" \
-    --data-urlencode "licenseType=3")
+  # The URL and every field, including the key, arrive on stdin. Argv never
+  # carries them, so a local `ps` cannot show the key. The upload is large,
+  # so this call gets a longer budget than the two small GET calls.
+  SUBMIT=$(curl -sS --connect-timeout 10 --max-time 180 -K - <<CFG || true
+url = "$(cfg_escape "$HOST")"
+request = "POST"
+data-urlencode = "apikey=$(cfg_escape "$KEY")"
+data-urlencode = "chainid=$(cfg_escape "$CHAIN")"
+data-urlencode = "module=contract"
+data-urlencode = "action=verifysourcecode"
+data-urlencode = "contractaddress=$(cfg_escape "$ADDRESS")"
+data-urlencode = "sourceCode@$(cfg_escape "$SOLC_INPUT")"
+data-urlencode = "codeformat=solidity-standard-json-input"
+data-urlencode = "contractname=$(cfg_escape "$FQN")"
+data-urlencode = "compilerversion=v$(cfg_escape "$COMPILER")"
+data-urlencode = "constructorArguements=$(cfg_escape "$ARGS_NO_PREFIX")"
+data-urlencode = "licenseType=3"
+CFG
+)
 
   if [ "$(printf '%s' "$SUBMIT" | jq -r '.status // "0"')" != "1" ]; then
     echo "  FAIL $ROLE: $(printf '%s' "$SUBMIT" | jq -r '.result // .message // .')"
@@ -145,21 +181,34 @@ for ROLE in $ROLES; do
   GUID=$(printf '%s' "$SUBMIT" | jq -r .result)
 
   # ---- poll -----------------------------------------------------------------
+  # TEXT holds the poll's result field. The loop keeps polling while TEXT is
+  # empty or "Pending in queue". RESULT stays empty until the explorer
+  # concludes, pass or fail, and RESULT_STATUS is captured at that moment.
   RESULT=""
+  RESULT_STATUS=""
   for _ in $(seq 1 30); do
     sleep 5
-    STATUS=$(curl -sS "$HOST$(sep "$HOST")module=contract&action=checkverifystatus&guid=$GUID&apikey=$KEY" || true)
-    TEXT=$(printf '%s' "$STATUS" | jq -r '.result // ""')
+    POLL=$(curl_get "$HOST$(sep "$HOST")module=contract&action=checkverifystatus&guid=$GUID&apikey=$KEY" 30)
+    TEXT=$(printf '%s' "$POLL" | jq -r '.result // ""')
     case "$TEXT" in
       "Pending in queue"|"") continue ;;
-      *) RESULT="$TEXT"; break ;;
+      *)
+        RESULT="$TEXT"
+        RESULT_STATUS=$(printf '%s' "$POLL" | jq -r '.status // "0"')
+        break
+        ;;
     esac
   done
 
-  if [ "$(printf '%s' "$STATUS" | jq -r '.status // "0"')" = "1" ]; then
+  # An empty RESULT means every poll timed out or pended. That counts as a
+  # failure. The explorer's last "still pending" reply can still carry status "1".
+  if [ -z "$RESULT" ]; then
+    echo "  FAIL $ROLE $ADDRESS: timed out after 150 seconds"
+    FAILED=$((FAILED + 1))
+  elif [ "$RESULT_STATUS" = "1" ]; then
     echo "  OK   $ROLE $ADDRESS: $RESULT"
   else
-    echo "  FAIL $ROLE $ADDRESS: ${RESULT:-timed out after 150 seconds}"
+    echo "  FAIL $ROLE $ADDRESS: $RESULT"
     FAILED=$((FAILED + 1))
   fi
 

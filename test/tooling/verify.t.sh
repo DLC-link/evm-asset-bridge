@@ -76,5 +76,26 @@ contains "reports the fallback variable" "$OUT" "key from ETHERSCAN_API_KEY"
 contains "does the implementation"       "$OUT" "BitSafeEvmAssetBridge"
 check "skips the other two" "$(printf '%s' "$OUT" | grep -c "TransparentUpgradeableProxy" || true)" "0"
 
+echo "== bad CONTRACT value =="
+set +e
+OUT=$(DRY_RUN=1 ETHERSCAN_API_KEY=x CONTRACT=implementaton DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
+RC=$?
+set -e
+check "exits non-zero on a bad CONTRACT value" "$RC" "2"
+contains "names implementation as a valid role" "$OUT" "implementation"
+contains "names proxy as a valid role"          "$OUT" "proxy"
+contains "names proxyAdmin as a valid role"     "$OUT" "proxyAdmin"
+
+echo "== missing per-role record =="
+IMPL_RECORD="deployments/BETH.implementation.$CHAIN_ID.json"
+mv "$IMPL_RECORD" "$IMPL_RECORD.bak"
+set +e
+OUT=$(DRY_RUN=1 ETHERSCAN_API_KEY=x DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
+RC=$?
+set -e
+mv "$IMPL_RECORD.bak" "$IMPL_RECORD"
+check "exits non-zero when a requested role has no record" "$RC" "1"
+contains "reports FAIL, not SKIP, for the missing role" "$OUT" "FAIL implementation: no record at $IMPL_RECORD"
+
 echo
 if [ "$FAILURES" -eq 0 ]; then echo "verify.t.sh: all checks passed"; else echo "verify.t.sh: $FAILURES check(s) failed"; exit 1; fi
