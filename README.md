@@ -87,6 +87,42 @@ and the time. Those six fields are enough to verify an old implementation later.
 produced the deployed bytes. The verify command submits that file. The
 explorer then reaches an exact match with no local build.
 
+## Verifying the source on an explorer
+
+```
+export ETHERSCAN_API_KEY_11155111=<key>
+make verify DEPLOYMENT=BETH CHAIN_ID=11155111
+```
+
+The command reads the three records and submits the stored compiler input. The
+explorer compiles the exact input that produced the deployed bytes, so it
+reaches an exact match. The command needs no local build and no matching
+checkout.
+
+It asks the explorer first and skips a contract that already has verified
+source, so you can run it as often as you like. It never runs during a deploy,
+so a slow explorer cannot fail one.
+
+| Env var | Required | Meaning |
+| --- | --- | --- |
+| `DEPLOYMENT` | yes | The deployment name, such as `BETH` |
+| `CHAIN_ID` | yes | Picks the record files |
+| `ETHERSCAN_API_KEY_<CHAIN_ID>` | one of the two | The key for that chain's explorer |
+| `ETHERSCAN_API_KEY` | one of the two | The fallback key |
+| `VERIFIER_URL_<CHAIN_ID>` | no | That chain's explorer host |
+| `VERIFIER_URL` | no | The fallback host. Defaults to Etherscan V2 |
+| `CONTRACT` | no | One role only: `proxy`, `implementation`, or `proxyAdmin` |
+| `DRY_RUN` | no | Set to `1` to print the request and send nothing |
+
+The script reads the per-chain key first, then the fallback. It prints which
+variable supplied the key, and it never prints the value.
+
+Etherscan's V2 endpoint accepts one key on every chain Etherscan itself
+operates. A chain whose explorer is Blockscout or Routescan needs its own host
+in `VERIFIER_URL_<CHAIN_ID>` and its own key.
+
+The command does not run in CI. It runs on an operator's machine.
+
 ## Deposit granularity
 
 Canton expresses 10 decimal places. ETH has 18. A deposit of 1 wei therefore has

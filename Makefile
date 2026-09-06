@@ -62,3 +62,25 @@ ifndef DEPLOYMENT
 	$(error DEPLOYMENT is not set. Example: make record DEPLOYMENT=BETH)
 endif
 	./script/record.sh $(DEPLOYMENT)
+
+# ---- Verification ----------------------------------------------------------
+#
+# make verify DEPLOYMENT=BETH CHAIN_ID=11155111
+#   Submits the source of all three contracts to the explorer.
+#
+# Set the API key first. The per-chain variable wins:
+#   export ETHERSCAN_API_KEY_11155111=...
+#   export ETHERSCAN_API_KEY=...           # the fallback
+#
+# Optional: CONTRACT=proxy limits it to one role. DRY_RUN=1 sends nothing.
+
+.PHONY: verify
+
+verify:
+ifndef DEPLOYMENT
+	$(error DEPLOYMENT is not set. Example: make verify DEPLOYMENT=BETH CHAIN_ID=11155111)
+endif
+ifndef CHAIN_ID
+	$(error CHAIN_ID is not set. Example: make verify DEPLOYMENT=BETH CHAIN_ID=11155111)
+endif
+	./script/verify.sh

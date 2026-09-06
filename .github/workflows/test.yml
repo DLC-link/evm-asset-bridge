@@ -53,3 +53,6 @@ jobs:
 
       - name: Run the record tooling test
         run: ./test/tooling/record.t.sh
+
+      - name: Run the verify tooling test
+        run: ./test/tooling/verify.t.sh
