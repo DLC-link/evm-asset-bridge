@@ -67,7 +67,10 @@ make deploy DEPLOYMENT=BETH RPC_URL=https://... \
   SIGNER="--ledger --sender 0xYourDeployer"
 ```
 
-Prefer a keystore account or a hardware wallet. A raw private key on the command line reaches your shell history, the process listing via ps, and the child process's environment. Make expands the variable into the child process's argument list, where ps finds it. Make also exports the variable into the child process's environment.
+Prefer a keystore account or a hardware wallet. A raw private key on the
+command line reaches your shell history. Make expands the variable into the
+child process's argument list, where `ps` finds it. Make also exports the
+variable into the child process's environment.
 
 ### Commit the records
 
