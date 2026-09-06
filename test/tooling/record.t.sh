@@ -11,7 +11,15 @@ RPC="http://127.0.0.1:$PORT"
 CHAIN_ID=31337
 FAILURES=0
 
-cleanup() { pkill -f "anvil --port $PORT" >/dev/null 2>&1 || true; }
+cleanup() {
+  pkill -f "anvil --port $PORT" >/dev/null 2>&1 || true
+  # The test's compiler inputs are throwaway. Delete only the untracked ones,
+  # so a real deployment's committed input always survives.
+  for f in deployments/solcInputs/*.json; do
+    [ -e "$f" ] || continue
+    git ls-files --error-unmatch "$f" >/dev/null 2>&1 || rm -f "$f"
+  done
+}
 trap cleanup EXIT
 
 check() { # check <label> <actual> <expected>

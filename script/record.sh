@@ -59,10 +59,17 @@ lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
 # Prints the standard-json compiler input for one contract, and echoes the
 # 16-character content hash it stored it under.
 store_solc_input() { # store_solc_input <sourcePath> <contractName>
-  local tmp hash
+  local tmp err hash
   tmp=$(mktemp)
-  forge verify-contract 0x0000000000000000000000000000000000000001 "$1:$2" \
-    --show-standard-json-input >"$tmp" 2>/dev/null
+  err=$(mktemp)
+  if ! forge verify-contract 0x0000000000000000000000000000000000000001 "$1:$2" \
+    --show-standard-json-input >"$tmp" 2>"$err"; then
+    echo "record.sh: forge verify-contract --show-standard-json-input failed for $2 ($1)" >&2
+    cat "$err" >&2
+    rm -f "$tmp" "$err"
+    exit 1
+  fi
+  rm -f "$err"
   hash=$(shasum -a 256 "$tmp" | cut -c1-16)
   if [ ! -f "deployments/solcInputs/$hash.json" ]; then
     mv "$tmp" "deployments/solcInputs/$hash.json"
