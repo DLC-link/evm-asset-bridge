@@ -20,8 +20,8 @@ make deploy DEPLOYMENT=BETH RPC_URL=<url>
 ```
 
 That runs two steps. `forge script` broadcasts the deploy. `script/record.sh`
-then writes the deployment records. If the second step fails, run it again on
-its own:
+then writes the deployment records. The `make record` target repeats the
+second step on its own:
 
 ```
 make record DEPLOYMENT=BETH
@@ -46,7 +46,7 @@ The deploy reads its configuration from the environment:
 
 ## Deployment records
 
-One deploy creates three contracts, so it writes three records:
+One deploy creates three contracts. It therefore writes three records:
 
 ```
 deployments/
@@ -61,22 +61,31 @@ keeps the contract name still updates the same file.
 
 Every record holds the address, the ABI-encoded constructor arguments, the
 transaction receipt, the whole build artifact, the compiler settings, and the
-git commit. The proxy record holds four more fields: `implementation`,
-`proxyAdmin`, `bridgeConfig`, and `history`. `bridgeConfig` keeps `assetDecimals`,
-`targetDecimals`, and `depositUnit`, so an operator reads the live granularity
-rule straight from the record.
+git commit. The proxy record holds five more fields: `implementation`,
+`proxyAdmin`, `bridgeConfig`, `numDeployments`, and `history`.
 
-Each record holds the ABI of the contract at its own address. So a consumer
-reads the address from `BETH.proxy.<chainId>.json` and the bridge ABI from
-`BETH.implementation.<chainId>.json`.
+`bridgeConfig` holds the whole deploy configuration, not just the decimals
+fields:
+
+```
+asset, assetDecimals, targetDecimals, depositUnit, defaultAdmin, adminDelay,
+bridgeAdmin, proxyOwner, attestors, threshold, depositLimits, withdrawLimits
+```
+
+An operator reads the live granularity rule from `targetDecimals` and
+`depositUnit`, both inside `bridgeConfig`.
+
+Each record holds the ABI of the contract at its own address. A consumer
+therefore reads the address from `BETH.proxy.<chainId>.json`. It reads the
+bridge ABI from `BETH.implementation.<chainId>.json`.
 
 `history[]` lists every past implementation. Each entry names the address, the
 contract name, the compiler input hash, the git commit, the transaction hash,
 and the time. Those six fields are enough to verify an old implementation later.
 
 `deployments/solcInputs/<hash>.json` is the standard-JSON compiler input that
-produced the deployed bytes. The verify command submits that file, so the
-explorer reaches an exact match with no local build.
+produced the deployed bytes. The verify command submits that file. The
+explorer then reaches an exact match with no local build.
 
 ## Deposit granularity
 

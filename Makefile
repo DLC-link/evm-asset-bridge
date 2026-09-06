@@ -35,7 +35,7 @@ it-verify: it-build
 # ---- Deployment ------------------------------------------------------------
 #
 # make deploy DEPLOYMENT=BETH RPC_URL=https://...
-#   Runs the deploy script, then writes the deployment records.
+#   The target runs the deploy script. It then writes the deployment records.
 #
 # make record DEPLOYMENT=BETH
 #   Writes the records again from the last broadcast. Use it when the deploy
