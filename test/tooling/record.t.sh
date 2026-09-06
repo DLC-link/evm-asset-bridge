@@ -13,11 +13,18 @@ FAILURES=0
 
 cleanup() {
   pkill -f "anvil --port $PORT" >/dev/null 2>&1 || true
-  # The test's compiler inputs are throwaway. Delete only the untracked ones,
-  # so a real deployment's committed input always survives.
+  # An untracked compiler input is throwaway, unless a surviving record still
+  # names it. verify.t.sh reads that record right after this test finishes.
   for f in deployments/solcInputs/*.json; do
     [ -e "$f" ] || continue
-    git ls-files --error-unmatch "$f" >/dev/null 2>&1 || rm -f "$f"
+    git ls-files --error-unmatch "$f" >/dev/null 2>&1 && continue
+    HASH="$(basename "$f" .json)"
+    KEEP=0
+    for r in deployments/*.json; do
+      [ -e "$r" ] || continue
+      [ "$(jq -r '.solcInputHash // empty' "$r" 2>/dev/null)" = "$HASH" ] && { KEEP=1; break; }
+    done
+    [ "$KEEP" -eq 1 ] || rm -f "$f"
   done
 }
 trap cleanup EXIT
