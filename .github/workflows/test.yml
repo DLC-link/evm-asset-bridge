@@ -33,3 +33,23 @@ jobs:
 
       - name: Run Forge tests
         run: forge test -vvv
+
+  tooling:
+    name: Deployment record tooling
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build
+        run: forge build
+
+      - name: Run the record tooling test
+        run: ./test/tooling/record.t.sh

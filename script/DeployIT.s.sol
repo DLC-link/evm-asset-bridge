@@ -8,8 +8,8 @@ import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transpa
 /// @title DeployIT
 /// @notice Fixed-ordering deployment of one BitSafeEvmAssetBridge (ETH) for
 ///         the Docker-based integration-test (IT) stack, run against a local
-///         anvil chain. NOT for testnet/mainnet use — see script/Deploy.s.sol
-///         for the env-var-driven production deployer.
+///         anvil chain. NOT for testnet/mainnet use — see
+///         script/Deploy_BETH.s.sol for the env-var-driven production deployer.
 ///
 /// @dev Determinism: this script is meant to run exactly once against a
 ///      *fresh* anvil instance seeded from anvil's default account set,

@@ -11,10 +11,23 @@ BitSafeEvmAssetBridge: an upgradeable EVM contract that locks one asset
 
 ## Production deploy
 
-`script/Deploy.s.sol` deploys the implementation behind a
-`TransparentUpgradeableProxy` and writes
-`deployments/BitSafeEvmAssetBridge.<chainId>.json`. It reads its
-configuration entirely from environment variables:
+`script/Deploy_BETH.s.sol` deploys the implementation behind a
+`TransparentUpgradeableProxy`. The part of the file name after the underscore is
+the deployment name. A second bridged asset gets its own `Deploy_<NAME>.s.sol`.
+
+```
+make deploy DEPLOYMENT=BETH RPC_URL=<url>
+```
+
+That runs two steps. `forge script` broadcasts the deploy. `script/record.sh`
+then writes the deployment records. If the second step fails, run it again on
+its own:
+
+```
+make record DEPLOYMENT=BETH
+```
+
+The deploy reads its configuration from the environment:
 
 | Env var | Meaning |
 | --- | --- |
@@ -31,18 +44,39 @@ configuration entirely from environment variables:
 | `WITHDRAW_MIN` | Minimum withdrawal amount (0 = no minimum) |
 | `WITHDRAW_MAX` | Maximum withdrawal amount (`type(uint256).max` = no maximum) |
 
-The output JSON also records `assetDecimals`, `targetDecimals`, and
-`depositUnit`, so an operator can read the live granularity rule from the
-deployment record.
+## Deployment records
 
-`GIT_COMMIT` (optional) is recorded in the output JSON alongside the
-compiler version for provenance; it defaults to `"unknown"` when unset.
-
-Run with:
+One deploy creates three contracts, so it writes three records:
 
 ```
-forge script script/Deploy.s.sol:Deploy --rpc-url <RPC_URL> --broadcast
+deployments/
+  BETH.proxy.<chainId>.json           <- the address every consumer calls
+  BETH.implementation.<chainId>.json  <- the bridge ABI
+  BETH.proxyAdmin.<chainId>.json      <- the contract that can upgrade the proxy
+  solcInputs/<hash>.json              <- the exact compiler input
 ```
+
+The middle part of the name is the role, not the contract name. An upgrade that
+keeps the contract name still updates the same file.
+
+Every record holds the address, the ABI-encoded constructor arguments, the
+transaction receipt, the whole build artifact, the compiler settings, and the
+git commit. The proxy record holds four more fields: `implementation`,
+`proxyAdmin`, `bridgeConfig`, and `history`. `bridgeConfig` keeps `assetDecimals`,
+`targetDecimals`, and `depositUnit`, so an operator reads the live granularity
+rule straight from the record.
+
+Each record holds the ABI of the contract at its own address. So a consumer
+reads the address from `BETH.proxy.<chainId>.json` and the bridge ABI from
+`BETH.implementation.<chainId>.json`.
+
+`history[]` lists every past implementation. Each entry names the address, the
+contract name, the compiler input hash, the git commit, the transaction hash,
+and the time. Those six fields are enough to verify an old implementation later.
+
+`deployments/solcInputs/<hash>.json` is the standard-JSON compiler input that
+produced the deployed bytes. The verify command submits that file, so the
+explorer reaches an exact match with no local build.
 
 ## Deposit granularity
 
