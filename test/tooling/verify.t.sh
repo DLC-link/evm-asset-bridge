@@ -26,9 +26,17 @@ contains() { # contains <label> <haystack> <needle>
   case "$2" in *"$3"*) echo "  ok   $1" ;; *) echo "  FAIL $1: '$3' not found"; FAILURES=$((FAILURES + 1)) ;; esac
 }
 
-# The record test leaves the records behind. Build them if they are missing.
-if [ ! -f "deployments/BETH.proxy.$CHAIN_ID.json" ]; then
-  echo "== no records; running record.t.sh first =="
+# The records and their compiler inputs must both be present. This test's own
+# cleanup removes the inputs, so a second run must rebuild them.
+NEED_RECORDS=0
+for role in implementation proxy proxyAdmin; do
+  r="deployments/BETH.$role.$CHAIN_ID.json"
+  [ -f "$r" ] || { NEED_RECORDS=1; break; }
+  h="$(jq -r '.solcInputHash // empty' "$r")"
+  [ -n "$h" ] && [ -f "deployments/solcInputs/$h.json" ] || { NEED_RECORDS=1; break; }
+done
+if [ "$NEED_RECORDS" -eq 1 ]; then
+  echo "== records or compiler inputs missing; running record.t.sh first =="
   ./test/tooling/record.t.sh >/dev/null
 fi
 
