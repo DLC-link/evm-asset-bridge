@@ -18,7 +18,7 @@
 #   ETHERSCAN_API_KEY           the fallback key.
 #   VERIFIER_URL_<id>           that chain's explorer host.
 #   VERIFIER_URL                the fallback host. Defaults to Etherscan V2.
-#   CONTRACT                    optional. One of implementation, proxy, proxyAdmin.
+#   CONTRACT                    optional. One recorded role, such as proxy.
 #   DRY_RUN=1                   print the request and send nothing.
 set -euo pipefail
 
@@ -32,17 +32,6 @@ DRY="${DRY_RUN:-}"
 
 [ -n "$NAME" ]  || { echo "verify.sh: DEPLOYMENT is not set. Example: DEPLOYMENT=BETH" >&2; exit 2; }
 [ -n "$CHAIN" ] || { echo "verify.sh: CHAIN_ID is not set. Example: CHAIN_ID=11155111" >&2; exit 2; }
-
-# CONTRACT limits the run to one role. An unlisted role is likely a typo.
-if [ -n "$ONLY" ]; then
-  case "$ONLY" in
-    implementation|proxy|proxyAdmin) ;;
-    *)
-      echo "verify.sh: CONTRACT must be implementation, proxy, or proxyAdmin. Got '$ONLY'." >&2
-      exit 2
-      ;;
-  esac
-fi
 
 for tool in jq curl; do
   command -v "$tool" >/dev/null || { echo "verify.sh: $tool is not installed" >&2; exit 2; }
@@ -71,19 +60,40 @@ echo "verify.sh: deployment $NAME, chain $CHAIN, key from $KEY_VAR"
 echo "verify.sh: explorer $HOST"
 
 # ---- which roles ------------------------------------------------------------
-if [ -n "$ONLY" ]; then
-  ROLES="$ONLY"
-else
-  ROLES="implementation proxy proxyAdmin"
-fi
+# The role is a free label that the deploy script chooses. A fixed list would
+# miss a standalone contract, such as a timelock. So the script reads the roles
+# from the record files on disk.
+ALL_ROLES=""
+for RECORD_FILE in "deployments/$NAME."*".$CHAIN.json"; do
+  [ -e "$RECORD_FILE" ] || continue
+  ROLE_NAME=$(basename "$RECORD_FILE" ".$CHAIN.json")
+  ALL_ROLES="$ALL_ROLES ${ROLE_NAME#"$NAME."}"
+done
+ALL_ROLES="${ALL_ROLES# }"
 
-# The proxy record must exist. Its absence means the whole deployment is absent.
-PROXY_RECORD="deployments/$NAME.proxy.$CHAIN.json"
-if [ ! -f "$PROXY_RECORD" ]; then
-  echo "verify.sh: no record at $PROXY_RECORD" >&2
+# One record is enough. No record means the whole deployment is absent.
+if [ -z "$ALL_ROLES" ]; then
+  echo "verify.sh: no record at deployments/$NAME.<role>.$CHAIN.json" >&2
   echo "verify.sh: run 'make record DEPLOYMENT=$NAME' after a deploy" >&2
   exit 1
 fi
+
+# CONTRACT limits the run to one role. An undiscovered role is a typo, or a
+# deploy that nobody recorded.
+if [ -n "$ONLY" ]; then
+  case " $ALL_ROLES " in
+    *" $ONLY "*) ROLES="$ONLY" ;;
+    *)
+      echo "verify.sh: CONTRACT must name a recorded role. Got '$ONLY'." >&2
+      echo "verify.sh: this deployment records: $ALL_ROLES" >&2
+      exit 2
+      ;;
+  esac
+else
+  ROLES="$ALL_ROLES"
+fi
+
+echo "verify.sh: roles $ROLES"
 
 # `?` or `&` depends on whether the host already carries a query string.
 sep() { case "$1" in *\?*) printf '&' ;; *) printf '?' ;; esac; }

@@ -11,32 +11,15 @@ RPC="http://127.0.0.1:$PORT"
 CHAIN_ID=31337
 FAILURES=0
 
+# check, contains, and the compiler-input rule live in one file. verify.t.sh
+# sources the same file, so both tests clean up the same way.
+. "$ROOT/test/tooling/lib.sh"
+
 cleanup() {
   pkill -f "anvil --port $PORT" >/dev/null 2>&1 || true
-  # An untracked compiler input is throwaway, unless a surviving record still
-  # names it. verify.t.sh reads that record right after this test finishes.
-  for f in deployments/solcInputs/*.json; do
-    [ -e "$f" ] || continue
-    git ls-files --error-unmatch "$f" >/dev/null 2>&1 && continue
-    HASH="$(basename "$f" .json)"
-    KEEP=0
-    for r in deployments/*.json; do
-      [ -e "$r" ] || continue
-      [ "$(jq -r '.solcInputHash // empty' "$r" 2>/dev/null)" = "$HASH" ] && { KEEP=1; break; }
-    done
-    [ "$KEEP" -eq 1 ] || rm -f "$f"
-  done
+  prune_untracked_solc_inputs
 }
 trap cleanup EXIT
-
-check() { # check <label> <actual> <expected>
-  if [ "$2" = "$3" ]; then
-    echo "  ok   $1"
-  else
-    echo "  FAIL $1: got '$2', want '$3'"
-    FAILURES=$((FAILURES + 1))
-  fi
-}
 
 echo "== starting anvil on port $PORT =="
 cleanup
@@ -86,6 +69,11 @@ check "admin contractName"  "$(jq -r .contractName "$A")"  "ProxyAdmin"
 check "deploymentName"      "$(jq -r .deploymentName "$P")" "BETH"
 check "chainId"             "$(jq -r .chainId "$P")"       "$CHAIN_ID"
 
+# A consumer outside this repo reads the schema version to detect a migration.
+check "proxy schemaVersion" "$(jq -r .schemaVersion "$P")" "1"
+check "impl schemaVersion"  "$(jq -r .schemaVersion "$I")" "1"
+check "admin schemaVersion" "$(jq -r .schemaVersion "$A")" "1"
+
 # The proxy's third constructor argument is the initialize calldata.
 check "impl has no ctor args" "$(jq -r .encodedConstructorArgs "$I")" "0x"
 
@@ -132,6 +120,13 @@ HASH=$(jq -r .solcInputHash "$I")
 check "solcInput exists" "$([ -f "deployments/solcInputs/$HASH.json" ] && echo yes || echo no)" "yes"
 check "solcInput parses" "$(jq -r .language "deployments/solcInputs/$HASH.json")" "Solidity"
 
+# The proxy stores its own compiler input. The history checks below rely on
+# that difference, because a history entry must never name the proxy's input.
+check "the proxy has its own compiler input" \
+  "$([ "$(jq -r .solcInputHash "$P")" = "$HASH" ] && echo same || echo different)" "different"
+
+IMPL_TX=$(jq -r .transactionHash "$I")
+
 echo "== second deploy: history =="
 forge script script/Deploy_BETH.s.sol:Deploy_BETH \
   --rpc-url "$RPC" --broadcast --private-key "$PRIVATE_KEY" >/dev/null
@@ -142,6 +137,35 @@ check "history has one entry" "$(jq -r '.history | length' "$P")" "1"
 check "history names the old implementation" \
   "$(cast to-check-sum-address "$(jq -r '.history[0].implementation' "$P")")" \
   "$(cast to-check-sum-address "$IMPL_ADDR")"
+
+# The entry must describe the OLD implementation, never the proxy. An operator
+# verifies that implementation later from these fields alone.
+check "history names the old contract"      "$(jq -r '.history[0].contractName' "$P")"    "BitSafeEvmAssetBridge"
+check "history names the old solc input"    "$(jq -r '.history[0].solcInputHash' "$P")"   "$HASH"
+check "history names the old transaction"   "$(jq -r '.history[0].transactionHash' "$P")" "$IMPL_TX"
+check "history keeps the old commit"        "$(jq -r '.history[0].gitCommit | length > 0' "$P")" "true"
+check "history keeps the old timestamp"     "$(jq -r '.history[0].deployedAt | length > 0' "$P")" "true"
+
+echo "== two pending files =="
+# A string sort puts 31337 ahead of 8453. The writer must never guess, or a
+# local test run would hijack a deploy to another chain.
+mkdir -p deployments/.pending
+printf '{"chainId":31337}' >"deployments/.pending/BETH.$CHAIN_ID.json"
+printf '{"chainId":8453}' >deployments/.pending/BETH.8453.json
+set +e
+OUT=$(./script/record.sh BETH 2>&1)
+RC=$?
+set -e
+check "refuses two pending files" "$RC" "1"
+contains "names the other chain's file" "$OUT" "deployments/.pending/BETH.8453.json"
+
+set +e
+OUT=$(./script/record.sh BETH 8453 2>&1)
+RC=$?
+set -e
+check "the chain id picks the exact file" "$RC" "1"
+contains "reaches the chain it was given" "$OUT" "broadcast/Deploy_BETH.s.sol/8453/run-latest.json"
+rm -rf deployments/.pending
 
 echo
 if [ "$FAILURES" -eq 0 ]; then echo "record.t.sh: all checks passed"; else echo "record.t.sh: $FAILURES check(s) failed"; exit 1; fi

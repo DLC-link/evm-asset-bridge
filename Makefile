@@ -34,12 +34,23 @@ it-verify: it-build
 
 # ---- Deployment ------------------------------------------------------------
 #
-# make deploy DEPLOYMENT=BETH RPC_URL=https://...
+# make deploy DEPLOYMENT=BETH RPC_URL=https://... SIGNER="--account deployer"
 #   The target runs the deploy script. It then writes the deployment records.
 #
-# make record DEPLOYMENT=BETH
+# SIGNER carries the signer flags straight to `forge script`. Foundry reads no
+# private key from the environment, so a broadcast needs one of its wallet
+# flags. Any flag foundry accepts works, such as:
+#
+#   SIGNER="--account deployer --sender 0xYourDeployer"
+#   SIGNER="--ledger --sender 0xYourDeployer"
+#
+# Prefer a keystore account or a hardware wallet. A raw key on the command line
+# lands in your shell history.
+#
+# make record DEPLOYMENT=BETH CHAIN_ID=8453
 #   Writes the records again from the last broadcast. Use it when the deploy
-#   succeeded but the record step did not.
+#   succeeded but the record step did not. CHAIN_ID is optional. Pass it when
+#   more than one pending file waits.
 
 FOUNDRY_BIN := $(HOME)/.foundry/bin
 
@@ -52,16 +63,20 @@ endif
 ifndef RPC_URL
 	$(error RPC_URL is not set. Example: make deploy DEPLOYMENT=BETH RPC_URL=...)
 endif
+ifndef SIGNER
+	$(error SIGNER is not set. Example: SIGNER="--account deployer --sender 0x...")
+endif
 	PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  script/Deploy_$(DEPLOYMENT).s.sol:Deploy_$(DEPLOYMENT) \
-	  --rpc-url $(RPC_URL) --broadcast
-	./script/record.sh $(DEPLOYMENT)
+	  --rpc-url $(RPC_URL) --broadcast $(SIGNER)
+	CHAIN_ID="$$(PATH="$(FOUNDRY_BIN):$$PATH" cast chain-id --rpc-url $(RPC_URL))" \
+	  ./script/record.sh $(DEPLOYMENT)
 
 record:
 ifndef DEPLOYMENT
 	$(error DEPLOYMENT is not set. Example: make record DEPLOYMENT=BETH)
 endif
-	./script/record.sh $(DEPLOYMENT)
+	CHAIN_ID="$(CHAIN_ID)" ./script/record.sh $(DEPLOYMENT)
 
 # ---- Verification ----------------------------------------------------------
 #
@@ -72,7 +87,8 @@ endif
 #   export ETHERSCAN_API_KEY_11155111=...
 #   export ETHERSCAN_API_KEY=...           # the fallback
 #
-# Optional: CONTRACT=proxy limits it to one role. DRY_RUN=1 sends nothing.
+# Optional: CONTRACT=proxy limits it to one recorded role. DRY_RUN=1 sends
+# nothing.
 
 .PHONY: verify
 

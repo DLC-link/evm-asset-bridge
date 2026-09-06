@@ -16,7 +16,7 @@ BitSafeEvmAssetBridge: an upgradeable EVM contract that locks one asset
 the deployment name. A second bridged asset gets its own `Deploy_<NAME>.s.sol`.
 
 ```
-make deploy DEPLOYMENT=BETH RPC_URL=<url>
+make deploy DEPLOYMENT=BETH RPC_URL=<url> SIGNER="--account deployer --sender 0xYourDeployer"
 ```
 
 That runs two steps. `forge script` broadcasts the deploy. `script/record.sh`
@@ -26,6 +26,10 @@ second step on its own:
 ```
 make record DEPLOYMENT=BETH
 ```
+
+`make record` reads the pending file that the deploy wrote. It needs
+`CHAIN_ID=<id>` when more than one pending file waits. It names every match
+when it stops. A local `forge test` run leaves one behind for chain 31337.
 
 The deploy reads its configuration from the environment:
 
@@ -43,6 +47,45 @@ The deploy reads its configuration from the environment:
 | `DEPOSIT_MAX` | Maximum deposit amount (`type(uint256).max` = no maximum) |
 | `WITHDRAW_MIN` | Minimum withdrawal amount (0 = no minimum) |
 | `WITHDRAW_MAX` | Maximum withdrawal amount (`type(uint256).max` = no maximum) |
+
+### Signing the deploy
+
+`SIGNER` carries the signer flags straight to `forge script`. Foundry reads no
+private key from the environment, so a broadcast needs one of its wallet flags.
+`make deploy` stops when `SIGNER` is unset.
+
+```
+cast wallet import deployer --interactive        # once, into the keystore
+make deploy DEPLOYMENT=BETH RPC_URL=https://... \
+  SIGNER="--account deployer --sender 0xYourDeployer"
+```
+
+A hardware wallet works the same way:
+
+```
+make deploy DEPLOYMENT=BETH RPC_URL=https://... \
+  SIGNER="--ledger --sender 0xYourDeployer"
+```
+
+Prefer a keystore account or a hardware wallet. A raw private key on the
+command line lands in your shell history.
+
+### Commit the records
+
+The deploy writes files that only your machine holds. Commit them right after
+the deploy, or the source can never be verified again:
+
+```
+git add deployments/BETH.*.<chainId>.json deployments/solcInputs/
+git commit -m "chore(deployments): record BETH on chain <chainId>"
+```
+
+Commit both parts. The record files name a compiler input by hash, and
+`deployments/solcInputs/` holds that input. `script/verify.sh` reads the
+committed files. `broadcast/` and `out/` never leave your machine.
+
+A local test run writes into the same folder. Its compiler input matches the
+deployed one whenever the source matches, so an extra file is harmless.
 
 ## Deployment records
 
@@ -64,6 +107,9 @@ transaction receipt, the whole build artifact, the compiler settings, and the
 git commit. The proxy record holds five more fields: `implementation`,
 `proxyAdmin`, `bridgeConfig`, `numDeployments`, and `history`.
 
+Every record also opens with `schemaVersion`, which is `1` today. A consumer
+outside this repo reads it to detect a migration.
+
 `bridgeConfig` holds the whole deploy configuration, not just the decimals
 fields:
 
@@ -81,7 +127,8 @@ bridge ABI from `BETH.implementation.<chainId>.json`.
 
 `history[]` lists every past implementation. Each entry names the address, the
 contract name, the compiler input hash, the git commit, the transaction hash,
-and the time. Those six fields are enough to verify an old implementation later.
+and the time. The six fields describe the old implementation, never the proxy,
+so they are enough to verify that implementation later.
 
 `deployments/solcInputs/<hash>.json` is the standard-JSON compiler input that
 produced the deployed bytes. The verify command submits that file. The
@@ -94,7 +141,8 @@ export ETHERSCAN_API_KEY_11155111=<key>
 make verify DEPLOYMENT=BETH CHAIN_ID=11155111
 ```
 
-The command reads the three records and submits the stored compiler input. The
+The command reads every record for that deployment and chain, and it submits
+the stored compiler input. The
 explorer compiles the exact input that produced the deployed bytes, so it
 reaches an exact match. The command needs no local build and no matching
 checkout.
@@ -111,8 +159,13 @@ so a slow explorer cannot fail one.
 | `ETHERSCAN_API_KEY` | one of the two | The fallback key |
 | `VERIFIER_URL_<CHAIN_ID>` | no | That chain's explorer host |
 | `VERIFIER_URL` | no | The fallback host. Defaults to Etherscan V2 |
-| `CONTRACT` | no | One role only: `proxy`, `implementation`, or `proxyAdmin` |
+| `CONTRACT` | no | One recorded role only, such as `proxy` |
 | `DRY_RUN` | no | Set to `1` to print the request and send nothing |
+
+The command finds the roles by reading the file names in `deployments/`. The
+role is a free label that the deploy script chooses, so a standalone contract
+with one role works without a code change. `CONTRACT` accepts any role the
+command found, and it lists them when it rejects one.
 
 The script reads the per-chain key first, then the fallback. It prints which
 variable supplied the key, and it never prints the value.

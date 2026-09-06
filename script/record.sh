@@ -11,7 +11,10 @@
 # deployments/solcInputs/<hash>.json for each distinct compiler input. Then it
 # removes the pending file.
 #
-# Usage: ./script/record.sh <deploymentName>
+# Usage: ./script/record.sh <deploymentName> [chainId]
+#
+# The chain id also comes from CHAIN_ID in the environment. It picks the exact
+# pending file. Without it the script needs exactly one matching pending file.
 set -euo pipefail
 
 export PATH="$HOME/.foundry/bin:$PATH"
@@ -19,23 +22,59 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 NAME="${1:-}"
+CHAIN_ID="${2:-${CHAIN_ID:-}}"
 if [ -z "$NAME" ]; then
-  echo "usage: $0 <deploymentName>   (example: $0 BETH)" >&2
+  echo "usage: $0 <deploymentName> [chainId]   (example: $0 BETH 8453)" >&2
   exit 2
 fi
+
+# The schema version travels with every record. A consumer reads it to detect a
+# migration. Raise it whenever a field changes meaning or leaves the record.
+SCHEMA_VERSION=1
 
 for tool in jq forge cast; do
   command -v "$tool" >/dev/null || { echo "record.sh: $tool is not installed" >&2; exit 2; }
 done
 
 # ---- 1. the pending file ----------------------------------------------------
-PENDING=$(ls "deployments/.pending/$NAME."*.json 2>/dev/null | head -1 || true)
-if [ -z "$PENDING" ] || [ ! -f "$PENDING" ]; then
-  echo "record.sh: no pending file at deployments/.pending/$NAME.<chainId>.json" >&2
-  echo "record.sh: run the deploy first, or pass the right deployment name" >&2
+# The chain id names the exact file. Sorting the glob would be wrong, because a
+# string sort puts 31337 ahead of 8453. A local test run would then hijack a
+# real deploy. So the script refuses to guess when several files match.
+if [ -n "$CHAIN_ID" ]; then
+  PENDING="deployments/.pending/$NAME.$CHAIN_ID.json"
+  if [ ! -f "$PENDING" ]; then
+    echo "record.sh: no pending file at $PENDING" >&2
+    echo "record.sh: run the deploy first, or pass the right chain id" >&2
+    exit 1
+  fi
+else
+  PENDING=""
+  MATCHES=""
+  MATCH_COUNT=0
+  for candidate in "deployments/.pending/$NAME."*.json; do
+    [ -e "$candidate" ] || continue
+    PENDING="$candidate"
+    MATCHES="$MATCHES $candidate"
+    MATCH_COUNT=$((MATCH_COUNT + 1))
+  done
+  if [ "$MATCH_COUNT" -eq 0 ]; then
+    echo "record.sh: no pending file at deployments/.pending/$NAME.<chainId>.json" >&2
+    echo "record.sh: run the deploy first, or pass the right deployment name" >&2
+    exit 1
+  fi
+  if [ "$MATCH_COUNT" -gt 1 ]; then
+    echo "record.sh: $MATCH_COUNT pending files match $NAME:$MATCHES" >&2
+    echo "record.sh: name the chain, as in '$0 $NAME <chainId>'" >&2
+    exit 1
+  fi
+fi
+
+PENDING_CHAIN_ID=$(jq -r .chainId "$PENDING")
+if [ -n "$CHAIN_ID" ] && [ "$PENDING_CHAIN_ID" != "$CHAIN_ID" ]; then
+  echo "record.sh: $PENDING names chain $PENDING_CHAIN_ID, not $CHAIN_ID" >&2
   exit 1
 fi
-CHAIN_ID=$(jq -r .chainId "$PENDING")
+CHAIN_ID="$PENDING_CHAIN_ID"
 
 # ---- 2. the broadcast artifact ----------------------------------------------
 BROADCAST="broadcast/Deploy_$NAME.s.sol/$CHAIN_ID/run-latest.json"
@@ -55,6 +94,20 @@ DEPLOYED_AT=$(epoch_to_iso "$(jq -r '.timestamp' "$BROADCAST" | awk '{printf "%d
 mkdir -p deployments/solcInputs
 
 lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
+
+# ---- 2b. the outgoing implementation record ---------------------------------
+# The loop writes the implementation record before it reaches the proxy. The
+# proxy's history entry must describe the OLD implementation, so copy that
+# record now. The copy is the only remaining source for its five extra fields.
+OLD_IMPL_SNAPSHOT=""
+if [ -f "deployments/$NAME.implementation.$CHAIN_ID.json" ]; then
+  OLD_IMPL_SNAPSHOT=$(mktemp)
+  cp "deployments/$NAME.implementation.$CHAIN_ID.json" "$OLD_IMPL_SNAPSHOT"
+fi
+drop_snapshot() {
+  if [ -n "$OLD_IMPL_SNAPSHOT" ]; then rm -f "$OLD_IMPL_SNAPSHOT"; fi
+}
+trap drop_snapshot EXIT
 
 # Prints the standard-json compiler input for one contract, and echoes the
 # 16-character content hash it stored it under.
@@ -131,7 +184,9 @@ for i in $(seq 0 $((COUNT - 1))); do
     --arg encodedConstructorArgs "$ENCODED_ARGS" --arg transactionHash "$TX_HASH" \
     --argjson receipt "$RECEIPT" --slurpfile artifact "$ARTIFACT" \
     --arg solcInputHash "$SOLC_HASH" --arg gitCommit "$GIT_COMMIT" --arg deployedAt "$DEPLOYED_AT" \
+    --argjson schemaVersion "$SCHEMA_VERSION" \
     '{
+      schemaVersion: $schemaVersion,
       deploymentName: $name, role: $role, chainId: $chainId,
       address: $address, contractName: $contractName, sourcePath: $sourcePath,
       encodedConstructorArgs: $encodedConstructorArgs,
@@ -166,10 +221,26 @@ for i in $(seq 0 $((COUNT - 1))); do
       PREV_HISTORY=$(jq -c '.history // []' "$OUT")
       PREV_COUNT=$(jq -r '.numDeployments // 1' "$OUT")
       if [ -n "$PREV_IMPL" ] && [ "$(lower "$PREV_IMPL")" != "$(lower "$IMPL")" ]; then
-        PREV_HISTORY=$(jq -c --argjson h "$PREV_HISTORY" \
-          '$h + [{implementation: .implementation, contractName: .contractName,
-                  solcInputHash: .solcInputHash, gitCommit: .gitCommit,
-                  transactionHash: .transactionHash, deployedAt: .deployedAt}]' "$OUT")
+        # The six fields describe the old implementation, never the proxy. An
+        # operator verifies that implementation later from these fields alone.
+        SNAPSHOT_ADDR=""
+        if [ -n "$OLD_IMPL_SNAPSHOT" ]; then
+          SNAPSHOT_ADDR=$(lower "$(jq -r '.address // ""' "$OLD_IMPL_SNAPSHOT")")
+        fi
+        if [ -n "$SNAPSHOT_ADDR" ] && [ "$SNAPSHOT_ADDR" = "$(lower "$PREV_IMPL")" ]; then
+          ENTRY=$(jq -c '{implementation: .address, contractName: .contractName,
+                          solcInputHash: .solcInputHash, gitCommit: .gitCommit,
+                          transactionHash: .transactionHash, deployedAt: .deployedAt}' \
+            "$OLD_IMPL_SNAPSHOT")
+        else
+          # Nobody recorded the old implementation, so five fields are lost.
+          echo "record.sh: no record for the old implementation $PREV_IMPL" >&2
+          echo "record.sh: its history entry holds the address only" >&2
+          ENTRY=$(jq -nc --arg impl "$PREV_IMPL" \
+            '{implementation: $impl, contractName: null, solcInputHash: null,
+              gitCommit: null, transactionHash: null, deployedAt: null}')
+        fi
+        PREV_HISTORY=$(printf '%s' "$PREV_HISTORY" | jq -c --argjson e "$ENTRY" '. + [$e]')
         PREV_COUNT=$((PREV_COUNT + 1))
       fi
     else
