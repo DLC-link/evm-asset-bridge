@@ -82,7 +82,8 @@ IMPL_ADDR=$(jq -r .address "$I")
 ADMIN_ADDR=$(jq -r .address "$A")
 
 # Argument 1 of the proxy constructor is the implementation address.
-DECODED_IMPL=$(cast abi-decode --input "c(address,address,bytes)" "$(jq -r .encodedConstructorArgs "$P")" | head -1)
+DECODED_ALL=$(cast abi-decode --input "c(address,address,bytes)" "$(jq -r .encodedConstructorArgs "$P")")
+DECODED_IMPL=${DECODED_ALL%%$'\n'*}
 check "proxy arg0 == implementation" "$(cast to-check-sum-address "$DECODED_IMPL")" "$(cast to-check-sum-address "$IMPL_ADDR")"
 
 # The ProxyAdmin's only constructor argument is its owner.
