@@ -9,6 +9,7 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -26,20 +27,35 @@ contract BitSafeEvmAssetBridge is
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
 
+    /// Both bounds are inclusive. An amount passes when
+    /// `minAmount <= amount <= maxAmount`, so `minAmount == maxAmount` names
+    /// exactly one legal amount.
     struct Limits {
-        uint256 minAmount; // 0 = no minimum
-        uint256 maxAmount; // type(uint256).max = no maximum
+        uint256 minAmount; // 0 = no minimum. An amount of 0 still reverts with ZeroAmount.
+        uint256 maxAmount; // type(uint256).max = no maximum. No uint256 exceeds it.
     }
 
     bytes32 public constant BRIDGE_ADMIN_ROLE = keccak256("BRIDGE_ADMIN_ROLE");
     bytes32 public constant ATTESTOR_ROLE = keccak256("ATTESTOR_ROLE");
     uint256 public constant MIN_THRESHOLD = 2;
+    /// @dev 18 is the idiomatic maximum precision for an ERC20.
+    uint8 public constant MAX_ASSET_DECIMALS = 18;
+    /// @dev Canton's CIP-56 token standard sets 10 as the maximum precision. This
+    ///      bridge targets Canton, so it accepts no higher value. A wider bound
+    ///      would admit a typo that clamps the deposit unit to 1 and turns the
+    ///      granularity check off without an error.
+    uint8 public constant MAX_TARGET_DECIMALS = 10;
+    /// @dev ETH has no contract to ask, so its precision is a convention.
+    uint8 private constant ETH_DECIMALS = 18;
     bytes32 public constant WITHDRAWAL_TYPEHASH =
         keccak256("Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount)");
 
     /// @custom:storage-location erc7201:bitsafe.storage.BitSafeEvmAssetBridge
     struct BridgeStorage {
         address asset;
+        // Packed into the `asset` slot: 20 + 1 + 1 bytes.
+        uint8 assetDecimals;
+        uint8 targetDecimals;
         uint256 threshold;
         Limits depositLimits;
         Limits withdrawLimits;
@@ -65,10 +81,12 @@ contract BitSafeEvmAssetBridge is
 
     error InvalidAddress();
     error InvalidLimits();
+    error DecimalsOutOfRange();
     error ThresholdOutOfBounds();
     error EmptyId();
     error ZeroAmount();
     error AmountOutsideLimits(uint256 amount, uint256 minAmount, uint256 maxAmount);
+    error AmountNotRepresentable(uint256 amount, uint256 depositUnit);
     error AssetIsNotEther();
     error AssetIsNotERC20();
     error WithdrawRequestAlreadyUsed();
@@ -89,6 +107,7 @@ contract BitSafeEvmAssetBridge is
 
     function initialize(
         address asset_,
+        uint8 targetDecimals_,
         address defaultAdmin,
         uint48 defaultAdminDelay,
         address bridgeAdmin,
@@ -106,6 +125,7 @@ contract BitSafeEvmAssetBridge is
 
         BridgeStorage storage $ = _getBridgeStorage();
         $.asset = asset_;
+        _setDecimals(targetDecimals_);
 
         for (uint256 i; i < attestors_.length; ++i) {
             if (attestors_[i] == address(0)) revert InvalidAddress();
@@ -121,6 +141,21 @@ contract BitSafeEvmAssetBridge is
 
     function asset() external view returns (address) {
         return _getBridgeStorage().asset;
+    }
+
+    function assetDecimals() external view returns (uint8) {
+        return _getBridgeStorage().assetDecimals;
+    }
+
+    /// @notice Decimal places the target chain expresses. Canton expresses 10.
+    function targetDecimals() external view returns (uint8) {
+        return _getBridgeStorage().targetDecimals;
+    }
+
+    /// @notice The smallest deposit step the target chain can express, in asset
+    ///         base units. Every deposit amount must be a whole multiple of it.
+    function depositUnit() external view returns (uint256) {
+        return _depositUnit(_getBridgeStorage());
     }
 
     function threshold() external view returns (uint256) {
@@ -217,6 +252,31 @@ contract BitSafeEvmAssetBridge is
         }
     }
 
+    /// @dev Reads the asset's own decimals and stores both precisions. It takes
+    ///      the asset from storage, not as a parameter: `initialize` already sits
+    ///      at the EVM stack limit, and one more argument fails to compile.
+    function _setDecimals(uint8 targetDecimals_) internal {
+        BridgeStorage storage $ = _getBridgeStorage();
+        address asset_ = $.asset;
+        uint8 assetDecimals_ = asset_ == address(0) ? ETH_DECIMALS : IERC20Metadata(asset_).decimals();
+        // The asset sits in 1 to MAX_ASSET_DECIMALS, because it is an EVM token.
+        if (assetDecimals_ == 0 || assetDecimals_ > MAX_ASSET_DECIMALS) revert DecimalsOutOfRange();
+        // The target sits in 1 to MAX_TARGET_DECIMALS, which Canton's CIP-56
+        // standard sets. A deployment for another chain needs a new bound here.
+        if (targetDecimals_ == 0 || targetDecimals_ > MAX_TARGET_DECIMALS) revert DecimalsOutOfRange();
+        $.assetDecimals = assetDecimals_;
+        $.targetDecimals = targetDecimals_;
+    }
+
+    /// @dev Returns 1 when the target expresses at least as many places as the
+    ///      asset. Every amount is then representable and the check is inert.
+    function _depositUnit(BridgeStorage storage $) internal view returns (uint256) {
+        uint8 assetDecimals_ = $.assetDecimals;
+        uint8 targetDecimals_ = $.targetDecimals;
+        if (targetDecimals_ >= assetDecimals_) return 1;
+        return 10 ** (assetDecimals_ - targetDecimals_);
+    }
+
     function _checkLimits(uint256 amount, Limits storage limits) internal view {
         if (amount < limits.minAmount || amount > limits.maxAmount) {
             revert AmountOutsideLimits(amount, limits.minAmount, limits.maxAmount);
@@ -231,7 +291,14 @@ contract BitSafeEvmAssetBridge is
 
     function _setDepositLimits(Limits calldata newLimits) internal {
         _validateLimits(newLimits);
-        _getBridgeStorage().depositLimits = newLimits;
+        BridgeStorage storage $ = _getBridgeStorage();
+        // The band must hold at least one amount the target chain can express.
+        uint256 unit = _depositUnit($);
+        uint256 largestValidAmount = (newLimits.maxAmount / unit) * unit;
+        // The first clause is the only guard when `minAmount` is 0, because
+        // `0 < 0` is false. Keep both.
+        if (largestValidAmount == 0 || largestValidAmount < newLimits.minAmount) revert InvalidLimits();
+        $.depositLimits = newLimits;
         emit DepositLimitsSet(newLimits.minAmount, newLimits.maxAmount);
     }
 
@@ -241,6 +308,11 @@ contract BitSafeEvmAssetBridge is
         emit WithdrawLimitsSet(newLimits.minAmount, newLimits.maxAmount);
     }
 
+    /// @dev Enforces two rules: the maximum is above 0, and the minimum is at or
+    ///      below the maximum. A zero maximum would reject every amount, so it is
+    ///      always a misconfiguration. `pause` is the tool for blocking traffic.
+    ///      Neither sentinel needs a special case, because 0 is at or below every
+    ///      amount and `type(uint256).max` is at or above every amount.
     function _validateLimits(Limits calldata limits) internal pure {
         if (limits.maxAmount == 0 || limits.minAmount > limits.maxAmount) revert InvalidLimits();
     }
@@ -274,6 +346,10 @@ contract BitSafeEvmAssetBridge is
         if (depositAccountId.length == 0) revert EmptyId();
         if (amount == 0) revert ZeroAmount();
         _checkLimits(amount, $.depositLimits);
+        // The target chain must be able to express the minted amount. Without
+        // this check the remainder below its precision would be unmintable.
+        uint256 unit = _depositUnit($);
+        if (amount % unit != 0) revert AmountNotRepresentable(amount, unit);
     }
 
     receive() external payable {

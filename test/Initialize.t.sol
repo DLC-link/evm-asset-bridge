@@ -33,6 +33,7 @@ contract InitializeTest is BridgeTestBase {
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         bridge.initialize(
             address(0),
+            DEFAULT_TARGET_DECIMALS,
             defaultAdmin,
             ADMIN_DELAY,
             bridgeAdmin,
@@ -48,6 +49,7 @@ contract InitializeTest is BridgeTestBase {
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         implementation.initialize(
             address(0),
+            DEFAULT_TARGET_DECIMALS,
             defaultAdmin,
             ADMIN_DELAY,
             bridgeAdmin,
@@ -67,6 +69,7 @@ contract InitializeTest is BridgeTestBase {
             BitSafeEvmAssetBridge.initialize,
             (
                 address(0),
+                DEFAULT_TARGET_DECIMALS,
                 defaultAdmin,
                 ADMIN_DELAY,
                 bridgeAdmin,
@@ -93,6 +96,7 @@ contract InitializeTest is BridgeTestBase {
             BitSafeEvmAssetBridge.initialize,
             (
                 address(0),
+                DEFAULT_TARGET_DECIMALS,
                 defaultAdmin,
                 ADMIN_DELAY,
                 bridgeAdmin,
@@ -112,6 +116,7 @@ contract InitializeTest is BridgeTestBase {
             BitSafeEvmAssetBridge.initialize,
             (
                 address(0),
+                DEFAULT_TARGET_DECIMALS,
                 defaultAdmin,
                 ADMIN_DELAY,
                 bridgeAdmin,
@@ -134,6 +139,7 @@ contract InitializeTest is BridgeTestBase {
             BitSafeEvmAssetBridge.initialize,
             (
                 address(0),
+                DEFAULT_TARGET_DECIMALS,
                 defaultAdmin,
                 ADMIN_DELAY,
                 bridgeAdmin,
@@ -153,6 +159,7 @@ contract InitializeTest is BridgeTestBase {
             BitSafeEvmAssetBridge.initialize,
             (
                 address(0),
+                DEFAULT_TARGET_DECIMALS,
                 defaultAdmin,
                 ADMIN_DELAY,
                 address(0),
@@ -172,6 +179,7 @@ contract InitializeTest is BridgeTestBase {
             BitSafeEvmAssetBridge.initialize,
             (
                 address(0),
+                DEFAULT_TARGET_DECIMALS,
                 defaultAdmin,
                 ADMIN_DELAY,
                 bridgeAdmin,
