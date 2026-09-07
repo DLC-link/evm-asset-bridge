@@ -104,6 +104,7 @@ contract BitSafeEvmAssetBridge is
     error CannotRescueBridgedAsset();
     error EthTransferFailed();
     error DirectEthTransferNotAllowed();
+    error ThresholdBelowMajority(uint256 threshold, uint256 attestorCount);
 
     constructor() {
         _disableInitializers();
@@ -296,6 +297,8 @@ contract BitSafeEvmAssetBridge is
 
     function _setThreshold(uint256 newThreshold, uint256 attestorCount) internal {
         if (newThreshold < MIN_THRESHOLD || newThreshold > attestorCount) revert ThresholdOutOfBounds();
+        // A threshold at or below half lets a key-theft minority sign releases.
+        if (newThreshold <= attestorCount / 2) revert ThresholdBelowMajority(newThreshold, attestorCount);
         _getBridgeStorage().threshold = newThreshold;
         emit ThresholdSet(newThreshold);
     }

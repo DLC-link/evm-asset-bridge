@@ -90,9 +90,62 @@ contract InitializeTest is BridgeTestBase {
         _expectInitRevert(4, BitSafeEvmAssetBridge.ThresholdOutOfBounds.selector);
     }
 
-    function _expectInitRevert(uint256 threshold_, bytes4 selector) internal {
+    function test_initialize_thresholdBelowMajority_reverts() public {
+        // 2 of 4 is exactly half; the rule rejects it.
+        uint256[] memory pks = new uint256[](4);
+        pks[0] = 0xA11CE1;
+        pks[1] = 0xA11CE2;
+        pks[2] = 0xA11CE3;
+        pks[3] = 0xA11CE4;
+        _setAttestorsSortedByAddress(pks);
+        _expectInitRevert(2, abi.encodeWithSelector(BitSafeEvmAssetBridge.ThresholdBelowMajority.selector, 2, 4));
+    }
+
+    function test_initialize_majorityThreshold_passes() public {
+        // 3 of 4 passes.
+        uint256[] memory pks = new uint256[](4);
+        pks[0] = 0xA11CE1;
+        pks[1] = 0xA11CE2;
+        pks[2] = 0xA11CE3;
+        pks[3] = 0xA11CE4;
+        _setAttestorsSortedByAddress(pks);
+        BitSafeEvmAssetBridge fourOfWhichThree = _deployBridgeWithThreshold(3);
+        assertEq(fourOfWhichThree.threshold(), 3);
+        assertEq(fourOfWhichThree.getAttestors().length, 4);
+    }
+
+    function test_initialize_twoOfTwo_passes() public {
+        // 2 of 2 stays valid: 2 > 2 / 2.
+        uint256[] memory pks = new uint256[](2);
+        pks[0] = 0xA11CE1;
+        pks[1] = 0xA11CE2;
+        _setAttestorsSortedByAddress(pks);
+        BitSafeEvmAssetBridge twoOfTwo = _deployBridgeWithThreshold(2);
+        assertEq(twoOfTwo.threshold(), 2);
+        assertEq(twoOfTwo.getAttestors().length, 2);
+    }
+
+    function _deployBridgeWithThreshold(uint256 threshold_) internal returns (BitSafeEvmAssetBridge) {
         BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
-        bytes memory initData = abi.encodeCall(
+        bytes memory initData = _initData(threshold_);
+        TransparentUpgradeableProxyHarness proxy =
+            new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
+        return BitSafeEvmAssetBridge(payable(address(proxy)));
+    }
+
+    function _expectInitRevert(uint256 threshold_, bytes4 selector) internal {
+        _expectInitRevert(threshold_, abi.encodePacked(selector));
+    }
+
+    function _expectInitRevert(uint256 threshold_, bytes memory revertData) internal {
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
+        bytes memory initData = _initData(threshold_);
+        vm.expectRevert(revertData);
+        new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
+    }
+
+    function _initData(uint256 threshold_) internal view returns (bytes memory) {
+        return abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
             (
                 address(0),
@@ -106,8 +159,6 @@ contract InitializeTest is BridgeTestBase {
                 BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
             )
         );
-        vm.expectRevert(selector);
-        new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
     }
 
     function test_initialize_zeroMaxLimit_reverts() public {

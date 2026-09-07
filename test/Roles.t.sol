@@ -79,6 +79,32 @@ contract RolesTest is BridgeTestBase {
         vm.stopPrank();
     }
 
+    function test_setThreshold_atHalf_reverts() public {
+        // The base fixture has 3 attestors; grow the set to 4 so that a
+        // threshold of 2 sits exactly at half.
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor4"));
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.ThresholdBelowMajority.selector, 2, 4));
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(2);
+    }
+
+    function test_setThreshold_aboveHalf_passes() public {
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor4"));
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3); // 4 / 2 + 1
+        assertEq(bridge.threshold(), 3);
+    }
+
+    function test_setThreshold_twoOfThree_passes() public {
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(2); // boundary: 2 > 3 / 2
+        assertEq(bridge.threshold(), 2);
+    }
+
     function test_setThreshold_requiresBridgeAdmin() public {
         vm.expectRevert(
             abi.encodeWithSelector(
