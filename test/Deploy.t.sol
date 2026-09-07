@@ -46,6 +46,10 @@ contract DeployTest is Test {
         assertEq(vm.parseJsonUint(json, ".targetDecimals"), 10);
         assertEq(vm.parseJsonUint(json, ".depositUnit"), 1e8);
 
+        // `forge test` shares the pending folder with a real deploy. A file left
+        // here would make `make record` find two matches and refuse to guess.
+        vm.removeFile(path);
+
         // A value the script narrows must fail loudly when it does not fit.
         // A silent truncation would deploy a bridge that nobody configured.
         _setValidEnv();

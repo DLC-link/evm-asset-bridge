@@ -105,8 +105,9 @@ The middle part of the name is the role, not the contract name. An upgrade that
 keeps the contract name still updates the same file.
 
 Every record holds the address, the ABI-encoded constructor arguments, the
-transaction receipt, the whole build artifact, the compiler settings, and the
-git commit. The proxy record holds five more fields: `implementation`,
+transaction receipt, the contract ABI, the compiler settings, and the git
+commit. It holds nothing that names the machine that ran the deploy. The proxy
+record holds five more fields: `implementation`,
 `proxyAdmin`, `bridgeConfig`, `numDeployments`, and `history`.
 
 Every record also opens with `schemaVersion`, which is `1` today. A consumer

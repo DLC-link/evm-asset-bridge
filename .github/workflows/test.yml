@@ -10,6 +10,7 @@ on:
 jobs:
   check:
     name: Foundry project
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -36,6 +37,7 @@ jobs:
 
   tooling:
     name: Deployment record tooling
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     permissions:
       contents: read

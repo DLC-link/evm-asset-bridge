@@ -68,8 +68,8 @@ ifndef SIGNER
 endif
 	PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  script/Deploy_$(DEPLOYMENT).s.sol:Deploy_$(DEPLOYMENT) \
-	  --rpc-url $(RPC_URL) --broadcast $(SIGNER)
-	CHAIN_ID="$$(PATH="$(FOUNDRY_BIN):$$PATH" cast chain-id --rpc-url $(RPC_URL))" \
+	  --rpc-url "$(RPC_URL)" --broadcast $(SIGNER)
+	CHAIN_ID="$$(PATH="$(FOUNDRY_BIN):$$PATH" cast chain-id --rpc-url "$(RPC_URL)")" \
 	  ./script/record.sh $(DEPLOYMENT)
 
 record:
@@ -99,4 +99,5 @@ endif
 ifndef CHAIN_ID
 	$(error CHAIN_ID is not set. Example: make verify DEPLOYMENT=BETH CHAIN_ID=11155111)
 endif
-	./script/verify.sh
+	DEPLOYMENT="$(DEPLOYMENT)" CHAIN_ID="$(CHAIN_ID)" \
+	  CONTRACT="$(CONTRACT)" DRY_RUN="$(DRY_RUN)" ./script/verify.sh
