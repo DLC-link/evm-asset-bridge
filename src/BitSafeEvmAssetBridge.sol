@@ -80,6 +80,8 @@ contract BitSafeEvmAssetBridge is
     event ThresholdSet(uint256 newThreshold);
     event DepositLimitsSet(uint256 minAmount, uint256 maxAmount);
     event WithdrawLimitsSet(uint256 minAmount, uint256 maxAmount);
+    event ERC20Rescued(address indexed token, address indexed to, uint256 amount);
+    event ETHRescued(address indexed to, uint256 amount);
 
     error InvalidAddress();
     error InvalidLimits();
@@ -247,6 +249,7 @@ contract BitSafeEvmAssetBridge is
         if (token == _getBridgeStorage().asset) revert CannotRescueBridgedAsset();
         if (to == address(0)) revert InvalidAddress();
         IERC20(token).safeTransfer(to, amount);
+        emit ERC20Rescued(token, to, amount);
     }
 
     /// @notice Rescues stray ETH (for example forced in via selfdestruct).
@@ -256,6 +259,7 @@ contract BitSafeEvmAssetBridge is
         if (to == address(0)) revert InvalidAddress();
         (bool ok,) = to.call{value: amount}("");
         if (!ok) revert EthTransferFailed();
+        emit ETHRescued(to, amount);
     }
 
     /// @dev Attestors leave only through revokeRole.
