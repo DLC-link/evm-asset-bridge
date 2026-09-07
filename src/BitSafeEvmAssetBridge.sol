@@ -48,7 +48,7 @@ contract BitSafeEvmAssetBridge is
     /// @dev ETH has no contract to ask, so its precision is a convention.
     uint8 private constant ETH_DECIMALS = 18;
     bytes32 public constant WITHDRAWAL_TYPEHASH =
-        keccak256("Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount)");
+        keccak256("Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount,uint256 deadline)");
 
     /// @custom:storage-location erc7201:bitsafe.storage.BitSafeEvmAssetBridge
     struct BridgeStorage {
@@ -72,7 +72,8 @@ contract BitSafeEvmAssetBridge is
         bytes32 indexed withdrawRequestIdHash,
         bytes withdrawRequestId,
         address indexed destinationAddress,
-        uint256 amount
+        uint256 amount,
+        uint256 deadline
     );
     event AttestorSetChanged(address[] attestors, uint256 threshold);
     event ThresholdSet(uint256 newThreshold);
@@ -90,6 +91,7 @@ contract BitSafeEvmAssetBridge is
     error AssetIsNotEther();
     error AssetIsNotERC20();
     error WithdrawRequestAlreadyUsed();
+    error WithdrawalExpired(uint256 deadline);
     error InvalidDestination();
     error NotEnoughSignatures();
     error InvalidSignature();
@@ -363,23 +365,29 @@ contract BitSafeEvmAssetBridge is
     // ----------------------------------------------------------- withdrawals
 
     /// @notice The exact EIP-712 digest attestors must sign for a withdrawal.
-    function withdrawalDigest(bytes calldata withdrawRequestId, address destinationAddress, uint256 amount)
-        public
-        view
-        returns (bytes32)
-    {
+    function withdrawalDigest(
+        bytes calldata withdrawRequestId,
+        address destinationAddress,
+        uint256 amount,
+        uint256 deadline
+    ) public view returns (bytes32) {
         return _hashTypedDataV4(
-            keccak256(abi.encode(WITHDRAWAL_TYPEHASH, keccak256(withdrawRequestId), destinationAddress, amount))
+            keccak256(
+                abi.encode(WITHDRAWAL_TYPEHASH, keccak256(withdrawRequestId), destinationAddress, amount, deadline)
+            )
         );
     }
 
     /// @notice Releases `amount` of the bridged asset to `destinationAddress`.
     /// @dev Requires `threshold` valid, distinct attestor signatures over the
     ///      EIP-712 digest. Signer order does not matter.
+    ///      The attestor stack picks the deadline when it signs. The contract
+    ///      only compares the deadline against `block.timestamp` (inclusive).
     function withdraw(
         bytes calldata withdrawRequestId,
         address destinationAddress,
         uint256 amount,
+        uint256 deadline,
         bytes[] calldata signatures
     ) external onlyRole(ATTESTOR_ROLE) whenNotPaused nonReentrant {
         BridgeStorage storage $ = _getBridgeStorage();
@@ -394,9 +402,11 @@ contract BitSafeEvmAssetBridge is
         }
         if (amount == 0) revert ZeroAmount();
         _checkLimits(amount, $.withdrawLimits);
+        // Inclusive bound: the bundle stays valid through the deadline second.
+        if (block.timestamp > deadline) revert WithdrawalExpired(deadline);
         if (signatures.length < threshold_) revert NotEnoughSignatures();
 
-        bytes32 digest = withdrawalDigest(withdrawRequestId, destinationAddress, amount);
+        bytes32 digest = withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline);
         address[] memory seenSigners = new address[](signatures.length);
         for (uint256 i; i < signatures.length; ++i) {
             (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signatures[i]);
@@ -419,6 +429,6 @@ contract BitSafeEvmAssetBridge is
         } else {
             IERC20(asset_).safeTransfer(destinationAddress, amount);
         }
-        emit Withdraw(keccak256(withdrawRequestId), withdrawRequestId, destinationAddress, amount);
+        emit Withdraw(keccak256(withdrawRequestId), withdrawRequestId, destinationAddress, amount, deadline);
     }
 }

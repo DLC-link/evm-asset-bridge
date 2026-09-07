@@ -100,7 +100,8 @@ contract RolesTest is BridgeTestBase {
         bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
 
         // Build a fully valid withdraw bundle.
-        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, user, 1 ether);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, user, 1 ether, deadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
 
         // Pause and verify both paths are blocked by EnforcedPause.
@@ -113,7 +114,7 @@ contract RolesTest is BridgeTestBase {
 
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         vm.prank(attestors[0]);
-        bridge.withdraw(REQUEST_ID, user, 1 ether, sigs);
+        bridge.withdraw(REQUEST_ID, user, 1 ether, deadline, sigs);
 
         // Unpause and verify both paths succeed.
         vm.prank(bridgeAdmin);
@@ -123,7 +124,7 @@ contract RolesTest is BridgeTestBase {
         bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
 
         vm.prank(attestors[0]);
-        bridge.withdraw(REQUEST_ID, user, 1 ether, sigs);
+        bridge.withdraw(REQUEST_ID, user, 1 ether, deadline, sigs);
     }
 
     function test_rescueERC20_blocksBridgedAsset() public {

@@ -94,7 +94,7 @@ The signed struct and its type string (field names are part of the digest —
 they must match byte for byte):
 
 ```
-Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount)
+Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount,uint256 deadline)
 ```
 
 The domain has four fields. `verifyingContract` is the bridge PROXY address
@@ -120,6 +120,7 @@ sol! {
         bytes withdrawRequestId;
         address destinationAddress;
         uint256 amount;
+        uint256 deadline;
     }
 }
 
@@ -130,6 +131,7 @@ fn sign_withdrawal(
     cid_bytes: Vec<u8>,        // the raw Canton WithdrawRequest cid bytes
     destination: Address,
     amount_wei: U256,
+    deadline: U256,            // Unix seconds; see the derivation rule below
 ) -> eyre::Result<Vec<u8>> {
     let domain = eip712_domain! {
         name: "BitSafeEvmAssetBridge",
@@ -142,6 +144,7 @@ fn sign_withdrawal(
         withdrawRequestId: Bytes::from(cid_bytes),
         destinationAddress: destination,
         amount: amount_wei,
+        deadline,
     };
 
     let digest: B256 = message.eip712_signing_hash(&domain);
@@ -160,13 +163,27 @@ Rules the contract enforces on submission (`withdraw`):
 - At least `threshold` signatures are required; the caller must hold
   `ATTESTOR_ROLE`.
 - Each `withdrawRequestId` executes once, forever.
+- A bundle expires after its `deadline` (a Unix timestamp, inclusive): the
+  contract rejects it when `block.timestamp > deadline`.
+
+Every attestor derives the deadline alone, with the same rule:
+`deadline = ledgerTimeOf(WithdrawRequest create) + HORIZON`. `HORIZON` is a
+fixed constant in the versioned attestor-stack config. Each attestor reads the
+same ledger time, so all signatures hash the same deadline. Choose a `HORIZON`
+of a few hours, not weeks: it bounds how long a leaked signature bundle stays
+valid. A mismatched `HORIZON` is safe: that signature does not combine, and the
+withdrawal stalls until `threshold` attestors agree.
+
+A pause longer than `HORIZON` expires every pending bundle. The request ids
+stay unused, so no funds are at risk; the attestors re-sign the withdrawals
+after the unpause.
 
 Before rollout, cross-check the encoding against the live contract: the view
-`withdrawalDigest(withdrawRequestId, destinationAddress, amount)` returns the
-exact digest the contract verifies. Assert your locally computed digest equals
-it. Note for raw-key or KMS setups: sign the digest bytes directly (no
-`personal_sign` / Ethereum Signed Message prefix — the EIP-712 `\x19\x01`
-envelope is already inside the digest).
+`withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline)`
+returns the exact digest the contract verifies. Assert your locally computed
+digest equals it. Note for raw-key or KMS setups: sign the digest bytes
+directly (no `personal_sign` / Ethereum Signed Message prefix — the EIP-712
+`\x19\x01` envelope is already inside the digest).
 
 ## Watching Deposit events (Rust)
 
