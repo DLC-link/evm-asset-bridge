@@ -9,6 +9,14 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 contract RolesTest is BridgeTestBase {
+    address internal sentry = makeAddr("sentry");
+
+    function _grantSentry() internal {
+        bytes32 role = bridge.SENTRY_ROLE();
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, sentry);
+    }
+
     // Cache role ids in locals: an inline bridge.ROLE() view call would
     // consume a pending vm.prank or vm.expectRevert.
     function test_attestor_cannotRenounce() public {
@@ -144,11 +152,66 @@ contract RolesTest is BridgeTestBase {
         assertEq(stray.balanceOf(user), 5 ether);
     }
 
-    function test_pause_requiresBridgeAdmin() public {
-        bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
-        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+    function test_pause_withoutRole_reverts() public {
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.NotPauser.selector, user));
         vm.prank(user);
         bridge.pause();
+    }
+
+    function test_sentry_pauses() public {
+        _grantSentry();
+        vm.prank(sentry);
+        bridge.pause();
+        assertTrue(bridge.paused());
+        // Deposits revert while paused.
+        vm.deal(user, 1 ether);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.prank(user);
+        bridge.depositETH{value: 1e8}(DEPOSIT_ID);
+    }
+
+    function test_sentry_cannotUnpause() public {
+        _grantSentry();
+        vm.prank(sentry);
+        bridge.pause();
+        bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, sentry, role));
+        vm.prank(sentry);
+        bridge.unpause();
+    }
+
+    function test_bridgeAdmin_stillPausesAndUnpauses() public {
+        vm.startPrank(bridgeAdmin);
+        bridge.pause();
+        bridge.unpause();
+        vm.stopPrank();
+        assertFalse(bridge.paused());
+    }
+
+    function test_sentry_canRenounce() public {
+        _grantSentry();
+        bytes32 role = bridge.SENTRY_ROLE();
+        vm.prank(sentry);
+        bridge.renounceRole(role, sentry);
+        assertFalse(bridge.hasRole(role, sentry));
+    }
+
+    function test_grantSentry_emitsRoleGranted() public {
+        bytes32 role = bridge.SENTRY_ROLE();
+        vm.expectEmit(true, true, true, true);
+        emit IAccessControl.RoleGranted(role, sentry, defaultAdmin);
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, sentry);
+    }
+
+    function test_revokeSentry_emitsRoleRevoked() public {
+        _grantSentry();
+        bytes32 role = bridge.SENTRY_ROLE();
+        vm.expectEmit(true, true, true, true);
+        emit IAccessControl.RoleRevoked(role, sentry, defaultAdmin);
+        vm.prank(defaultAdmin);
+        bridge.revokeRole(role, sentry);
+        assertFalse(bridge.hasRole(role, sentry));
     }
 
     function test_unpause_requiresBridgeAdmin() public {
