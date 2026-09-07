@@ -37,6 +37,7 @@ contract BitSafeEvmAssetBridge is
 
     bytes32 public constant BRIDGE_ADMIN_ROLE = keccak256("BRIDGE_ADMIN_ROLE");
     bytes32 public constant ATTESTOR_ROLE = keccak256("ATTESTOR_ROLE");
+    bytes32 public constant SENTRY_ROLE = keccak256("SENTRY_ROLE");
     uint256 public constant MIN_THRESHOLD = 2;
     /// @dev 18 is the idiomatic maximum precision for an ERC20.
     uint8 public constant MAX_ASSET_DECIMALS = 18;
@@ -98,6 +99,7 @@ contract BitSafeEvmAssetBridge is
     error DuplicateSigner(address signer);
     error SignerIsNotAttestor(address signer);
     error AttestorCannotRenounce();
+    error NotPauser(address caller);
     error UnexpectedBalanceChange();
     error CannotRescueBridgedAsset();
     error EthTransferFailed();
@@ -204,7 +206,14 @@ contract BitSafeEvmAssetBridge is
 
     // ------------------------------------------------------------- admin
 
-    function pause() external onlyRole(BRIDGE_ADMIN_ROLE) {
+    /// @notice A sentry or the bridge admin pauses. Only the bridge admin unpauses.
+    /// @dev A sentry key may be hot: the role grants only a denial power, and the
+    ///      admin can always reverse it. A pause auto-expiry (as Optimism's
+    ///      Guardian has) is a possible future extension.
+    function pause() external {
+        if (!hasRole(BRIDGE_ADMIN_ROLE, msg.sender) && !hasRole(SENTRY_ROLE, msg.sender)) {
+            revert NotPauser(msg.sender);
+        }
         _pause();
     }
 
