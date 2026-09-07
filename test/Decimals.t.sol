@@ -64,7 +64,7 @@ contract DecimalsTest is BridgeTestBase {
     /// target units instead under-mints by the whole deposit unit.
     function test_depositETH_emitsTheWeiAmount() public {
         vm.expectEmit(true, true, false, true, address(ethBridge));
-        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether);
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether, 1);
         vm.prank(user);
         ethBridge.depositETH{value: 1 ether}(DEPOSIT_ID);
     }
@@ -77,7 +77,7 @@ contract DecimalsTest is BridgeTestBase {
         vm.startPrank(user);
         token.approve(address(b), 100 ether);
         vm.expectEmit(true, true, false, true, address(b));
-        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether);
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether, 1);
         b.depositERC20(1 ether, DEPOSIT_ID);
         vm.stopPrank();
     }

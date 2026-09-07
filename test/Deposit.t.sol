@@ -21,10 +21,40 @@ contract DepositTest is BridgeTestBase {
 
     function test_depositETH_locksAndEmits() public {
         vm.expectEmit(true, true, false, true);
-        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether);
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether, 1);
         vm.prank(user);
         bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
         assertEq(address(bridge).balance, 1 ether);
+    }
+
+    function test_deposit_emitsIncrementingNonce() public {
+        assertEq(bridge.depositNonce(), 0);
+        vm.deal(user, 10 ether);
+        vm.prank(user);
+        vm.expectEmit(true, true, false, true);
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1e8, 1);
+        bridge.depositETH{value: 1e8}(DEPOSIT_ID);
+        assertEq(bridge.depositNonce(), 1);
+        vm.prank(user);
+        vm.expectEmit(true, true, false, true);
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1e8, 2);
+        bridge.depositETH{value: 1e8}(DEPOSIT_ID);
+        assertEq(bridge.depositNonce(), 2);
+    }
+
+    function test_depositERC20_emitsIncrementingNonce() public {
+        assertEq(erc20Bridge.depositNonce(), 0);
+        vm.startPrank(user);
+        token.approve(address(erc20Bridge), 2e8);
+        vm.expectEmit(true, true, false, true);
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1e8, 1);
+        erc20Bridge.depositERC20(1e8, DEPOSIT_ID);
+        assertEq(erc20Bridge.depositNonce(), 1);
+        vm.expectEmit(true, true, false, true);
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1e8, 2);
+        erc20Bridge.depositERC20(1e8, DEPOSIT_ID);
+        assertEq(erc20Bridge.depositNonce(), 2);
+        vm.stopPrank();
     }
 
     function test_depositETH_onErc20Instance_reverts() public {
@@ -49,7 +79,7 @@ contract DepositTest is BridgeTestBase {
         vm.startPrank(user);
         token.approve(address(erc20Bridge), 5 ether);
         vm.expectEmit(true, true, false, true);
-        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 5 ether);
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 5 ether, 1);
         erc20Bridge.depositERC20(5 ether, DEPOSIT_ID);
         vm.stopPrank();
         assertEq(token.balanceOf(address(erc20Bridge)), 5 ether);

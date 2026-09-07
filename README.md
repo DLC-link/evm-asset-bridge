@@ -200,17 +200,30 @@ directly (no `personal_sign` / Ethereum Signed Message prefix — the EIP-712
 Both `depositETH` and `depositERC20` emit the same event:
 
 ```solidity
-event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
+event Deposit(
+    bytes32 indexed depositAccountIdHash,
+    bytes depositAccountId,
+    address indexed sender,
+    uint256 amount,
+    uint256 depositNonce
+);
 ```
 
 - `topic0` (the event signature hash) is
-  `0xacaea730ea841fae3326f72a7ff746b6e06c646840526bcaf5dabee5fd887ef8`,
-  which is `keccak256("Deposit(bytes32,bytes,address,uint256)")`.
+  `0xf3ca88974ec5963addc617fe6c0c359d7196759e318be6ab0cade940986e30e2`,
+  which is `keccak256("Deposit(bytes32,bytes,address,uint256,uint256)")`.
 - `depositAccountIdHash` (`topic1`) is `keccak256(depositAccountId)`. Filter
   on it to follow one Canton deposit account.
 - `sender` (`topic2`) is the EVM account that paid the deposit.
 - The data part carries the raw `depositAccountId` bytes (the Canton deposit
-  account id) and `amount` (wei for ETH, base units for an ERC20 asset).
+  account id), `amount` (wei for ETH, base units for an ERC20 asset), and
+  `depositNonce`.
+- `depositNonce` is monotonic and dense: the first deposit gets 1, and each
+  deposit increments it by exactly 1, with no gaps. Zero never names a real
+  deposit, so a consumer can use 0 as a sentinel. Use the nonce as the dedup
+  key, and prove completeness with a gap scan: a hole in the observed nonce
+  sequence is a missed deposit. The view `depositNonce()` returns the last
+  assigned nonce.
 
 Emit address: always the bridge PROXY address, never the implementation.
 
@@ -223,7 +236,13 @@ use alloy_rpc_types::Filter;
 use alloy_sol_types::{sol, SolEvent};
 
 sol! {
-    event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
+    event Deposit(
+        bytes32 indexed depositAccountIdHash,
+        bytes depositAccountId,
+        address indexed sender,
+        uint256 amount,
+        uint256 depositNonce
+    );
 }
 
 #[tokio::main]
@@ -241,10 +260,11 @@ async fn main() -> eyre::Result<()> {
     for log in provider.get_logs(&filter).await? {
         let deposit = log.log_decode::<Deposit>()?.inner.data;
         println!(
-            "deposit: account_id={} sender={} amount={}",
+            "deposit: account_id={} sender={} amount={} nonce={}",
             deposit.depositAccountId, // Bytes prints as 0x-prefixed hex
             deposit.sender,
             deposit.amount,
+            deposit.depositNonce,
         );
     }
     Ok(())

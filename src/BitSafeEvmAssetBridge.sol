@@ -62,13 +62,20 @@ contract BitSafeEvmAssetBridge is
         Limits withdrawLimits;
         EnumerableSet.AddressSet attestors;
         mapping(bytes withdrawRequestId => bool used) usedWithdrawRequests;
+        uint256 depositNonce;
     }
 
     // cast index-erc7201 bitsafe.storage.BitSafeEvmAssetBridge
     bytes32 public constant BRIDGE_STORAGE_LOCATION =
         0xe9e5dc9730c787910ca70d94c5f8cdb143fd0b13ee96336e56e945dc2a3d2500;
 
-    event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
+    event Deposit(
+        bytes32 indexed depositAccountIdHash,
+        bytes depositAccountId,
+        address indexed sender,
+        uint256 amount,
+        uint256 depositNonce
+    );
     event Withdraw(
         bytes32 indexed withdrawRequestIdHash,
         bytes withdrawRequestId,
@@ -183,6 +190,11 @@ contract BitSafeEvmAssetBridge is
 
     function isWithdrawRequestUsed(bytes calldata withdrawRequestId) external view returns (bool) {
         return _getBridgeStorage().usedWithdrawRequests[withdrawRequestId];
+    }
+
+    /// @notice The nonce of the last deposit. The first deposit gets 1; 0 means no deposit yet.
+    function depositNonce() external view returns (uint256) {
+        return _getBridgeStorage().depositNonce;
     }
 
     // ------------------------------------------------------- role overrides
@@ -342,7 +354,8 @@ contract BitSafeEvmAssetBridge is
         BridgeStorage storage $ = _getBridgeStorage();
         if ($.asset != address(0)) revert AssetIsNotEther();
         _validateDeposit(depositAccountId, msg.value, $);
-        emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, msg.value);
+        uint256 nonce = ++$.depositNonce;
+        emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, msg.value, nonce);
     }
 
     /// @notice Locks the configured ERC20 asset. Requires prior approval.
@@ -357,7 +370,8 @@ contract BitSafeEvmAssetBridge is
             revert UnexpectedBalanceChange();
         }
         // Emitted after the transfer: the amount is only confirmed by the balance-delta check above.
-        emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, amount);
+        uint256 nonce = ++$.depositNonce;
+        emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, amount, nonce);
     }
 
     function _validateDeposit(bytes calldata depositAccountId, uint256 amount, BridgeStorage storage $) internal view {
