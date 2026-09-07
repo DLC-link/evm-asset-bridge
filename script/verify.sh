@@ -37,6 +37,21 @@ for tool in jq curl; do
   command -v "$tool" >/dev/null || { echo "verify.sh: $tool is not installed" >&2; exit 2; }
 done
 
+# The record schema this script reads. script/record.sh stamps the same number
+# on every record it writes. A record with any other version stops its role.
+READS_SCHEMA_VERSION=1
+
+# A curl config file holds one directive per line, so a newline inside a value
+# would start a new directive. cfg_escape cannot escape that, and the values
+# below come from a record file and from the explorer. So the script refuses
+# such a value instead.
+has_line_break() { # has_line_break <value>
+  case "$1" in
+    *$'\n'* | *$'\r'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # ---- the API key ------------------------------------------------------------
 # The per-chain variable wins. The script prints which one it used, so the
 # fallback is never silent. It never prints the value.
@@ -55,6 +70,11 @@ fi
 HOST=$(printenv "VERIFIER_URL_$CHAIN" || true)
 [ -n "$HOST" ] || HOST="${VERIFIER_URL:-}"
 [ -n "$HOST" ] || HOST="https://api.etherscan.io/v2/api?chainid=$CHAIN"
+
+if has_line_break "$HOST$KEY$CHAIN"; then
+  echo "verify.sh: the host, the key, or the chain id holds a line break" >&2
+  exit 2
+fi
 
 echo "verify.sh: deployment $NAME, chain $CHAIN, key from $KEY_VAR"
 echo "verify.sh: explorer $HOST"
@@ -113,6 +133,32 @@ url = "$(cfg_escape "$1")"
 CFG
 }
 
+# json_field prints one field of a JSON body. It prints the default instead when
+# the body is not JSON, or when the field is absent or null.
+#
+# An explorer can answer with an HTML error page or an empty body. `jq` then
+# exits non-zero, and inside an assignment that status stops the whole script.
+# So every read of a reply and of a record goes through this function.
+json_field() { # json_field <text> <filter> <default>
+  local out
+  out=$(printf '%s' "$1" | jq -r "$2 // empty" 2>/dev/null || true)
+  if [ -n "$out" ]; then printf '%s' "$out"; else printf '%s' "$3"; fi
+}
+
+# explorer_reason prints why one call failed. A JSON reply names the reason. Any
+# other body, such as a rate-limit page, gives its first 200 characters.
+explorer_reason() { # explorer_reason <text>
+  local reason
+  reason=$(json_field "$1" '.result // .message' "")
+  if [ -n "$reason" ]; then
+    printf '%s' "$reason"
+  elif [ -z "$1" ]; then
+    printf '%s' "the explorer sent an empty reply"
+  else
+    printf 'the explorer sent no JSON: %s' "$(printf '%s' "$1" | tr '\n\r\t' '   ' | cut -c1-200)"
+  fi
+}
+
 FAILED=0
 
 for ROLE in $ROLES; do
@@ -125,12 +171,51 @@ for ROLE in $ROLES; do
     continue
   fi
 
-  ADDRESS=$(jq -r .address "$RECORD")
-  CONTRACT_NAME=$(jq -r .contractName "$RECORD")
-  SOURCE_PATH=$(jq -r .sourcePath "$RECORD")
-  ARGS=$(jq -r .encodedConstructorArgs "$RECORD")
-  SOLC_HASH=$(jq -r .solcInputHash "$RECORD")
-  COMPILER=$(jq -r .compiler.version "$RECORD")
+  # One read proves the record parses. A separate `jq` call per field would stop
+  # the whole run on a truncated file, part way through the roles.
+  if ! RECORD_JSON=$(jq -c . "$RECORD" 2>/dev/null); then
+    echo "  FAIL $ROLE: $RECORD holds no valid JSON"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
+
+  # The writer stamps every record with a schema version. A version this script
+  # does not know means the fields below may have changed meaning.
+  SCHEMA=$(json_field "$RECORD_JSON" .schemaVersion "")
+  if [ "$SCHEMA" != "$READS_SCHEMA_VERSION" ]; then
+    echo "  FAIL $ROLE: $RECORD has schemaVersion '$SCHEMA'; this script reads $READS_SCHEMA_VERSION"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
+
+  ADDRESS=$(json_field "$RECORD_JSON" .address "")
+  CONTRACT_NAME=$(json_field "$RECORD_JSON" .contractName "")
+  SOURCE_PATH=$(json_field "$RECORD_JSON" .sourcePath "")
+  ARGS=$(json_field "$RECORD_JSON" .encodedConstructorArgs "")
+  SOLC_HASH=$(json_field "$RECORD_JSON" .solcInputHash "")
+  COMPILER=$(json_field "$RECORD_JSON" .compiler.version "")
+
+  # The explorer needs all six. `jq -r` prints the word "null" for an absent
+  # field, and a request carrying that word gets a confusing rejection.
+  MISSING=""
+  [ -n "$ADDRESS" ] || MISSING="$MISSING address"
+  [ -n "$CONTRACT_NAME" ] || MISSING="$MISSING contractName"
+  [ -n "$SOURCE_PATH" ] || MISSING="$MISSING sourcePath"
+  [ -n "$ARGS" ] || MISSING="$MISSING encodedConstructorArgs"
+  [ -n "$SOLC_HASH" ] || MISSING="$MISSING solcInputHash"
+  [ -n "$COMPILER" ] || MISSING="$MISSING compiler.version"
+  if [ -n "$MISSING" ]; then
+    echo "  FAIL $ROLE: $RECORD has no$MISSING"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
+
+  if has_line_break "$ADDRESS$CONTRACT_NAME$SOURCE_PATH$ARGS$SOLC_HASH$COMPILER"; then
+    echo "  FAIL $ROLE: $RECORD holds a line break in a field this script sends"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
+
   SOLC_INPUT="deployments/solcInputs/$SOLC_HASH.json"
   FQN="$SOURCE_PATH:$CONTRACT_NAME"
 
@@ -156,7 +241,9 @@ for ROLE in $ROLES; do
 
   # ---- skip a contract that already has verified source ---------------------
   ABI_RESPONSE=$(curl_get "$HOST$(sep "$HOST")module=contract&action=getabi&address=$ADDRESS&apikey=$KEY" 30)
-  if [ "$(printf '%s' "$ABI_RESPONSE" | jq -r '.status // "0"')" = "1" ]; then
+  # A reply this script cannot read is not proof of verified source. The role
+  # goes on to the submit step, which reports a real reason when it fails.
+  if [ "$(json_field "$ABI_RESPONSE" .status 0)" = "1" ]; then
     echo "  SKIP $ROLE $ADDRESS: already verified"
     continue
   fi
@@ -182,29 +269,52 @@ data-urlencode = "licenseType=3"
 CFG
 )
 
-  if [ "$(printf '%s' "$SUBMIT" | jq -r '.status // "0"')" != "1" ]; then
-    echo "  FAIL $ROLE: $(printf '%s' "$SUBMIT" | jq -r '.result // .message // .')"
+  if [ "$(json_field "$SUBMIT" .status 0)" != "1" ]; then
+    echo "  FAIL $ROLE: $(explorer_reason "$SUBMIT")"
     FAILED=$((FAILED + 1))
     continue
   fi
 
-  GUID=$(printf '%s' "$SUBMIT" | jq -r .result)
+  # The explorer answers a good submit with a guid. The poll step needs it.
+  GUID=$(json_field "$SUBMIT" .result "")
+  if [ -z "$GUID" ]; then
+    echo "  FAIL $ROLE: the explorer accepted the submit but sent no guid"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
+  if has_line_break "$GUID"; then
+    echo "  FAIL $ROLE: the explorer sent a guid holding a line break"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
 
   # ---- poll -----------------------------------------------------------------
   # TEXT holds the poll's result field. The loop keeps polling while TEXT is
   # empty or "Pending in queue". RESULT stays empty until the explorer
   # concludes, pass or fail, and RESULT_STATUS is captured at that moment.
+  # POLL_NOTE holds the last reply the script could not read, so a timeout can
+  # say why.
   RESULT=""
   RESULT_STATUS=""
+  POLL_NOTE=""
   for _ in $(seq 1 30); do
     sleep 5
     POLL=$(curl_get "$HOST$(sep "$HOST")module=contract&action=checkverifystatus&guid=$GUID&apikey=$KEY" 30)
-    TEXT=$(printf '%s' "$POLL" | jq -r '.result // ""')
+    TEXT=$(json_field "$POLL" .result "")
+    if [ -z "$TEXT" ]; then
+      # An empty body, or a body this script cannot read, is not a verdict. The
+      # loop keeps polling and keeps the reason for the timeout message.
+      POLL_NOTE=$(explorer_reason "$POLL")
+      continue
+    fi
     case "$TEXT" in
-      "Pending in queue"|"") continue ;;
+      "Pending in queue")
+        POLL_NOTE=""
+        continue
+        ;;
       *)
         RESULT="$TEXT"
-        RESULT_STATUS=$(printf '%s' "$POLL" | jq -r '.status // "0"')
+        RESULT_STATUS=$(json_field "$POLL" .status 0)
         break
         ;;
     esac
@@ -212,7 +322,10 @@ CFG
 
   # An empty RESULT means every poll timed out or pended. That counts as a
   # failure. The explorer's last "still pending" reply can still carry status "1".
-  if [ -z "$RESULT" ]; then
+  if [ -z "$RESULT" ] && [ -n "$POLL_NOTE" ]; then
+    echo "  FAIL $ROLE $ADDRESS: timed out after 150 seconds. $POLL_NOTE"
+    FAILED=$((FAILED + 1))
+  elif [ -z "$RESULT" ]; then
     echo "  FAIL $ROLE $ADDRESS: timed out after 150 seconds"
     FAILED=$((FAILED + 1))
   elif [ "$RESULT_STATUS" = "1" ]; then
