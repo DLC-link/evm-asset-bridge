@@ -178,6 +178,15 @@ contract RolesTest is BridgeTestBase {
         assertEq(stray.balanceOf(user), 5 ether);
     }
 
+    function test_rescueERC20_emitsEvent() public {
+        MockERC20 stray = new MockERC20();
+        stray.mint(address(bridge), 5 ether); // ETH instance, any ERC20 is foreign
+        vm.expectEmit(true, true, false, true);
+        emit BitSafeEvmAssetBridge.ERC20Rescued(address(stray), user, 5 ether);
+        vm.prank(bridgeAdmin);
+        bridge.rescueERC20(address(stray), user, 5 ether);
+    }
+
     function test_pause_withoutRole_reverts() public {
         vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.NotPauser.selector, user));
         vm.prank(user);
@@ -287,6 +296,18 @@ contract RolesTest is BridgeTestBase {
         erc20Bridge.rescueETH(user, 3 ether);
         assertEq(address(erc20Bridge).balance, 0);
         assertEq(user.balance, 3 ether);
+    }
+
+    function test_rescueETH_emitsEvent() public {
+        MockERC20 token = new MockERC20();
+        BitSafeEvmAssetBridge erc20Bridge = _deployBridge(address(token));
+        ForceSend force = new ForceSend{value: 3 ether}();
+        force.boom(payable(address(erc20Bridge)));
+
+        vm.expectEmit(true, false, false, true);
+        emit BitSafeEvmAssetBridge.ETHRescued(user, 3 ether);
+        vm.prank(bridgeAdmin);
+        erc20Bridge.rescueETH(user, 3 ether);
     }
 
     function test_rescueETH_blocksBridgedAsset() public {
