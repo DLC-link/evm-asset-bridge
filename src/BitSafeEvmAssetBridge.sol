@@ -190,6 +190,14 @@ contract BitSafeEvmAssetBridge is
         if (granted && role == ATTESTOR_ROLE) {
             BridgeStorage storage $ = _getBridgeStorage();
             $.attestors.add(account);
+            // A grant must not dilute the threshold to half or below. Growth
+            // therefore runs raise-then-grant. During initialize the
+            // threshold is still 0; _setThreshold checks the final set then.
+            uint256 threshold_ = $.threshold;
+            uint256 count = $.attestors.length();
+            if (threshold_ != 0 && threshold_ <= count / 2) {
+                revert ThresholdBelowMajority(threshold_, count);
+            }
             emit AttestorSetChanged($.attestors.values(), $.threshold);
         }
     }

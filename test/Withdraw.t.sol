@@ -282,11 +282,14 @@ contract WithdrawTest is BridgeTestBase {
         // the guard. Signatures below still come from real attestor keys;
         // granting the role only changes who may *call* withdraw.
         bytes32 attestorRole = bridge.ATTESTOR_ROLE();
+        // The grant grows the set to 4, so the threshold must rise to 3 first.
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3);
         vm.prank(defaultAdmin);
         bridge.grantRole(attestorRole, address(attacker));
 
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, address(attacker), 1 ether, defaultDeadline);
-        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        bytes[] memory sigs = _attestorSignatures(digest, 3);
         attacker.arm(IBridgeWithdraw(address(bridge)), REQUEST_ID, 1 ether, defaultDeadline, sigs);
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, address(attacker), 1 ether, defaultDeadline, sigs);
@@ -306,15 +309,18 @@ contract WithdrawTest is BridgeTestBase {
         // marked used. This isolates the guard from the replay protection.
         ReentrantReceiver attacker = new ReentrantReceiver();
         bytes32 attestorRole = bridge.ATTESTOR_ROLE();
+        // The grant grows the set to 4, so the threshold must rise to 3 first.
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3);
         vm.prank(defaultAdmin);
         bridge.grantRole(attestorRole, address(attacker));
 
         bytes memory secondId = hex"aabbccddee";
         bytes32 outerDigest = bridge.withdrawalDigest(REQUEST_ID, address(attacker), 1 ether, defaultDeadline);
-        bytes[] memory outerSigs = _attestorSignatures(outerDigest, 2);
+        bytes[] memory outerSigs = _attestorSignatures(outerDigest, 3);
 
         bytes32 innerDigest = bridge.withdrawalDigest(secondId, address(attacker), 1 ether, defaultDeadline);
-        bytes[] memory innerSigs = _attestorSignatures(innerDigest, 2);
+        bytes[] memory innerSigs = _attestorSignatures(innerDigest, 3);
 
         attacker.arm(IBridgeWithdraw(address(bridge)), secondId, 1 ether, defaultDeadline, innerSigs);
 

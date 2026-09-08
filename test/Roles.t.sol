@@ -51,11 +51,33 @@ contract RolesTest is BridgeTestBase {
             expected[i] = attestors[i];
         }
         expected[3] = newAttestor;
+        // Growth runs raise-then-grant: 2 of 4 would sit at half.
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3);
         vm.expectEmit(false, false, false, true);
-        emit BitSafeEvmAssetBridge.AttestorSetChanged(expected, THRESHOLD);
+        emit BitSafeEvmAssetBridge.AttestorSetChanged(expected, 3);
         vm.prank(defaultAdmin);
         bridge.grantRole(role, newAttestor);
         assertEq(bridge.getAttestors().length, 4);
+    }
+
+    function test_grantAttestor_dilutingThreshold_reverts() public {
+        // 2 of 3 is a majority; a fourth attestor puts 2 exactly at half.
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.ThresholdBelowMajority.selector, 2, 4));
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor4"));
+    }
+
+    function test_grantAttestor_afterRaise_passes() public {
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3);
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor4")); // 3 of 4 is a majority
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor5")); // 3 of 5 is a majority
+        assertEq(bridge.getAttestors().length, 5);
     }
 
     function test_revokeAttestor_belowThreshold_allowed() public {
@@ -80,9 +102,11 @@ contract RolesTest is BridgeTestBase {
     }
 
     function test_setThreshold_atHalf_reverts() public {
-        // The base fixture has 3 attestors; grow the set to 4 so that a
-        // threshold of 2 sits exactly at half.
+        // The base fixture has 3 attestors; grow the set to 4 in the safe
+        // order, then try to lower the threshold to exactly half.
         bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3);
         vm.prank(defaultAdmin);
         bridge.grantRole(role, makeAddr("attestor4"));
         vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.ThresholdBelowMajority.selector, 2, 4));
@@ -92,10 +116,12 @@ contract RolesTest is BridgeTestBase {
 
     function test_setThreshold_aboveHalf_passes() public {
         bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3);
         vm.prank(defaultAdmin);
         bridge.grantRole(role, makeAddr("attestor4"));
         vm.prank(bridgeAdmin);
-        bridge.setThreshold(3); // 4 / 2 + 1
+        bridge.setThreshold(3); // 4 / 2 + 1, re-set on the grown set
         assertEq(bridge.threshold(), 3);
     }
 
