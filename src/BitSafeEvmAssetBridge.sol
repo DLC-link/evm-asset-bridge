@@ -72,6 +72,7 @@ contract BitSafeEvmAssetBridge is
         // the check off. There is no cross-validation against
         // `withdrawLimits`; operations sizes both.
         RateLimiter.RefillingBucket withdrawRateLimit;
+        uint256 totalLocked;
     }
 
     // cast index-erc7201 bitsafe.storage.BitSafeEvmAssetBridge
@@ -93,6 +94,7 @@ contract BitSafeEvmAssetBridge is
     event WithdrawRateLimitSet(uint208 capacity, uint48 window);
     event ERC20Rescued(address indexed token, address indexed to, uint256 amount);
     event ETHRescued(address indexed to, uint256 amount);
+    event SurplusRescued(address indexed to, uint256 amount);
 
     error InvalidAddress();
     error InvalidLimits();
@@ -115,6 +117,7 @@ contract BitSafeEvmAssetBridge is
     error NotPauser(address caller);
     error UnexpectedBalanceChange();
     error CannotRescueBridgedAsset();
+    error AmountExceedsSurplus(uint256 amount, uint256 surplus);
     error EthTransferFailed();
     error DirectEthTransferNotAllowed();
     error ThresholdBelowMajority(uint256 threshold, uint256 attestorCount);
@@ -205,6 +208,25 @@ contract BitSafeEvmAssetBridge is
 
     function isWithdrawRequestUsed(bytes calldata withdrawRequestId) external view returns (bool) {
         return _getBridgeStorage().usedWithdrawRequests[withdrawRequestId];
+    }
+
+    /// @notice Base units the deposit paths locked and `withdraw` has not
+    ///         released. Bounds `rescueSurplus` and feeds monitoring only;
+    ///         `withdraw` never reads it.
+    function totalLocked() external view returns (uint256) {
+        return _getBridgeStorage().totalLocked;
+    }
+
+    /// @notice Bridged-asset balance above `totalLocked`: funds no deposit
+    ///         backs, such as forced-in ETH or direct token transfers.
+    function surplus() public view returns (uint256) {
+        BridgeStorage storage $ = _getBridgeStorage();
+        address asset_ = $.asset;
+        uint256 balance = asset_ == address(0) ? address(this).balance : IERC20(asset_).balanceOf(address(this));
+        uint256 tl = $.totalLocked;
+        // Clamps to 0: a counter above the balance reports no surplus, so the
+        // view stays readable for monitors instead of reverting on underflow.
+        return balance > tl ? balance - tl : 0;
     }
 
     // ------------------------------------------------------- role overrides
@@ -300,6 +322,24 @@ contract BitSafeEvmAssetBridge is
         (bool ok,) = to.call{value: amount}("");
         if (!ok) revert EthTransferFailed();
         emit ETHRescued(to, amount);
+    }
+
+    /// @notice Rescues the bridged-asset balance above `totalLocked`, such as
+    ///         forced-in ETH or direct token transfers. The only rescue path
+    ///         that touches the bridged asset, and the counter bounds it:
+    ///         deposited funds stay out of reach.
+    function rescueSurplus(address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) {
+        if (to == address(0)) revert InvalidAddress();
+        uint256 surplus_ = surplus();
+        if (amount > surplus_) revert AmountExceedsSurplus(amount, surplus_);
+        address asset_ = _getBridgeStorage().asset;
+        if (asset_ == address(0)) {
+            (bool ok,) = to.call{value: amount}("");
+            if (!ok) revert EthTransferFailed();
+        } else {
+            IERC20(asset_).safeTransfer(to, amount);
+        }
+        emit SurplusRescued(to, amount);
     }
 
     /// @dev Attestors leave only through revokeRole.
@@ -406,6 +446,7 @@ contract BitSafeEvmAssetBridge is
         BridgeStorage storage $ = _getBridgeStorage();
         if ($.asset != address(0)) revert AssetIsNotEther();
         _validateDeposit(depositAccountId, msg.value, $);
+        $.totalLocked += msg.value;
         emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, msg.value);
     }
 
@@ -420,6 +461,8 @@ contract BitSafeEvmAssetBridge is
         if (IERC20(asset_).balanceOf(address(this)) - balanceBefore != amount) {
             revert UnexpectedBalanceChange();
         }
+        // After the balance-delta check: the counter records confirmed amounts only.
+        $.totalLocked += amount;
         // Emitted after the transfer: the amount is only confirmed by the balance-delta check above.
         emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, amount);
     }
@@ -501,6 +544,12 @@ contract BitSafeEvmAssetBridge is
 
         // Effect before interaction: consume the request id.
         $.usedWithdrawRequests[withdrawRequestId] = true;
+        // Saturates, never gates: a drifted counter must never block a
+        // release. The block scope frees the local again (stack limit).
+        {
+            uint256 tl = $.totalLocked;
+            $.totalLocked = tl >= amount ? tl - amount : 0;
+        }
 
         // Interaction.
         address asset_ = $.asset;
