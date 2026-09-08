@@ -133,8 +133,18 @@ contains "names the roles it did find"      "$OUT" "records: proxy proxyAdmin"
 # real ancestor, because CI checks out one commit only. Both objects stay
 # unreachable, and `git gc` collects them.
 #
+# FIXTURE_IDENT gives `git commit-tree` an author and a committer. Do not remove
+# it. A CI runner has no git identity, because actions/checkout sets none, and
+# `git commit-tree` then fails with "empty ident name". Your own machine has a
+# global identity, so it hides the failure.
+FIXTURE_IDENT=(
+  GIT_AUTHOR_NAME="verify.t.sh fixture" GIT_AUTHOR_EMAIL="fixture@localhost"
+  GIT_COMMITTER_NAME="verify.t.sh fixture" GIT_COMMITTER_EMAIL="fixture@localhost"
+)
+
 # SAME_SOURCE carries HEAD's own tree, so only the commit hash differs.
-SAME_SOURCE=$(git commit-tree "HEAD^{tree}" -m "verify.t.sh fixture: the source of HEAD" </dev/null)
+SAME_SOURCE=$(env "${FIXTURE_IDENT[@]}" \
+  git commit-tree "HEAD^{tree}" -m "verify.t.sh fixture: the source of HEAD" </dev/null)
 
 # OTHER_SOURCE carries HEAD's tree with one changed foundry.toml. A temporary
 # index keeps the real one untouched.
@@ -144,7 +154,8 @@ GIT_INDEX_FILE="$FIXTURE_DIR/index" git read-tree HEAD
 GIT_INDEX_FILE="$FIXTURE_DIR/index" git update-index --add --cacheinfo 100644 "$FIXTURE_BLOB" foundry.toml
 OTHER_TREE=$(GIT_INDEX_FILE="$FIXTURE_DIR/index" git write-tree)
 rm -rf "$FIXTURE_DIR"
-OTHER_SOURCE=$(git commit-tree "$OTHER_TREE" -m "verify.t.sh fixture: another foundry.toml" </dev/null)
+OTHER_SOURCE=$(env "${FIXTURE_IDENT[@]}" \
+  git commit-tree "$OTHER_TREE" -m "verify.t.sh fixture: another foundry.toml" </dev/null)
 
 GUARD="deployments/BETH.proxy.$CHAIN_ID.json"
 cp "$GUARD" "$GUARD.bak"
