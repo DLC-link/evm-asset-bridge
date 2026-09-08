@@ -195,6 +195,29 @@ check    "never blames the source" \
   "$(printf '%s' "$GUARD_OUT" | grep -c "The source does not match" || true)" "0"
 check    "verifies nothing at all" "$(printf '%s' "$GUARD_OUT" | grep -c "DRY  " || true)" "0"
 
+echo "== a record that names no commit =="
+# record.sh writes 'unknown' when the broadcast artifact carries no commit. No
+# commit exists, so no fetch helps. The old message sent the operator after a
+# commit that never existed.
+forge_commit unknown
+check    "exits non-zero without a recorded commit" "$GUARD_RC" "1"
+contains "says the deploy recorded no commit" "$GUARD_OUT" "The deploy recorded no commit"
+contains "quotes the value it read"           "$GUARD_OUT" "holds the gitCommit 'unknown'"
+contains "says the source is unchecked"       "$GUARD_OUT" "so the source is unchecked"
+contains "tells the operator to check by hand" "$GUARD_OUT" \
+  "confirm by hand that this build produced the deployed bytes"
+contains "gives the escape hatch as the way on" "$GUARD_OUT" \
+  "ALLOW_COMMIT_MISMATCH=1 make verify DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID"
+# The exit code was already right. The advice was the defect, so assert it is
+# gone. No fetch can ever produce this commit.
+check    "never tells the operator to fetch" \
+  "$(printf '%s' "$GUARD_OUT" | grep -c "git fetch" || true)" "0"
+check    "never claims the commit is unreachable" \
+  "$(printf '%s' "$GUARD_OUT" | grep -c "cannot reach the deployed commit" || true)" "0"
+check    "never blames the source" \
+  "$(printf '%s' "$GUARD_OUT" | grep -c "The source does not match" || true)" "0"
+check    "verifies nothing at all" "$(printf '%s' "$GUARD_OUT" | grep -c "DRY  " || true)" "0"
+
 echo "== the escape hatch =="
 # It must open the strictest case, which is a real source change.
 jq --arg c "$OTHER_SOURCE" '.gitCommit = $c' "$GUARD.bak" >"$GUARD"

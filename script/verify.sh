@@ -135,6 +135,24 @@ if [ -z "$ALLOW_MISMATCH" ]; then
     [ -n "$RECORD_COMMIT" ] || continue
     [ "$RECORD_COMMIT" != "$HEAD_COMMIT" ] || continue
 
+    # record.sh writes 'unknown' when the broadcast artifact carries no commit.
+    # No commit exists, so no fetch helps, and the git-diff attempt below would
+    # send the operator after a commit that never existed.
+    if [ "$RECORD_COMMIT" = "unknown" ]; then
+      {
+        echo "verify.sh: STOP. The deploy recorded no commit."
+        echo "verify.sh: $RECORD holds the gitCommit 'unknown'."
+        echo "verify.sh: HEAD is '$HEAD_COMMIT'."
+        echo "verify.sh: the guard has no commit to compare, so the source is unchecked."
+        echo "verify.sh: no fetch helps you. That commit never existed."
+        echo "verify.sh: confirm by hand that this build produced the deployed bytes."
+        echo "verify.sh: then run the command again:"
+        echo
+        echo "    ALLOW_COMMIT_MISMATCH=1 make verify DEPLOYMENT=$NAME CHAIN_ID=$CHAIN"
+      } >&2
+      exit 1
+    fi
+
     # `git diff --quiet` answers with three codes. 0 means the paths are equal.
     # 1 means they differ. Anything else, such as 128, means git could not
     # compare the two commits at all. Each code needs its own answer.
