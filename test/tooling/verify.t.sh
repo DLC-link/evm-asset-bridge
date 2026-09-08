@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Runs script/verify.sh in dry-run mode and checks the command it builds.
-#
-# Every case here either sends nothing or stops before it sends. No case
-# reaches a live block explorer.
+# Runs script/verify.sh in dry-run mode and checks the request it builds.
 set -euo pipefail
 
 export PATH="$HOME/.foundry/bin:$PATH"
@@ -12,23 +9,31 @@ cd "$ROOT"
 CHAIN_ID=31337
 FAILURES=0
 
-# check and contains live in one file. record.t.sh sources the same file, so
-# both tests count failures the same way.
+# check, contains, and the compiler-input rule live in one file. record.t.sh
+# sources the same file, so both tests clean up the same way. An input that a
+# record still names survives, because a real deploy leaves both untracked.
 . "$ROOT/test/tooling/lib.sh"
 
-HEAD_COMMIT=$(git rev-parse --short HEAD)
+# The stub directory holds the canned explorer replies. See the stub section
+# below.
+STUB_DIR=$(mktemp -d)
+cleanup() {
+  rm -rf "$STUB_DIR"
+  prune_untracked_solc_inputs
+}
+trap cleanup EXIT
 
-# The records must be present, and they must name this commit. verify.sh stops
-# on any other commit, because forge compiles the source again. A clean checkout
-# holds no record, so this test builds them once.
+# The records and their compiler inputs must both be present. A clean checkout
+# holds neither, so this test builds them once.
 NEED_RECORDS=0
 for role in implementation proxy proxyAdmin; do
   r="deployments/BETH.$role.$CHAIN_ID.json"
   [ -f "$r" ] || { NEED_RECORDS=1; break; }
-  [ "$(jq -r '.gitCommit // empty' "$r")" = "$HEAD_COMMIT" ] || { NEED_RECORDS=1; break; }
+  h="$(jq -r '.solcInputHash // empty' "$r")"
+  [ -n "$h" ] && [ -f "deployments/solcInputs/$h.json" ] || { NEED_RECORDS=1; break; }
 done
 if [ "$NEED_RECORDS" -eq 1 ]; then
-  echo "== records missing or from another commit; running record.t.sh first =="
+  echo "== records or compiler inputs missing; running record.t.sh first =="
   ./test/tooling/record.t.sh >/dev/null
 fi
 
@@ -53,34 +58,15 @@ contains "names the files it wanted" "$OUT" "deployments/NOPE.<role>.$CHAIN_ID.j
 echo "== dry run, all three contracts =="
 OUT=$(DRY_RUN=1 ETHERSCAN_API_KEY_31337=testkey DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
 
-contains "reports the key variable"   "$OUT" "key from ETHERSCAN_API_KEY_$CHAIN_ID"
-contains "calls forge verify-contract" "$OUT" "forge verify-contract"
-contains "passes the chain id"        "$OUT" "--chain $CHAIN_ID"
-contains "waits for the result"       "$OUT" "--watch"
-contains "handles implementation"     "$OUT" "src/BitSafeEvmAssetBridge.sol:BitSafeEvmAssetBridge"
-contains "handles the proxy"          "$OUT" ":TransparentUpgradeableProxy"
-contains "handles the ProxyAdmin"     "$OUT" ":ProxyAdmin"
-contains "passes the compiler version" "$OUT" "--compiler-version v0.8.34+commit.80d5c536"
-contains "passes the proxy ctor args" "$OUT" \
-  "--constructor-args $(jq -r .encodedConstructorArgs "deployments/BETH.proxy.$CHAIN_ID.json")"
-
-# forge picks the host itself unless a variable names one. The old code held a
-# default endpoint of its own.
-contains "leaves the host to forge" "$OUT" "explorer chosen by forge for chain $CHAIN_ID"
-check    "passes no verifier url"   "$(printf '%s' "$OUT" | grep -c -- "--verifier-url" || true)" "0"
-
-# The key reaches forge through the environment, so argv never holds it. A
-# local `ps` therefore cannot show it. The printed line names the variable.
-contains "passes the key by variable" "$OUT" "ETHERSCAN_API_KEY=\"\$ETHERSCAN_API_KEY_$CHAIN_ID\""
+contains "reports the key variable"  "$OUT" "key from ETHERSCAN_API_KEY_$CHAIN_ID"
+contains "handles implementation"    "$OUT" "src/BitSafeEvmAssetBridge.sol:BitSafeEvmAssetBridge"
+contains "handles the proxy"         "$OUT" ":TransparentUpgradeableProxy"
+contains "handles the ProxyAdmin"    "$OUT" ":ProxyAdmin"
+contains "sends the right codeformat" "$OUT" "solidity-standard-json-input"
+contains "sends the compiler version" "$OUT" "v0.8.34+commit.80d5c536"
+contains "sends the MIT license code" "$OUT" "licenseType=3"
+contains "sends the proxy ctor args"  "$OUT" "$(jq -r .encodedConstructorArgs "deployments/BETH.proxy.$CHAIN_ID.json" | cut -c3-42)"
 check    "never prints the key"       "$(printf '%s' "$OUT" | grep -c testkey || true)" "0"
-check    "never passes the key in argv" \
-  "$(printf '%s' "$OUT" | grep -c -- "--etherscan-api-key" || true)" "0"
-
-echo "== a per-chain explorer host =="
-OUT=$(DRY_RUN=1 VERIFIER_URL_31337=https://explorer.example/api \
-  ETHERSCAN_API_KEY=x DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
-contains "reports the host"     "$OUT" "explorer https://explorer.example/api"
-contains "passes the host on"   "$OUT" "--verifier-url https://explorer.example/api"
 
 echo "== dry run, one contract only =="
 OUT=$(DRY_RUN=1 ETHERSCAN_API_KEY=testkey CONTRACT=implementation DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
@@ -124,171 +110,155 @@ check "exits non-zero when a requested role has no record" "$RC" "2"
 contains "names the role it could not find" "$OUT" "Got 'implementation'"
 contains "names the roles it did find"      "$OUT" "records: proxy proxyAdmin"
 
-# ---- the build guard ---------------------------------------------------------
-# forge compiles the source again before it submits. A build of other source
-# therefore submits bytes the chain never held. The guard compares the source of
-# two commits, not their hashes, so a records-only commit passes.
-#
-# The two fixtures below are commit objects this test writes. It cannot use a
-# real ancestor, because CI checks out one commit only. Both objects stay
-# unreachable, and `git gc` collects them.
-#
-# FIXTURE_IDENT gives `git commit-tree` an author and a committer. Do not remove
-# it. A CI runner has no git identity, because actions/checkout sets none, and
-# `git commit-tree` then fails with "empty ident name". Your own machine has a
-# global identity, so it hides the failure.
-FIXTURE_IDENT=(
-  GIT_AUTHOR_NAME="verify.t.sh fixture" GIT_AUTHOR_EMAIL="fixture@localhost"
-  GIT_COMMITTER_NAME="verify.t.sh fixture" GIT_COMMITTER_EMAIL="fixture@localhost"
-)
 
-# SAME_SOURCE carries HEAD's own tree, so only the commit hash differs.
-SAME_SOURCE=$(env "${FIXTURE_IDENT[@]}" \
-  git commit-tree "HEAD^{tree}" -m "verify.t.sh fixture: the source of HEAD" </dev/null)
+# ---- the explorer replies ----------------------------------------------------
+# The dry-run cases above send nothing, so they never test how the script reads
+# an explorer reply. A fake curl on PATH replaces the network. script/verify.sh
+# always sends its request on stdin, so the stub reads the whole request and
+# prints a canned reply. A fake sleep joins it, because the poll loop waits five
+# seconds thirty times.
+FAKE_PATH="$ROOT/test/tooling/fake:$PATH"
 
-# OTHER_SOURCE carries HEAD's tree with one changed foundry.toml. A temporary
-# index keeps the real one untouched.
-FIXTURE_DIR=$(mktemp -d)
-FIXTURE_BLOB=$(printf 'solc_version = "0.0.1"\n' | git hash-object -w --stdin)
-GIT_INDEX_FILE="$FIXTURE_DIR/index" git read-tree HEAD
-GIT_INDEX_FILE="$FIXTURE_DIR/index" git update-index --add --cacheinfo 100644 "$FIXTURE_BLOB" foundry.toml
-OTHER_TREE=$(GIT_INDEX_FILE="$FIXTURE_DIR/index" git write-tree)
-rm -rf "$FIXTURE_DIR"
-OTHER_SOURCE=$(env "${FIXTURE_IDENT[@]}" \
-  git commit-tree "$OTHER_TREE" -m "verify.t.sh fixture: another foundry.toml" </dev/null)
-
-GUARD="deployments/BETH.proxy.$CHAIN_ID.json"
-cp "$GUARD" "$GUARD.bak"
-
-forge_commit() { # forge_commit <commit> — rewrites the proxy record's gitCommit
-  jq --arg c "$1" '.gitCommit = $c' "$GUARD.bak" >"$GUARD"
+# run_stub answers the three calls with the bodies it is given. It sets
+# STUB_OUT and STUB_RC, and it leaves the captured requests in $STUB_DIR/log.
+# It runs one role, the implementation, unless a fourth argument names another.
+# An empty fourth argument runs every role.
+run_stub() { # run_stub <getabiBody> <submitBody> <pollBody> [role]
+  rm -f "$STUB_DIR"/getabi.txt "$STUB_DIR"/submit.txt "$STUB_DIR"/poll.txt "$STUB_DIR"/log
+  printf '%s' "$1" >"$STUB_DIR/getabi.txt"
+  printf '%s' "$2" >"$STUB_DIR/submit.txt"
+  printf '%s' "$3" >"$STUB_DIR/poll.txt"
   set +e
-  GUARD_OUT=$(DRY_RUN=1 ETHERSCAN_API_KEY=x DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
-  GUARD_RC=$?
+  STUB_OUT=$(PATH="$FAKE_PATH" FAKE_CURL_DIR="$STUB_DIR" FAKE_CURL_LOG="$STUB_DIR/log" \
+    ETHERSCAN_API_KEY=stubkey CONTRACT="${4-implementation}" \
+    DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
+  STUB_RC=$?
   set -e
 }
 
-echo "== another commit with the same source =="
-# `git diff --quiet` exits 0 here, so the run goes on. This is the case a
-# records-only commit creates.
-forge_commit "$SAME_SOURCE"
-check    "exits zero when the source matches" "$GUARD_RC" "0"
-contains "names the record's commit" "$GUARD_OUT" "the record names commit $SAME_SOURCE"
-contains "names the checked-out commit" "$GUARD_OUT" "and HEAD is $HEAD_COMMIT"
-contains "names the paths it compared" "$GUARD_OUT" "src lib foundry.toml remappings.txt agree"
-contains "verifies the proxy anyway" "$GUARD_OUT" "DRY  proxy"
+NOT_VERIFIED='{"status":"0","result":"Contract source code not verified"}'
+GUID='{"status":"1","result":"stubguid"}'
+PASSED='{"status":"1","result":"Pass - Verified"}'
 
-echo "== another commit whose source differs =="
-# `git diff --quiet` exits 1 here, so the run stops.
-forge_commit "$OTHER_SOURCE"
-check    "exits non-zero on a source change" "$GUARD_RC" "1"
-contains "blames the source"             "$GUARD_OUT" "The source does not match the deployment"
-contains "names the record's commit"     "$GUARD_OUT" "names commit '$OTHER_SOURCE'"
-contains "names the checked-out commit"  "$GUARD_OUT" "HEAD is '$HEAD_COMMIT'"
-contains "names the paths that changed"  "$GUARD_OUT" "src lib foundry.toml remappings.txt changed"
-contains "gives the recovery command"    "$GUARD_OUT" "git checkout $OTHER_SOURCE"
-contains "names the rebuild"             "$GUARD_OUT" "forge build"
-contains "names the escape hatch"        "$GUARD_OUT" "ALLOW_COMMIT_MISMATCH=1"
-check    "verifies nothing at all"       "$(printf '%s' "$GUARD_OUT" | grep -c "DRY  " || true)" "0"
+echo "== the explorer already has the source =="
+run_stub '{"status":"1","result":"[]"}' "$GUID" "$PASSED"
+check    "exits zero when the source is already verified" "$STUB_RC" "0"
+contains "skips the verified contract" "$STUB_OUT" "SKIP implementation"
 
-echo "== a commit this clone cannot reach =="
-# `git diff --quiet` exits 128 here, which is not a verdict on the source. A
-# rebase or a shallow clone causes it, and it needs its own advice.
-forge_commit deadbee
-check    "exits non-zero on an unreachable commit" "$GUARD_RC" "1"
-contains "says the clone cannot reach it" "$GUARD_OUT" "cannot reach the deployed commit"
-contains "names the commit it wanted"     "$GUARD_OUT" "names commit 'deadbee'"
-contains "says the source is unchecked"   "$GUARD_OUT" "so the source is unchecked"
-contains "rules out a source change"      "$GUARD_OUT" "not a source change"
-contains "tells the operator to fetch"    "$GUARD_OUT" "git fetch --all"
-contains "names the escape hatch"         "$GUARD_OUT" "ALLOW_COMMIT_MISMATCH=1"
-check    "never blames the source" \
-  "$(printf '%s' "$GUARD_OUT" | grep -c "The source does not match" || true)" "0"
-check    "verifies nothing at all" "$(printf '%s' "$GUARD_OUT" | grep -c "DRY  " || true)" "0"
+echo "== the explorer accepts the source =="
+run_stub "$NOT_VERIFIED" "$GUID" "$PASSED"
+check    "exits zero on a pass"      "$STUB_RC" "0"
+contains "sends the contract"        "$STUB_OUT" "SEND implementation"
+contains "reports the pass"          "$STUB_OUT" "OK   implementation"
+contains "quotes the explorer"       "$STUB_OUT" "Pass - Verified"
 
-echo "== a record that names no commit =="
-# record.sh writes 'unknown' when the broadcast artifact carries no commit. No
-# commit exists, so no fetch helps. The old message sent the operator after a
-# commit that never existed.
-forge_commit unknown
-check    "exits non-zero without a recorded commit" "$GUARD_RC" "1"
-contains "says the deploy recorded no commit" "$GUARD_OUT" "The deploy recorded no commit"
-contains "quotes the value it read"           "$GUARD_OUT" "holds the gitCommit 'unknown'"
-contains "says the source is unchecked"       "$GUARD_OUT" "so the source is unchecked"
-contains "tells the operator to check by hand" "$GUARD_OUT" \
-  "confirm by hand that this build produced the deployed bytes"
-contains "gives the escape hatch as the way on" "$GUARD_OUT" \
-  "ALLOW_COMMIT_MISMATCH=1 make verify DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID"
-# The exit code was already right. The advice was the defect, so assert it is
-# gone. No fetch can ever produce this commit.
-check    "never tells the operator to fetch" \
-  "$(printf '%s' "$GUARD_OUT" | grep -c "git fetch" || true)" "0"
-check    "never claims the commit is unreachable" \
-  "$(printf '%s' "$GUARD_OUT" | grep -c "cannot reach the deployed commit" || true)" "0"
-check    "never blames the source" \
-  "$(printf '%s' "$GUARD_OUT" | grep -c "The source does not match" || true)" "0"
-check    "verifies nothing at all" "$(printf '%s' "$GUARD_OUT" | grep -c "DRY  " || true)" "0"
+# The dry-run path prints these fields. This asserts the request really carries
+# them. The key appears in the captured request, which proves it travels on
+# stdin. Argv therefore never holds it, so a local `ps` cannot show it.
+LOG=$(cat "$STUB_DIR/log")
+contains "posts the verify action"   "$LOG" "action=verifysourcecode"
+contains "posts the standard json"   "$LOG" "codeformat=solidity-standard-json-input"
+contains "posts the contract name"   "$LOG" "src/BitSafeEvmAssetBridge.sol:BitSafeEvmAssetBridge"
+contains "posts the license code"    "$LOG" "licenseType=3"
+contains "sends the key on stdin"    "$LOG" "apikey=stubkey"
+check    "never prints the key"      "$(printf '%s' "$STUB_OUT" | grep -c stubkey || true)" "0"
 
-echo "== the escape hatch =="
-# It must open the strictest case, which is a real source change.
-jq --arg c "$OTHER_SOURCE" '.gitCommit = $c' "$GUARD.bak" >"$GUARD"
-set +e
-OUT=$(ALLOW_COMMIT_MISMATCH=1 DRY_RUN=1 ETHERSCAN_API_KEY=x \
-  DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
-RC=$?
-set -e
-mv "$GUARD.bak" "$GUARD"
-check    "exits zero with the escape hatch" "$RC" "0"
-contains "reaches the proxy anyway" "$OUT" "DRY  proxy"
+echo "== the explorer rejects the source =="
+run_stub "$NOT_VERIFIED" '{"status":"0","result":"NOTOK: invalid API key"}' "$PASSED"
+check    "exits non-zero on a reject" "$STUB_RC" "1"
+contains "names the failed role"      "$STUB_OUT" "FAIL implementation"
+contains "quotes the reason"          "$STUB_OUT" "NOTOK: invalid API key"
+contains "counts the failure"         "$STUB_OUT" "1 contract(s) failed"
 
-# ---- records this script must refuse -----------------------------------------
-# One bad record must fail its own role only. The other roles must still run.
-BAD="deployments/BETH.implementation.$CHAIN_ID.json"
+echo "== the already-verified check gets an error page =="
+# A rate-limit page is not JSON. The script must treat the contract as
+# unverified and submit it, rather than skip it.
+run_stub '<html>rate limited</html>' "$GUID" "$PASSED"
+check    "exits zero after an error page" "$STUB_RC" "0"
+contains "submits the contract anyway"    "$STUB_OUT" "SEND implementation"
 
-run_bad() { # run_bad — runs every role in dry-run mode
-  set +e
-  BAD_OUT=$(DRY_RUN=1 ETHERSCAN_API_KEY=x DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
-  BAD_RC=$?
-  set -e
-}
+echo "== the explorer never concludes =="
+# The fake sleep makes this case fast. The real loop waits 150 seconds.
+run_stub "$NOT_VERIFIED" "$GUID" '{"status":"1","result":"Pending in queue"}'
+check    "exits non-zero on a timeout" "$STUB_RC" "1"
+contains "reports the timeout"         "$STUB_OUT" "timed out after 150 seconds"
+
+echo "== the explorer sends no JSON =="
+# A rate-limit page or an empty body must fail one role with a readable reason.
+# It must never stop the run with a raw jq parse error.
+run_stub "$NOT_VERIFIED" '' "$PASSED"
+check    "exits non-zero on an empty submit reply" "$STUB_RC" "1"
+contains "says the reply was empty" "$STUB_OUT" "the explorer sent an empty reply"
+
+run_stub "$NOT_VERIFIED" '<html>502 Bad Gateway</html>' "$PASSED"
+check    "exits non-zero on a non-JSON submit reply" "$STUB_RC" "1"
+contains "quotes the page it got" "$STUB_OUT" "the explorer sent no JSON: <html>502 Bad Gateway</html>"
+
+run_stub "$NOT_VERIFIED" "$GUID" '<html>429 Too Many Requests</html>'
+check    "exits non-zero on a non-JSON poll reply" "$STUB_RC" "1"
+contains "names the timeout"      "$STUB_OUT" "timed out after 150 seconds"
+contains "quotes the poll page"   "$STUB_OUT" "the explorer sent no JSON: <html>429 Too Many Requests</html>"
+
+echo "== the explorer accepts the submit but sends no guid =="
+run_stub "$NOT_VERIFIED" '{"status":"1"}' "$PASSED"
+check    "exits non-zero without a guid" "$STUB_RC" "1"
+contains "says the guid is missing" "$STUB_OUT" "sent no guid"
 
 echo "== a record this script cannot read =="
+# One bad record must fail its own role only. The other roles must still run.
+BAD="deployments/BETH.implementation.$CHAIN_ID.json"
 cp "$BAD" "$BAD.bak"
 printf '{"address": "0x1' >"$BAD"
-run_bad
+run_stub "$NOT_VERIFIED" "$GUID" "$PASSED" ""
 mv "$BAD.bak" "$BAD"
-check    "exits non-zero on a truncated record" "$BAD_RC" "1"
-contains "names the unreadable record" "$BAD_OUT" "holds no valid JSON"
-contains "still handles the proxy"     "$BAD_OUT" "DRY  proxy"
-contains "still handles the admin"     "$BAD_OUT" "DRY  proxyAdmin"
+check    "exits non-zero on a truncated record" "$STUB_RC" "1"
+contains "names the unreadable record" "$STUB_OUT" "holds no valid JSON"
+contains "still verifies the proxy"    "$STUB_OUT" "OK   proxy"
+contains "still verifies the admin"    "$STUB_OUT" "OK   proxyAdmin"
 
 echo "== a record from a newer schema =="
 cp "$BAD" "$BAD.bak"
 jq '.schemaVersion = 2' "$BAD.bak" >"$BAD"
-run_bad
+run_stub "$NOT_VERIFIED" "$GUID" "$PASSED"
 mv "$BAD.bak" "$BAD"
-check    "exits non-zero on an unknown schema" "$BAD_RC" "1"
-contains "names both versions" "$BAD_OUT" "has schemaVersion '2'; this script reads 1"
+check    "exits non-zero on an unknown schema" "$STUB_RC" "1"
+contains "names both versions" "$STUB_OUT" "has schemaVersion '2'; this script reads 1"
 
-echo "== a record missing a field forge needs =="
-# jq prints the word "null" for an absent field. A command carrying that word
+echo "== a record missing a field the explorer needs =="
+# jq prints the word "null" for an absent field. A request holding that word
 # gets a confusing rejection, so the script stops the role first.
 cp "$BAD" "$BAD.bak"
 jq 'del(.encodedConstructorArgs)' "$BAD.bak" >"$BAD"
-run_bad
+run_stub "$NOT_VERIFIED" "$GUID" "$PASSED"
 mv "$BAD.bak" "$BAD"
-check    "exits non-zero on a missing field" "$BAD_RC" "1"
-contains "names the missing field" "$BAD_OUT" "has no encodedConstructorArgs"
+check    "exits non-zero on a missing field" "$STUB_RC" "1"
+contains "names the missing field" "$STUB_OUT" "has no encodedConstructorArgs"
 
-echo "== a record missing its commit =="
-# The build guard reads gitCommit. A record without it would reach forge
-# unchecked, so the script refuses the role.
+echo "== a record holding a line break =="
+# A curl config file holds one directive per line. A newline in a value would
+# start a new directive, such as one that writes a file. The script must refuse
+# the record and send nothing.
 cp "$BAD" "$BAD.bak"
-jq 'del(.gitCommit)' "$BAD.bak" >"$BAD"
-run_bad
+jq '.contractName = "Bridge\noutput = /tmp/stolen"' "$BAD.bak" >"$BAD"
+run_stub "$NOT_VERIFIED" "$GUID" "$PASSED"
 mv "$BAD.bak" "$BAD"
-check    "exits non-zero without a commit" "$BAD_RC" "1"
-contains "names the missing commit" "$BAD_OUT" "has no gitCommit"
+check    "exits non-zero on a line break" "$STUB_RC" "1"
+contains "names the line break" "$STUB_OUT" "holds a line break"
+check    "reaches no explorer" \
+  "$([ -s "$STUB_DIR/log" ] && echo sent || echo nothing)" "nothing"
 
+echo "== a poisoned explorer host =="
+# The host, the key and the chain id all reach the same curl config. The script
+# checks them once, before it reads any record. This case also proves the check
+# runs at all: bash reports "command not found" for a function defined further
+# down the file, and an `if` swallows that, so the check would do nothing.
+set +e
+OUT=$(VERIFIER_URL_31337="$(printf 'https://x\noutput = /tmp/stolen')" \
+  ETHERSCAN_API_KEY=x DRY_RUN=1 DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
+RC=$?
+set -e
+check    "exits non-zero on a poisoned host" "$RC" "2"
+contains "names the line break"   "$OUT" "holds a line break"
+check    "the check itself runs"  "$(printf '%s' "$OUT" | grep -c 'command not found' || true)" "0"
 echo
 if [ "$FAILURES" -eq 0 ]; then echo "verify.t.sh: all checks passed"; else echo "verify.t.sh: $FAILURES check(s) failed"; exit 1; fi

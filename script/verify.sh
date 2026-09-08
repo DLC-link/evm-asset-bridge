@@ -2,17 +2,11 @@
 #
 # verify.sh — submits the source of every recorded contract to a block explorer.
 #
-# It reads the records that script/record.sh wrote. It then runs
-# `forge verify-contract` once per record.
+# It reads the records that script/record.sh wrote. It submits the stored
+# compiler input, so the explorer compiles the exact input that produced the
+# deployed bytes and reaches an exact match. It needs no local build.
 #
-# forge does six jobs this script used to do by hand. It picks the explorer
-# host, it reads the API key, it skips a contract that already has verified
-# source, it maps the licence, it sends the compiler version, and it waits for
-# the result.
-#
-# forge compiles the source again on this machine. The local build must
-# therefore match the deployed bytes. The script compares the source of each
-# record's gitCommit against HEAD, and it stops when the two differ.
+# It skips a contract that already has verified source, so it is safe to repeat.
 #
 # Usage:
 #   DEPLOYMENT=BETH CHAIN_ID=11155111 ./script/verify.sh
@@ -23,13 +17,11 @@
 #   ETHERSCAN_API_KEY_<id>      the key for that chain. Read first.
 #   ETHERSCAN_API_KEY           the fallback key.
 #   VERIFIER_URL_<id>           that chain's explorer host.
-#   VERIFIER_URL                the fallback host. forge picks one otherwise.
+#   VERIFIER_URL                the fallback host. Defaults to Etherscan V2.
 #   CONTRACT                    optional. One recorded role, such as proxy.
-#   ALLOW_COMMIT_MISMATCH=1     skip the commit check. Read the guard below.
-#   DRY_RUN=1                   print the command and run nothing.
+#   DRY_RUN=1                   print the request and send nothing.
 set -euo pipefail
 
-export PATH="$HOME/.foundry/bin:$PATH"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
@@ -37,18 +29,28 @@ NAME="${DEPLOYMENT:-}"
 CHAIN="${CHAIN_ID:-}"
 ONLY="${CONTRACT:-}"
 DRY="${DRY_RUN:-}"
-ALLOW_MISMATCH="${ALLOW_COMMIT_MISMATCH:-}"
 
 [ -n "$NAME" ]  || { echo "verify.sh: DEPLOYMENT is not set. Example: DEPLOYMENT=BETH" >&2; exit 2; }
 [ -n "$CHAIN" ] || { echo "verify.sh: CHAIN_ID is not set. Example: CHAIN_ID=11155111" >&2; exit 2; }
 
-for tool in jq forge git; do
+for tool in jq curl; do
   command -v "$tool" >/dev/null || { echo "verify.sh: $tool is not installed" >&2; exit 2; }
 done
 
 # The record schema this script reads. script/record.sh stamps the same number
 # on every record it writes. A record with any other version stops its role.
 READS_SCHEMA_VERSION=1
+
+# A curl config file holds one directive per line, so a newline inside a value
+# would start a new directive. cfg_escape cannot escape that, and the values
+# below come from a record file and from the explorer. So the script refuses
+# such a value instead.
+has_line_break() { # has_line_break <value>
+  case "$1" in
+    *$'\n'* | *$'\r'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 # ---- the API key ------------------------------------------------------------
 # The per-chain variable wins. The script prints which one it used, so the
@@ -65,16 +67,17 @@ if [ -z "$KEY" ]; then
 fi
 
 # ---- the explorer host ------------------------------------------------------
-# An empty host leaves the choice to forge, which knows every Etherscan chain.
 HOST=$(printenv "VERIFIER_URL_$CHAIN" || true)
 [ -n "$HOST" ] || HOST="${VERIFIER_URL:-}"
+[ -n "$HOST" ] || HOST="https://api.etherscan.io/v2/api?chainid=$CHAIN"
+
+if has_line_break "$HOST$KEY$CHAIN"; then
+  echo "verify.sh: the host, the key, or the chain id holds a line break" >&2
+  exit 2
+fi
 
 echo "verify.sh: deployment $NAME, chain $CHAIN, key from $KEY_VAR"
-if [ -n "$HOST" ]; then
-  echo "verify.sh: explorer $HOST"
-else
-  echo "verify.sh: explorer chosen by forge for chain $CHAIN"
-fi
+echo "verify.sh: explorer $HOST"
 
 # ---- which roles ------------------------------------------------------------
 # The role is a free label that the deploy script chooses. A fixed list would
@@ -112,114 +115,48 @@ fi
 
 echo "verify.sh: roles $ROLES"
 
-# ---- the build guard --------------------------------------------------------
-# forge compiles the source again before it submits. A build of other source
-# therefore submits bytes the chain never held. The explorer either rejects the
-# submission or publishes the wrong code, and nothing warns the operator.
+# `?` or `&` depends on whether the host already carries a query string.
+sep() { case "$1" in *\?*) printf '&' ;; *) printf '?' ;; esac; }
+
+# This escapes backslash and double quote for curl's quoted config-file syntax.
+cfg_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
+# curl_get reads the URL from stdin, not argv, so a local `ps` cannot show the key.
+curl_get() { # curl_get <url> <max-time>
+  curl -sS --connect-timeout 10 --max-time "$2" -K - <<CFG || true
+url = "$(cfg_escape "$1")"
+CFG
+}
+
+# json_field prints one field of a JSON body. It prints the default instead when
+# the body is not JSON, or when the field is absent or null.
 #
-# The guard compares the source, not the commit hash. Four paths decide the
-# compiled bytes. `script` and `test` decide none of them, because verification
-# submits neither. A commit that only adds records therefore leaves the guard
-# quiet.
-BUILD_PATHS=(src lib foundry.toml remappings.txt)
-HEAD_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || true)
-EQUIVALENT_SEEN=""
-if [ -z "$ALLOW_MISMATCH" ]; then
-  for ROLE in $ROLES; do
-    RECORD="deployments/$NAME.$ROLE.$CHAIN.json"
-    [ -f "$RECORD" ] || continue
-    RECORD_COMMIT=$(jq -r '.gitCommit // empty' "$RECORD" 2>/dev/null || true)
-    # An unreadable record names no commit. The loop below reports why, so the
-    # guard leaves it alone. The loop also refuses a record with no gitCommit,
-    # so no record reaches forge unchecked.
-    [ -n "$RECORD_COMMIT" ] || continue
-    [ "$RECORD_COMMIT" != "$HEAD_COMMIT" ] || continue
-
-    # record.sh writes 'unknown' when the broadcast artifact carries no commit.
-    # No commit exists, so no fetch helps, and the git-diff attempt below would
-    # send the operator after a commit that never existed.
-    if [ "$RECORD_COMMIT" = "unknown" ]; then
-      {
-        echo "verify.sh: STOP. The deploy recorded no commit."
-        echo "verify.sh: $RECORD holds the gitCommit 'unknown'."
-        echo "verify.sh: HEAD is '$HEAD_COMMIT'."
-        echo "verify.sh: the guard has no commit to compare, so the source is unchecked."
-        echo "verify.sh: no fetch helps you. That commit never existed."
-        echo "verify.sh: confirm by hand that this build produced the deployed bytes."
-        echo "verify.sh: then run the command again:"
-        echo
-        echo "    ALLOW_COMMIT_MISMATCH=1 make verify DEPLOYMENT=$NAME CHAIN_ID=$CHAIN"
-      } >&2
-      exit 1
-    fi
-
-    # `git diff --quiet` answers with three codes. 0 means the paths are equal.
-    # 1 means they differ. Anything else, such as 128, means git could not
-    # compare the two commits at all. Each code needs its own answer.
-    DIFF_RC=0
-    git diff --quiet "$RECORD_COMMIT" HEAD -- "${BUILD_PATHS[@]}" 2>/dev/null || DIFF_RC=$?
-
-    if [ "$DIFF_RC" -eq 0 ]; then
-      # One line per distinct commit. Three records normally share one.
-      case " $EQUIVALENT_SEEN " in
-        *" $RECORD_COMMIT "*) ;;
-        *)
-          EQUIVALENT_SEEN="$EQUIVALENT_SEEN $RECORD_COMMIT"
-          echo "verify.sh: the record names commit $RECORD_COMMIT, and HEAD is $HEAD_COMMIT"
-          echo "verify.sh: ${BUILD_PATHS[*]} agree, so this build matches"
-          ;;
-      esac
-      continue
-    fi
-
-    if [ "$DIFF_RC" -eq 1 ]; then
-      {
-        echo "verify.sh: STOP. The source does not match the deployment."
-        echo "verify.sh: $RECORD names commit '$RECORD_COMMIT'."
-        echo "verify.sh: HEAD is '$HEAD_COMMIT'."
-        echo "verify.sh: ${BUILD_PATHS[*]} changed between the two."
-        echo "verify.sh: forge compiles the source again before it submits."
-        echo "verify.sh: other source compiles other bytes, and the result is wrong."
-        echo "verify.sh: go back to the deployed commit, build, and verify:"
-        echo
-        echo "    git checkout $RECORD_COMMIT"
-        echo "    forge build"
-        echo "    make verify DEPLOYMENT=$NAME CHAIN_ID=$CHAIN"
-        echo
-        echo "verify.sh: set ALLOW_COMMIT_MISMATCH=1 if you know the build matches."
-      } >&2
-      exit 1
-    fi
-
-    # git could not compare the two commits. A rebase or a shallow clone drops
-    # the deployed commit, and the guard then proves nothing about the source.
-    {
-      echo "verify.sh: STOP. This clone cannot reach the deployed commit."
-      echo "verify.sh: $RECORD names commit '$RECORD_COMMIT'."
-      echo "verify.sh: HEAD is '$HEAD_COMMIT'."
-      echo "verify.sh: git cannot compare the two, so the source is unchecked."
-      echo "verify.sh: this is not a source change. The commit is unreachable."
-      echo "verify.sh: fetch the commit, then verify again:"
-      echo
-      echo "    git fetch --all"
-      echo "    make verify DEPLOYMENT=$NAME CHAIN_ID=$CHAIN"
-      echo
-      echo "verify.sh: set ALLOW_COMMIT_MISMATCH=1 if you know the build matches."
-    } >&2
-    exit 1
-  done
-fi
-
-# json_field prints one field of a JSON record. It prints the default instead
-# when the field is absent or null.
-#
-# `jq -r` prints the word "null" for an absent field, and a request carrying
-# that word gets a confusing rejection. So every read of a record goes through
-# this function.
+# An explorer can answer with an HTML error page or an empty body. `jq` then
+# exits non-zero, and inside an assignment that status stops the whole script.
+# So every read of a reply and of a record goes through this function.
 json_field() { # json_field <text> <filter> <default>
   local out
   out=$(printf '%s' "$1" | jq -r "$2 // empty" 2>/dev/null || true)
   if [ -n "$out" ]; then printf '%s' "$out"; else printf '%s' "$3"; fi
+}
+
+# explorer_reason prints why one call failed. A JSON reply names the reason. Any
+# other body, such as a rate-limit page, gives its first 200 characters.
+explorer_reason() { # explorer_reason <text>
+  local reason
+  reason=$(json_field "$1" '.result // .message' "")
+  if [ -n "$reason" ]; then
+    printf '%s' "$reason"
+  elif [ -z "$1" ]; then
+    printf '%s' "the explorer sent an empty reply"
+  else
+    printf 'the explorer sent no JSON: %s' "$(printf '%s' "$1" | tr '\n\r\t' '   ' | cut -c1-200)"
+  fi
 }
 
 FAILED=0
@@ -255,51 +192,151 @@ for ROLE in $ROLES; do
   CONTRACT_NAME=$(json_field "$RECORD_JSON" .contractName "")
   SOURCE_PATH=$(json_field "$RECORD_JSON" .sourcePath "")
   ARGS=$(json_field "$RECORD_JSON" .encodedConstructorArgs "")
+  SOLC_HASH=$(json_field "$RECORD_JSON" .solcInputHash "")
   COMPILER=$(json_field "$RECORD_JSON" .compiler.version "")
-  COMMIT=$(json_field "$RECORD_JSON" .gitCommit "")
 
+  # The explorer needs all six. `jq -r` prints the word "null" for an absent
+  # field, and a request carrying that word gets a confusing rejection.
   MISSING=""
   [ -n "$ADDRESS" ] || MISSING="$MISSING address"
   [ -n "$CONTRACT_NAME" ] || MISSING="$MISSING contractName"
   [ -n "$SOURCE_PATH" ] || MISSING="$MISSING sourcePath"
   [ -n "$ARGS" ] || MISSING="$MISSING encodedConstructorArgs"
+  [ -n "$SOLC_HASH" ] || MISSING="$MISSING solcInputHash"
   [ -n "$COMPILER" ] || MISSING="$MISSING compiler.version"
-  # The build guard above reads gitCommit. A record without it would reach
-  # forge unchecked, so it fails here instead.
-  [ -n "$COMMIT" ] || MISSING="$MISSING gitCommit"
   if [ -n "$MISSING" ]; then
     echo "  FAIL $ROLE: $RECORD has no$MISSING"
     FAILED=$((FAILED + 1))
     continue
   fi
 
+  if has_line_break "$ADDRESS$CONTRACT_NAME$SOURCE_PATH$ARGS$SOLC_HASH$COMPILER"; then
+    echo "  FAIL $ROLE: $RECORD holds a line break in a field this script sends"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
+
+  SOLC_INPUT="deployments/solcInputs/$SOLC_HASH.json"
   FQN="$SOURCE_PATH:$CONTRACT_NAME"
 
-  # The record's own encoded arguments go to forge. `--guess-constructor-args`
-  # would not work here, because the ProxyAdmin has no transaction of its own.
-  # The proxy constructor created it.
-  FORGE_ARGS=(--chain "$CHAIN" --compiler-version "v$COMPILER"
-    --constructor-args "$ARGS" --watch)
-  [ -z "$HOST" ] || FORGE_ARGS+=(--verifier-url "$HOST")
-  FORGE_ARGS+=("$ADDRESS" "$FQN")
+  if [ ! -f "$SOLC_INPUT" ]; then
+    echo "  FAIL $ROLE: no compiler input at $SOLC_INPUT"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
+
+  # Etherscan wants the arguments with no 0x prefix.
+  ARGS_NO_PREFIX="${ARGS#0x}"
 
   if [ -n "$DRY" ]; then
-    # The printed line names the key variable, never the key. An operator can
-    # copy the line and run it.
     echo "  DRY  $ROLE $ADDRESS"
-    echo "       ETHERSCAN_API_KEY=\"\$$KEY_VAR\" forge verify-contract ${FORGE_ARGS[*]}"
+    echo "       contractname=$FQN"
+    echo "       compilerversion=v$COMPILER"
+    echo "       codeformat=solidity-standard-json-input"
+    echo "       licenseType=3"
+    echo "       constructorArguements=$ARGS_NO_PREFIX"
+    echo "       sourceCode=@$SOLC_INPUT ($(wc -c <"$SOLC_INPUT" | tr -d ' ') bytes)"
+    continue
+  fi
+
+  # ---- skip a contract that already has verified source ---------------------
+  ABI_RESPONSE=$(curl_get "$HOST$(sep "$HOST")module=contract&action=getabi&address=$ADDRESS&apikey=$KEY" 30)
+  # A reply this script cannot read is not proof of verified source. The role
+  # goes on to the submit step, which reports a real reason when it fails.
+  if [ "$(json_field "$ABI_RESPONSE" .status 0)" = "1" ]; then
+    echo "  SKIP $ROLE $ADDRESS: already verified"
     continue
   fi
 
   echo "  SEND $ROLE $ADDRESS ($FQN)"
-  # The key travels in the environment, so argv never holds it. A local `ps`
-  # therefore cannot show it.
-  if ETHERSCAN_API_KEY="$KEY" forge verify-contract "${FORGE_ARGS[@]}"; then
-    echo "  OK   $ROLE $ADDRESS"
+  # The URL and every field, including the key, arrive on stdin. Argv never
+  # carries them, so a local `ps` cannot show the key. The upload is large,
+  # so this call gets a longer budget than the two small GET calls.
+  SUBMIT=$(curl -sS --connect-timeout 10 --max-time 180 -K - <<CFG || true
+url = "$(cfg_escape "$HOST")"
+request = "POST"
+data-urlencode = "apikey=$(cfg_escape "$KEY")"
+data-urlencode = "chainid=$(cfg_escape "$CHAIN")"
+data-urlencode = "module=contract"
+data-urlencode = "action=verifysourcecode"
+data-urlencode = "contractaddress=$(cfg_escape "$ADDRESS")"
+data-urlencode = "sourceCode@$(cfg_escape "$SOLC_INPUT")"
+data-urlencode = "codeformat=solidity-standard-json-input"
+data-urlencode = "contractname=$(cfg_escape "$FQN")"
+data-urlencode = "compilerversion=v$(cfg_escape "$COMPILER")"
+data-urlencode = "constructorArguements=$(cfg_escape "$ARGS_NO_PREFIX")"
+data-urlencode = "licenseType=3"
+CFG
+)
+
+  if [ "$(json_field "$SUBMIT" .status 0)" != "1" ]; then
+    echo "  FAIL $ROLE: $(explorer_reason "$SUBMIT")"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
+
+  # The explorer answers a good submit with a guid. The poll step needs it.
+  GUID=$(json_field "$SUBMIT" .result "")
+  if [ -z "$GUID" ]; then
+    echo "  FAIL $ROLE: the explorer accepted the submit but sent no guid"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
+  if has_line_break "$GUID"; then
+    echo "  FAIL $ROLE: the explorer sent a guid holding a line break"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
+
+  # ---- poll -----------------------------------------------------------------
+  # TEXT holds the poll's result field. The loop keeps polling while TEXT is
+  # empty or "Pending in queue". RESULT stays empty until the explorer
+  # concludes, pass or fail, and RESULT_STATUS is captured at that moment.
+  # POLL_NOTE holds the last reply the script could not read, so a timeout can
+  # say why.
+  RESULT=""
+  RESULT_STATUS=""
+  POLL_NOTE=""
+  for _ in $(seq 1 30); do
+    sleep 5
+    POLL=$(curl_get "$HOST$(sep "$HOST")module=contract&action=checkverifystatus&guid=$GUID&apikey=$KEY" 30)
+    TEXT=$(json_field "$POLL" .result "")
+    if [ -z "$TEXT" ]; then
+      # An empty body, or a body this script cannot read, is not a verdict. The
+      # loop keeps polling and keeps the reason for the timeout message.
+      POLL_NOTE=$(explorer_reason "$POLL")
+      continue
+    fi
+    case "$TEXT" in
+      "Pending in queue")
+        POLL_NOTE=""
+        continue
+        ;;
+      *)
+        RESULT="$TEXT"
+        RESULT_STATUS=$(json_field "$POLL" .status 0)
+        break
+        ;;
+    esac
+  done
+
+  # An empty RESULT means every poll timed out or pended. That counts as a
+  # failure. The explorer's last "still pending" reply can still carry status "1".
+  if [ -z "$RESULT" ] && [ -n "$POLL_NOTE" ]; then
+    echo "  FAIL $ROLE $ADDRESS: timed out after 150 seconds. $POLL_NOTE"
+    FAILED=$((FAILED + 1))
+  elif [ -z "$RESULT" ]; then
+    echo "  FAIL $ROLE $ADDRESS: timed out after 150 seconds"
+    FAILED=$((FAILED + 1))
+  elif [ "$RESULT_STATUS" = "1" ]; then
+    echo "  OK   $ROLE $ADDRESS: $RESULT"
   else
-    echo "  FAIL $ROLE $ADDRESS: forge verify-contract failed"
+    echo "  FAIL $ROLE $ADDRESS: $RESULT"
     FAILED=$((FAILED + 1))
   fi
+
+  # Stay inside the explorer's rate limit.
+  sleep 0.5
 done
 
 if [ "$FAILED" -gt 0 ]; then
