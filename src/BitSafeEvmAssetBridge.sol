@@ -207,7 +207,8 @@ contract BitSafeEvmAssetBridge is
 
     /// @notice The maximum distance a withdrawal `deadline` can sit past
     ///         `block.timestamp`, in seconds (inclusive). `0` turns the bound
-    ///         off. The attestor stack reads this value to derive deadlines.
+    ///         off. The attestor stack reads this value to pick its signing
+    ///         mode and to derive deadlines.
     function withdrawalHorizon() external view returns (uint256) {
         return _getBridgeStorage().withdrawalHorizon;
     }
@@ -319,14 +320,12 @@ contract BitSafeEvmAssetBridge is
     /// @notice Sets the withdrawal horizon: the maximum distance a withdrawal
     ///         `deadline` can sit past `block.timestamp`, in seconds. The
     ///         bound is inclusive. `0` disables the bound.
-    /// @dev The attestor stack reads this value to derive deadlines. Set a
-    ///      non-zero horizon only after the attestors derive real deadlines;
-    ///      sentinel-mode bundles revert against a non-zero bound. Keep the
-    ///      horizon at least ten times any
-    ///      attestor-side tolerance, so a horizon change between two
-    ///      attestors' reads cannot make an honest deadline fail the bound.
-    ///      The default of 0 means a fresh or upgraded deployment needs no
-    ///      reinitializer; the bridge admin sets the horizon post-deploy.
+    /// @dev The attestor stack reads this view to pick its signing mode and
+    ///      to derive deadlines: 0 means the sentinel deadline, non-zero
+    ///      means derived deadlines. This one transaction therefore
+    ///      activates the bound. A change that lands between two attestors'
+    ///      reads splits their digests; the attestors defer the request to
+    ///      the next signing tick and re-sign.
     function setWithdrawalHorizon(uint256 horizon) external onlyRole(BRIDGE_ADMIN_ROLE) {
         _getBridgeStorage().withdrawalHorizon = horizon;
         emit WithdrawalHorizonSet(horizon);

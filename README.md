@@ -59,14 +59,15 @@ stack limit.
 
 The horizon bounds how far a withdrawal `deadline` can sit past
 `block.timestamp` (inclusive). The contract deploys with `0`, which disables
-the bound. Launch runs disabled: the attestors sign a fixed sentinel deadline,
-and the bound stays off. Activation later needs no contract change, but the
-order matters. First the attestor release switches to derived deadlines, then
-the bridge admin calls `setWithdrawalHorizon(horizon)` — the reverse order
-makes sentinel bundles revert against the new bound. The suggested first value
-is 48 hours; tighten it later with one admin transaction. `initialize` cannot
-take the horizon as a parameter because it already sits at the EVM stack
-limit.
+the bound. The attestors derive their signing mode from the
+`withdrawalHorizon()` view. While the view returns `0`, they sign the fixed
+sentinel deadline. When the view returns a non-zero value, they derive real
+deadlines. Activation is therefore one admin transaction:
+`setWithdrawalHorizon(horizon)`. That transaction invalidates every
+unsubmitted sentinel bundle, and the attestors re-sign those requests in
+derived mode. The suggested first value is 48 hours; tighten it later with
+one admin transaction. `initialize` cannot take the horizon as a parameter
+because it already sits at the EVM stack limit.
 
 ### Post-deploy: the sentry pause role
 
@@ -204,22 +205,32 @@ Rules the contract enforces on submission (`withdraw`):
   `deadline == block.timestamp + horizon` passes. A horizon of `0` disables
   the bound.
 
-The deadline runs in one of two modes. At launch, every attestor signs the
-same fixed sentinel deadline, a far-future constant in the shared release, and
-the on-chain horizon stays `0` (bound off). In derived mode, every attestor
-derives the deadline alone, with the same rule:
-`deadline = ledgerTimeOf(WithdrawRequest create) + withdrawalHorizon`. Every
-input is a ledger record: no local clocks, no slack constant. Each attestor
-reads the horizon from the contract's `withdrawalHorizon()` view — the single
-source of the policy value; there is no per-node horizon config. All attestors
-compute the same value, so the signatures combine with no coordinator-proposed
-field. Activate derived mode before the admin sets a non-zero horizon (see the
-deploy notes), start long — 48 hours is suggested — and tighten later with one
-admin transaction.
+The deadline runs in one of two modes, and the contract's
+`withdrawalHorizon()` view selects the mode. While the view returns `0`,
+every attestor signs the same fixed sentinel deadline, a far-future constant
+in the shared release, and the bound stays off. When the view returns a
+non-zero value, every attestor derives the deadline alone, with the same
+rule: `deadline = ledgerTimeOf(WithdrawRequest create) + withdrawalHorizon`.
+Every input is a ledger record or the on-chain view: no local clocks, no
+slack constant, no per-node horizon config. All attestors compute the same
+value, so the signatures combine with no coordinator-proposed field.
+Activation is one admin transaction (see the deploy notes); start long — 48
+hours is suggested — and tighten later with one admin transaction.
 
-A pause longer than the horizon expires every pending bundle. The request ids
-stay unused, so no funds are at risk; the attestors re-sign the withdrawals
-after the unpause.
+A horizon change can land between two attestors' reads. The attestors then
+derive different deadlines, sign different digests, and the signatures do not
+combine. An attestor that sees a deadline mismatch defers the request to the
+next signing tick, re-reads the horizon, and re-signs. The request ids stay
+unused, so no funds are at risk. The same deferral covers activation day:
+every unsubmitted sentinel bundle fails the new bound, and the attestors
+re-sign those requests in derived mode.
+
+A pause longer than the horizon expires every pending bundle. A re-sign alone
+does not recover them: the derivation rule is deterministic, so it computes
+the same expired deadline. The bridge admin raises the horizon above the age
+of the oldest pending request; the attestors re-derive and re-sign; the admin
+lowers the horizon after the backlog clears. The request ids stay unused, so
+no funds are at risk.
 
 Before rollout, cross-check the encoding against the live contract: the view
 `withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline)`
