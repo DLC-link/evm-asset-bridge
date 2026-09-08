@@ -1,4 +1,0 @@
-#!/bin/sh
-# A fake sleep for the verify tests. script/verify.sh polls thirty times with a
-# five-second wait, so the real sleep would cost 150 seconds per timeout case.
-exit 0

@@ -72,22 +72,20 @@ command line reaches your shell history. Make expands the variable into the
 child process's argument list, where `ps` finds it. Make also exports the
 variable into the child process's environment.
 
-### Commit the records
+### Verify, then commit the records
 
-The deploy writes files that only your machine holds. Commit them right after
-the deploy, or the source can never be verified again:
+Verify the source before you commit the records. `make verify` stops when
+`HEAD` is not the deployed commit, and the record commit moves `HEAD`.
+
+Then commit the records. The deploy writes files that only your machine holds:
 
 ```
-git add deployments/BETH.*.<chainId>.json deployments/solcInputs/
+git add deployments/BETH.*.<chainId>.json
 git commit -m "chore(deployments): record BETH on chain <chainId>"
 ```
 
-Commit both parts. The record files name a compiler input by hash, and
-`deployments/solcInputs/` holds that input. `script/verify.sh` reads the
-committed files. `broadcast/` and `out/` never leave your machine.
-
-A local test run writes into the same folder. Its compiler input matches the
-deployed one whenever the source matches, so an extra file is harmless.
+`script/verify.sh` reads the records. `broadcast/` and `out/` never leave your
+machine, so a record is the only lasting copy.
 
 ## Deployment records
 
@@ -98,7 +96,6 @@ deployments/
   BETH.proxy.<chainId>.json           <- the address every consumer calls
   BETH.implementation.<chainId>.json  <- the bridge ABI
   BETH.proxyAdmin.<chainId>.json      <- the contract that can upgrade the proxy
-  solcInputs/<hash>.json              <- the exact compiler input
 ```
 
 The middle part of the name is the role, not the contract name. An upgrade that
@@ -129,30 +126,28 @@ therefore reads the address from `BETH.proxy.<chainId>.json`. It reads the
 bridge ABI from `BETH.implementation.<chainId>.json`.
 
 `history[]` lists every past implementation. Each entry names the address, the
-contract name, the compiler input hash, the git commit, the transaction hash,
-and the time. The six fields describe the old implementation, never the proxy,
-so they are enough to verify that implementation later.
-
-`deployments/solcInputs/<hash>.json` is the standard-JSON compiler input that
-produced the deployed bytes. The verify command submits that file. The
-explorer then reaches an exact match with no local build.
+contract name, the git commit, the transaction hash, and the time. The five
+fields describe the old implementation, never the proxy. `gitCommit` is the one
+that lets an operator verify that implementation later.
 
 ## Verifying the source on an explorer
+
+Verification needs the build that produced the deployed bytes. `make verify`
+runs `forge verify-contract`, which compiles the source again on your machine.
+Run it on the deploying machine, from the deployed commit.
 
 ```
 export ETHERSCAN_API_KEY_11155111=<key>
 make verify DEPLOYMENT=BETH CHAIN_ID=11155111
 ```
 
-The command reads every record for that deployment and chain, and it submits
-the stored compiler input. The
-explorer compiles the exact input that produced the deployed bytes, so it
-reaches an exact match. The command needs no local build and no matching
-checkout.
+The command reads every record for that deployment and chain. It passes each
+record's address, contract name, and encoded constructor arguments to
+`forge verify-contract`.
 
-It asks the explorer first and skips a contract that already has verified
-source, so you can run it as often as you like. It never runs during a deploy,
-so a slow explorer cannot fail one.
+forge skips a contract that already has verified source, so you can run the
+command as often as you like. It never runs during a deploy, so a slow explorer
+cannot fail one.
 
 | Env var | Required | Meaning |
 | --- | --- | --- |
@@ -161,9 +156,10 @@ so a slow explorer cannot fail one.
 | `ETHERSCAN_API_KEY_<CHAIN_ID>` | one of the two | The key for that chain's explorer |
 | `ETHERSCAN_API_KEY` | one of the two | The fallback key |
 | `VERIFIER_URL_<CHAIN_ID>` | no | That chain's explorer host |
-| `VERIFIER_URL` | no | The fallback host. Defaults to Etherscan V2 |
+| `VERIFIER_URL` | no | The fallback host. forge picks one otherwise |
 | `CONTRACT` | no | One recorded role only, such as `proxy` |
-| `DRY_RUN` | no | Set to `1` to print the request and send nothing |
+| `ALLOW_COMMIT_MISMATCH` | no | Set to `1` to skip the build guard |
+| `DRY_RUN` | no | Set to `1` to print the command and send nothing |
 
 The command finds the roles by reading the file names in `deployments/`. The
 role is a free label that the deploy script chooses, so a standalone contract
@@ -173,11 +169,41 @@ command found, and it lists them when it rejects one.
 The script reads the per-chain key first, then the fallback. It prints which
 variable supplied the key, and it never prints the value.
 
-Etherscan's V2 endpoint accepts one key on every chain Etherscan itself
-operates. A chain whose explorer is Blockscout or Routescan needs its own host
-in `VERIFIER_URL_<CHAIN_ID>` and its own key.
+forge picks the explorer host for every chain Etherscan itself operates, and
+one key serves them all. A chain whose explorer is Blockscout or Routescan
+needs its own host in `VERIFIER_URL_<CHAIN_ID>` and its own key.
 
 The command does not run in CI. It runs on an operator's machine.
+
+### The build guard
+
+The command compares each record's `gitCommit` against your `HEAD`. It stops on
+a mismatch and names both commits. Without the guard a stale `out/` submits
+source that never produced the deployed bytes, and nothing warns you.
+
+Go back to the deployed commit and build again:
+
+```
+git checkout $(jq -r .gitCommit deployments/BETH.proxy.11155111.json)
+forge build
+make verify DEPLOYMENT=BETH CHAIN_ID=11155111
+```
+
+`ALLOW_COMMIT_MISMATCH=1` skips the check. Use it only when you know the local
+build matches the deployed bytes.
+
+The record commit is one such case. It adds JSON files and changes no source,
+so the build still matches. Verifying before that commit avoids the question.
+
+A teammate who never held that build compiles a different metadata hash, so the
+explorer may reject the submission. See the note on remappings below.
+
+### The remappings warning
+
+Foundry writes the nested OpenZeppelin remappings as absolute paths into the
+contract metadata. The metadata hash sits in the deployed bytecode, so a build
+of the same commit on another machine produces a different hash. That is why
+verification belongs on the deploying machine.
 
 ## Deposit granularity
 

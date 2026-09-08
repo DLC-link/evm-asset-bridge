@@ -11,8 +11,8 @@ RPC="http://127.0.0.1:$PORT"
 CHAIN_ID=31337
 FAILURES=0
 
-# check, contains, and the compiler-input rule live in one file. verify.t.sh
-# sources the same file, so both tests clean up the same way.
+# check and contains live in one file. verify.t.sh sources the same file, so
+# both tests count failures the same way.
 . "$ROOT/test/tooling/lib.sh"
 
 echo "== the deploy target quotes the RPC URL =="
@@ -30,7 +30,6 @@ contains "quotes the URL for cast"         "$MK_OUT" "cast chain-id --rpc-url \"
 
 cleanup() {
   pkill -f "anvil --port $PORT" >/dev/null 2>&1 || true
-  prune_untracked_solc_inputs
 }
 trap cleanup EXIT
 
@@ -178,16 +177,6 @@ for f in "$P" "$I" "$A"; do
   check "$b stays small"          "$([ "$(wc -c <"$f")" -lt 60000 ] && echo yes || echo no)" "yes"
 done
 
-# The compiler input exists and parses.
-HASH=$(jq -r .solcInputHash "$I")
-check "solcInput exists" "$([ -f "deployments/solcInputs/$HASH.json" ] && echo yes || echo no)" "yes"
-check "solcInput parses" "$(jq -r .language "deployments/solcInputs/$HASH.json")" "Solidity"
-
-# The proxy stores its own compiler input. The history checks below rely on
-# that difference, because a history entry must never name the proxy's input.
-check "the proxy has its own compiler input" \
-  "$([ "$(jq -r .solcInputHash "$P")" = "$HASH" ] && echo same || echo different)" "different"
-
 IMPL_TX=$(jq -r .transactionHash "$I")
 
 echo "== second deploy: history =="
@@ -202,9 +191,9 @@ check "history names the old implementation" \
   "$(cast to-check-sum-address "$IMPL_ADDR")"
 
 # The entry must describe the OLD implementation, never the proxy. An operator
-# verifies that implementation later from these fields alone.
+# verifies that implementation later from these fields alone. `gitCommit` is the
+# field that makes it possible, because it names the build to check out.
 check "history names the old contract"      "$(jq -r '.history[0].contractName' "$P")"    "BitSafeEvmAssetBridge"
-check "history names the old solc input"    "$(jq -r '.history[0].solcInputHash' "$P")"   "$HASH"
 check "history names the old transaction"   "$(jq -r '.history[0].transactionHash' "$P")" "$IMPL_TX"
 check "history keeps the old commit"        "$(jq -r '.history[0].gitCommit | length > 0' "$P")" "true"
 check "history keeps the old timestamp"     "$(jq -r '.history[0].deployedAt | length > 0' "$P")" "true"

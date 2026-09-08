@@ -7,8 +7,7 @@
 #   2. broadcast/Deploy_<name>.s.sol/<chainId>/run-latest.json  (foundry wrote it)
 #   3. out/<Contract>.sol/<Contract>.json           (the build wrote it)
 #
-# It writes deployments/<name>.<role>.<chainId>.json for each role, plus
-# deployments/solcInputs/<hash>.json for each distinct compiler input. Then it
+# It writes deployments/<name>.<role>.<chainId>.json for each role. Then it
 # removes the pending file.
 #
 # Usage: ./script/record.sh <deploymentName> [chainId]
@@ -17,7 +16,6 @@
 # pending file. Without it the script needs exactly one matching pending file.
 set -euo pipefail
 
-export PATH="$HOME/.foundry/bin:$PATH"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
@@ -32,22 +30,9 @@ fi
 # migration. Raise it whenever a field changes meaning or leaves the record.
 SCHEMA_VERSION=1
 
-for tool in jq forge awk; do
+for tool in jq awk; do
   command -v "$tool" >/dev/null || { echo "record.sh: $tool is not installed" >&2; exit 2; }
 done
-
-# The hash names each compiler-input file. Linux ships `sha256sum` and macOS
-# ships `shasum`, and a minimal container can hold neither. Both print the hash
-# first, so one `cut` reads either. SHA256 stays unquoted at the call site,
-# because `shasum -a 256` must split into three words.
-if command -v sha256sum >/dev/null; then
-  SHA256="sha256sum"
-elif command -v shasum >/dev/null; then
-  SHA256="shasum -a 256"
-else
-  echo "record.sh: neither sha256sum nor shasum is installed" >&2
-  exit 2
-fi
 
 # ---- 1. the pending file ----------------------------------------------------
 # The chain id names the exact file. Sorting the glob would be wrong, because a
@@ -111,14 +96,12 @@ epoch_to_iso() {
 # foundry writes the timestamp in milliseconds.
 DEPLOYED_AT=$(epoch_to_iso "$(jq -r '.timestamp' "$BROADCAST" | awk '{printf "%d", $1/1000}')")
 
-mkdir -p deployments/solcInputs
-
 lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
 
 # ---- 2b. the outgoing implementation record ---------------------------------
 # The loop writes the implementation record before it reaches the proxy. The
 # proxy's history entry must describe the OLD implementation, so copy that
-# record now. The copy is the only remaining source for its five extra fields.
+# record now. The copy is the only remaining source for its four extra fields.
 OLD_IMPL_SNAPSHOT=""
 if [ -f "deployments/$NAME.implementation.$CHAIN_ID.json" ]; then
   OLD_IMPL_SNAPSHOT=$(mktemp)
@@ -132,30 +115,6 @@ drop_temporaries() {
   if [ -n "$OUT" ]; then rm -f "$OUT.tmp" "$OUT.tmp2"; fi
 }
 trap drop_temporaries EXIT
-
-# Prints the standard-json compiler input for one contract, and echoes the
-# 16-character content hash it stored it under.
-store_solc_input() { # store_solc_input <sourcePath> <contractName>
-  local tmp err hash
-  tmp=$(mktemp)
-  err=$(mktemp)
-  if ! forge verify-contract 0x0000000000000000000000000000000000000001 "$1:$2" \
-    --show-standard-json-input >"$tmp" 2>"$err"; then
-    echo "record.sh: forge verify-contract --show-standard-json-input failed for $2 ($1)" >&2
-    cat "$err" >&2
-    rm -f "$tmp" "$err"
-    exit 1
-  fi
-  rm -f "$err"
-  # shellcheck disable=SC2086 # SHA256 must split into words.
-  hash=$($SHA256 "$tmp" | cut -c1-16)
-  if [ ! -f "deployments/solcInputs/$hash.json" ]; then
-    mv "$tmp" "deployments/solcInputs/$hash.json"
-  else
-    rm -f "$tmp"
-  fi
-  printf '%s' "$hash"
-}
 
 # ---- 3. one record per role -------------------------------------------------
 # The script zips the four arrays by index, so a length mismatch would write a
@@ -236,7 +195,6 @@ for ((i = 0; i < COUNT; i++)); do
        exit 1 ;;
   esac
 
-  SOLC_HASH=$(store_solc_input "$SOURCE" "$CONTRACT")
   OUT="deployments/$NAME.$ROLE.$CHAIN_ID.json"
 
   jq -n \
@@ -244,7 +202,7 @@ for ((i = 0; i < COUNT; i++)); do
     --arg address "$ADDR" --arg contractName "$CONTRACT" --arg sourcePath "$SOURCE" \
     --arg encodedConstructorArgs "$ENCODED_ARGS" --arg transactionHash "$TX_HASH" \
     --argjson receipt "$RECEIPT" --slurpfile artifact "$ARTIFACT" \
-    --arg solcInputHash "$SOLC_HASH" --arg gitCommit "$GIT_COMMIT" --arg deployedAt "$DEPLOYED_AT" \
+    --arg gitCommit "$GIT_COMMIT" --arg deployedAt "$DEPLOYED_AT" \
     --argjson schemaVersion "$SCHEMA_VERSION" \
     '{
       schemaVersion: $schemaVersion,
@@ -253,7 +211,6 @@ for ((i = 0; i < COUNT; i++)); do
       encodedConstructorArgs: $encodedConstructorArgs,
       transactionHash: $transactionHash, receipt: $receipt,
       abi: $artifact[0].abi,
-      solcInputHash: $solcInputHash,
       compiler: {
         version: $artifact[0].metadata.compiler.version,
         optimizer: $artifact[0].metadata.settings.optimizer.enabled,
@@ -282,7 +239,7 @@ for ((i = 0; i < COUNT; i++)); do
       PREV_HISTORY=$(jq -c '.history // []' "$OUT")
       PREV_COUNT=$(jq -r '.numDeployments // 1' "$OUT")
       if [ -n "$PREV_IMPL" ] && [ "$(lower "$PREV_IMPL")" != "$(lower "$IMPL")" ]; then
-        # The six fields describe the old implementation, never the proxy. An
+        # The five fields describe the old implementation, never the proxy. An
         # operator verifies that implementation later from these fields alone.
         SNAPSHOT_ADDR=""
         if [ -n "$OLD_IMPL_SNAPSHOT" ]; then
@@ -290,15 +247,15 @@ for ((i = 0; i < COUNT; i++)); do
         fi
         if [ -n "$SNAPSHOT_ADDR" ] && [ "$SNAPSHOT_ADDR" = "$(lower "$PREV_IMPL")" ]; then
           ENTRY=$(jq -c '{implementation: .address, contractName: .contractName,
-                          solcInputHash: .solcInputHash, gitCommit: .gitCommit,
+                          gitCommit: .gitCommit,
                           transactionHash: .transactionHash, deployedAt: .deployedAt}' \
             "$OLD_IMPL_SNAPSHOT")
         else
-          # Nobody recorded the old implementation, so five fields are lost.
+          # Nobody recorded the old implementation, so four fields are lost.
           echo "record.sh: no record for the old implementation $PREV_IMPL" >&2
           echo "record.sh: its history entry holds the address only" >&2
           ENTRY=$(jq -nc --arg impl "$PREV_IMPL" \
-            '{implementation: $impl, contractName: null, solcInputHash: null,
+            '{implementation: $impl, contractName: null,
               gitCommit: null, transactionHash: null, deployedAt: null}')
         fi
         PREV_HISTORY=$(printf '%s' "$PREV_HISTORY" | jq -c --argjson e "$ENTRY" '. + [$e]')
