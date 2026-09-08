@@ -55,6 +55,19 @@ deploys with `0`, so this step is what turns the limit on. `initialize`
 cannot take the limit as a parameter because it already sits at the EVM
 stack limit.
 
+### Post-deploy: the withdrawal horizon
+
+The horizon bounds how far a withdrawal `deadline` can sit past
+`block.timestamp` (inclusive). The contract deploys with `0`, which disables
+the bound. Launch runs disabled: the attestors sign a fixed sentinel deadline,
+and the bound stays off. Activation later needs no contract change, but the
+order matters. First the attestor release switches to derived deadlines, then
+the bridge admin calls `setWithdrawalHorizon(horizon)` — the reverse order
+makes sentinel bundles revert against the new bound. The suggested first value
+is 48 hours; tighten it later with one admin transaction. `initialize` cannot
+take the horizon as a parameter because it already sits at the EVM stack
+limit.
+
 ### Post-deploy: the sentry pause role
 
 After deploy, the default admin MAY grant `SENTRY_ROLE` to one or more
@@ -186,16 +199,25 @@ Rules the contract enforces on submission (`withdraw`):
 - Each `withdrawRequestId` executes once, forever.
 - A bundle expires after its `deadline` (a Unix timestamp, inclusive): the
   contract rejects it when `block.timestamp > deadline`.
+- A `deadline` further than the admin-set `withdrawalHorizon()` past
+  `block.timestamp` is rejected. The bound is inclusive:
+  `deadline == block.timestamp + horizon` passes. A horizon of `0` disables
+  the bound.
 
-Every attestor derives the deadline alone, with the same rule:
-`deadline = ledgerTimeOf(WithdrawRequest create) + HORIZON`. `HORIZON` is a
-fixed constant in the versioned attestor-stack config. Each attestor reads the
-same ledger time, so all signatures hash the same deadline. Choose a `HORIZON`
-of a few hours, not weeks: it bounds how long a leaked signature bundle stays
-valid. A mismatched `HORIZON` is safe: that signature does not combine, and the
-withdrawal stalls until `threshold` attestors agree.
+The deadline runs in one of two modes. At launch, every attestor signs the
+same fixed sentinel deadline, a far-future constant in the shared release, and
+the on-chain horizon stays `0` (bound off). In derived mode, every attestor
+derives the deadline alone, with the same rule:
+`deadline = ledgerTimeOf(WithdrawRequest create) + withdrawalHorizon`. Every
+input is a ledger record: no local clocks, no slack constant. Each attestor
+reads the horizon from the contract's `withdrawalHorizon()` view — the single
+source of the policy value; there is no per-node horizon config. All attestors
+compute the same value, so the signatures combine with no coordinator-proposed
+field. Activate derived mode before the admin sets a non-zero horizon (see the
+deploy notes), start long — 48 hours is suggested — and tighten later with one
+admin transaction.
 
-A pause longer than `HORIZON` expires every pending bundle. The request ids
+A pause longer than the horizon expires every pending bundle. The request ids
 stay unused, so no funds are at risk; the attestors re-sign the withdrawals
 after the unpause.
 

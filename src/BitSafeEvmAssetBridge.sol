@@ -73,6 +73,7 @@ contract BitSafeEvmAssetBridge is
         // `withdrawLimits`; operations sizes both.
         RateLimiter.RefillingBucket withdrawRateLimit;
         uint256 totalLocked;
+        uint256 withdrawalHorizon;
     }
 
     // cast index-erc7201 bitsafe.storage.BitSafeEvmAssetBridge
@@ -92,6 +93,7 @@ contract BitSafeEvmAssetBridge is
     event DepositLimitsSet(uint256 minAmount, uint256 maxAmount);
     event WithdrawLimitsSet(uint256 minAmount, uint256 maxAmount);
     event WithdrawRateLimitSet(uint208 capacity, uint48 window);
+    event WithdrawalHorizonSet(uint256 horizon);
     event ERC20Rescued(address indexed token, address indexed to, uint256 amount);
     event ETHRescued(address indexed to, uint256 amount);
     event SurplusRescued(address indexed to, uint256 amount);
@@ -108,6 +110,7 @@ contract BitSafeEvmAssetBridge is
     error AssetIsNotERC20();
     error WithdrawRequestAlreadyUsed();
     error WithdrawalExpired(uint256 deadline);
+    error DeadlineBeyondHorizon(uint256 deadline, uint256 horizon);
     error InvalidDestination();
     error NotEnoughSignatures();
     error InvalidSignature();
@@ -200,6 +203,13 @@ contract BitSafeEvmAssetBridge is
         capacity = limiter._capacity;
         window = limiter._window;
         availableBudget = limiter.available(WITHDRAW_RATE_LIMIT_KEY);
+    }
+
+    /// @notice The maximum distance a withdrawal `deadline` can sit past
+    ///         `block.timestamp`, in seconds (inclusive). `0` turns the bound
+    ///         off. The attestor stack reads this value to derive deadlines.
+    function withdrawalHorizon() external view returns (uint256) {
+        return _getBridgeStorage().withdrawalHorizon;
     }
 
     function getAttestors() external view returns (address[] memory) {
@@ -306,6 +316,22 @@ contract BitSafeEvmAssetBridge is
         emit WithdrawRateLimitSet(capacity, window);
     }
 
+    /// @notice Sets the withdrawal horizon: the maximum distance a withdrawal
+    ///         `deadline` can sit past `block.timestamp`, in seconds. The
+    ///         bound is inclusive. `0` disables the bound.
+    /// @dev The attestor stack reads this value to derive deadlines. Set a
+    ///      non-zero horizon only after the attestors derive real deadlines;
+    ///      sentinel-mode bundles revert against a non-zero bound. Keep the
+    ///      horizon at least ten times any
+    ///      attestor-side tolerance, so a horizon change between two
+    ///      attestors' reads cannot make an honest deadline fail the bound.
+    ///      The default of 0 means a fresh or upgraded deployment needs no
+    ///      reinitializer; the bridge admin sets the horizon post-deploy.
+    function setWithdrawalHorizon(uint256 horizon) external onlyRole(BRIDGE_ADMIN_ROLE) {
+        _getBridgeStorage().withdrawalHorizon = horizon;
+        emit WithdrawalHorizonSet(horizon);
+    }
+
     /// @notice Rescues tokens sent to the bridge by mistake. Never the bridged asset.
     function rescueERC20(address token, address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) {
         if (token == _getBridgeStorage().asset) revert CannotRescueBridgedAsset();
@@ -395,6 +421,17 @@ contract BitSafeEvmAssetBridge is
         // debt only.
         if (limiter._capacity == 0) return;
         limiter.consume(WITHDRAW_RATE_LIMIT_KEY, amount);
+    }
+
+    /// @dev Reverts when `deadline` sits further than `horizon` past
+    ///      `block.timestamp`. The bound is inclusive:
+    ///      `deadline == block.timestamp + horizon` passes. A horizon of 0
+    ///      turns the check off. A helper, not inline code: `withdraw` sits
+    ///      at the EVM stack limit.
+    function _checkHorizon(uint256 horizon, uint256 deadline) internal view {
+        if (horizon != 0 && deadline > block.timestamp + horizon) {
+            revert DeadlineBeyondHorizon(deadline, horizon);
+        }
     }
 
     function _checkLimits(uint256 amount, Limits storage limits) internal view {
@@ -504,8 +541,10 @@ contract BitSafeEvmAssetBridge is
     /// @notice Releases `amount` of the bridged asset to `destinationAddress`.
     /// @dev Requires `threshold` valid, distinct attestor signatures over the
     ///      EIP-712 digest. Signer order does not matter.
-    ///      The attestor stack picks the deadline when it signs. The contract
-    ///      only compares the deadline against `block.timestamp` (inclusive).
+    ///      The attestor stack derives the deadline when it signs. The
+    ///      contract compares the deadline against `block.timestamp`
+    ///      (inclusive) and bounds it by `withdrawalHorizon` (inclusive,
+    ///      0 disables).
     function withdraw(
         bytes calldata withdrawRequestId,
         address destinationAddress,
@@ -528,6 +567,7 @@ contract BitSafeEvmAssetBridge is
         _consumeWithdrawRateLimit($, amount);
         // Inclusive bound: the bundle stays valid through the deadline second.
         if (block.timestamp > deadline) revert WithdrawalExpired(deadline);
+        _checkHorizon($.withdrawalHorizon, deadline);
         if (signatures.length < threshold_) revert NotEnoughSignatures();
 
         bytes32 digest = withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline);
