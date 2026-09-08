@@ -11,8 +11,8 @@
 # the result.
 #
 # forge compiles the source again on this machine. The local build must
-# therefore match the deployed bytes. The script compares each record's
-# gitCommit against HEAD, and it stops on a mismatch.
+# therefore match the deployed bytes. The script compares the source of each
+# record's gitCommit against HEAD, and it stops when the two differ.
 #
 # Usage:
 #   DEPLOYMENT=BETH CHAIN_ID=11155111 ./script/verify.sh
@@ -113,11 +113,17 @@ fi
 echo "verify.sh: roles $ROLES"
 
 # ---- the build guard --------------------------------------------------------
-# forge compiles the source again before it submits. A stale out/ therefore
-# submits source that never produced the deployed bytes. The explorer either
-# rejects it or publishes the wrong code, and nothing warns the operator. So
-# every record must name the commit that is checked out now.
+# forge compiles the source again before it submits. A build of other source
+# therefore submits bytes the chain never held. The explorer either rejects the
+# submission or publishes the wrong code, and nothing warns the operator.
+#
+# The guard compares the source, not the commit hash. Four paths decide the
+# compiled bytes. `script` and `test` decide none of them, because verification
+# submits neither. A commit that only adds records therefore leaves the guard
+# quiet.
+BUILD_PATHS=(src lib foundry.toml remappings.txt)
 HEAD_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || true)
+EQUIVALENT_SEEN=""
 if [ -z "$ALLOW_MISMATCH" ]; then
   for ROLE in $ROLES; do
     RECORD="deployments/$NAME.$ROLE.$CHAIN.json"
@@ -128,16 +134,56 @@ if [ -z "$ALLOW_MISMATCH" ]; then
     # so no record reaches forge unchecked.
     [ -n "$RECORD_COMMIT" ] || continue
     [ "$RECORD_COMMIT" != "$HEAD_COMMIT" ] || continue
+
+    # `git diff --quiet` answers with three codes. 0 means the paths are equal.
+    # 1 means they differ. Anything else, such as 128, means git could not
+    # compare the two commits at all. Each code needs its own answer.
+    DIFF_RC=0
+    git diff --quiet "$RECORD_COMMIT" HEAD -- "${BUILD_PATHS[@]}" 2>/dev/null || DIFF_RC=$?
+
+    if [ "$DIFF_RC" -eq 0 ]; then
+      # One line per distinct commit. Three records normally share one.
+      case " $EQUIVALENT_SEEN " in
+        *" $RECORD_COMMIT "*) ;;
+        *)
+          EQUIVALENT_SEEN="$EQUIVALENT_SEEN $RECORD_COMMIT"
+          echo "verify.sh: the record names commit $RECORD_COMMIT, and HEAD is $HEAD_COMMIT"
+          echo "verify.sh: ${BUILD_PATHS[*]} agree, so this build matches"
+          ;;
+      esac
+      continue
+    fi
+
+    if [ "$DIFF_RC" -eq 1 ]; then
+      {
+        echo "verify.sh: STOP. The source does not match the deployment."
+        echo "verify.sh: $RECORD names commit '$RECORD_COMMIT'."
+        echo "verify.sh: HEAD is '$HEAD_COMMIT'."
+        echo "verify.sh: ${BUILD_PATHS[*]} changed between the two."
+        echo "verify.sh: forge compiles the source again before it submits."
+        echo "verify.sh: other source compiles other bytes, and the result is wrong."
+        echo "verify.sh: go back to the deployed commit, build, and verify:"
+        echo
+        echo "    git checkout $RECORD_COMMIT"
+        echo "    forge build"
+        echo "    make verify DEPLOYMENT=$NAME CHAIN_ID=$CHAIN"
+        echo
+        echo "verify.sh: set ALLOW_COMMIT_MISMATCH=1 if you know the build matches."
+      } >&2
+      exit 1
+    fi
+
+    # git could not compare the two commits. A rebase or a shallow clone drops
+    # the deployed commit, and the guard then proves nothing about the source.
     {
-      echo "verify.sh: STOP. This checkout is not the deployed commit."
+      echo "verify.sh: STOP. This clone cannot reach the deployed commit."
       echo "verify.sh: $RECORD names commit '$RECORD_COMMIT'."
       echo "verify.sh: HEAD is '$HEAD_COMMIT'."
-      echo "verify.sh: forge compiles the source again before it submits."
-      echo "verify.sh: another commit compiles other bytes, and the result is wrong."
-      echo "verify.sh: go back to the deployed commit, build, and verify:"
+      echo "verify.sh: git cannot compare the two, so the source is unchecked."
+      echo "verify.sh: this is not a source change. The commit is unreachable."
+      echo "verify.sh: fetch the commit, then verify again:"
       echo
-      echo "    git checkout $RECORD_COMMIT"
-      echo "    forge build"
+      echo "    git fetch --all"
       echo "    make verify DEPLOYMENT=$NAME CHAIN_ID=$CHAIN"
       echo
       echo "verify.sh: set ALLOW_COMMIT_MISMATCH=1 if you know the build matches."

@@ -125,25 +125,79 @@ contains "names the role it could not find" "$OUT" "Got 'implementation'"
 contains "names the roles it did find"      "$OUT" "records: proxy proxyAdmin"
 
 # ---- the build guard ---------------------------------------------------------
-# forge compiles the source again before it submits. A build from another commit
-# therefore submits bytes the chain never held, and nothing warns the operator.
-echo "== a record from another commit =="
+# forge compiles the source again before it submits. A build of other source
+# therefore submits bytes the chain never held. The guard compares the source of
+# two commits, not their hashes, so a records-only commit passes.
+#
+# The two fixtures below are commit objects this test writes. It cannot use a
+# real ancestor, because CI checks out one commit only. Both objects stay
+# unreachable, and `git gc` collects them.
+#
+# SAME_SOURCE carries HEAD's own tree, so only the commit hash differs.
+SAME_SOURCE=$(git commit-tree "HEAD^{tree}" -m "verify.t.sh fixture: the source of HEAD" </dev/null)
+
+# OTHER_SOURCE carries HEAD's tree with one changed foundry.toml. A temporary
+# index keeps the real one untouched.
+FIXTURE_DIR=$(mktemp -d)
+FIXTURE_BLOB=$(printf 'solc_version = "0.0.1"\n' | git hash-object -w --stdin)
+GIT_INDEX_FILE="$FIXTURE_DIR/index" git read-tree HEAD
+GIT_INDEX_FILE="$FIXTURE_DIR/index" git update-index --add --cacheinfo 100644 "$FIXTURE_BLOB" foundry.toml
+OTHER_TREE=$(GIT_INDEX_FILE="$FIXTURE_DIR/index" git write-tree)
+rm -rf "$FIXTURE_DIR"
+OTHER_SOURCE=$(git commit-tree "$OTHER_TREE" -m "verify.t.sh fixture: another foundry.toml" </dev/null)
+
 GUARD="deployments/BETH.proxy.$CHAIN_ID.json"
 cp "$GUARD" "$GUARD.bak"
-jq --arg c deadbee '.gitCommit = $c' "$GUARD.bak" >"$GUARD"
-set +e
-OUT=$(DRY_RUN=1 ETHERSCAN_API_KEY=x DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
-RC=$?
-set -e
-check    "exits non-zero on a commit mismatch" "$RC" "1"
-contains "names the record's commit" "$OUT" "$GUARD names commit 'deadbee'"
-contains "names the checked-out commit" "$OUT" "HEAD is '$HEAD_COMMIT'"
-contains "gives the recovery command"   "$OUT" "git checkout deadbee"
-contains "names the rebuild"            "$OUT" "forge build"
-contains "names the escape hatch"       "$OUT" "ALLOW_COMMIT_MISMATCH=1"
-check    "verifies nothing at all"      "$(printf '%s' "$OUT" | grep -c "DRY  " || true)" "0"
+
+forge_commit() { # forge_commit <commit> — rewrites the proxy record's gitCommit
+  jq --arg c "$1" '.gitCommit = $c' "$GUARD.bak" >"$GUARD"
+  set +e
+  GUARD_OUT=$(DRY_RUN=1 ETHERSCAN_API_KEY=x DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
+  GUARD_RC=$?
+  set -e
+}
+
+echo "== another commit with the same source =="
+# `git diff --quiet` exits 0 here, so the run goes on. This is the case a
+# records-only commit creates.
+forge_commit "$SAME_SOURCE"
+check    "exits zero when the source matches" "$GUARD_RC" "0"
+contains "names the record's commit" "$GUARD_OUT" "the record names commit $SAME_SOURCE"
+contains "names the checked-out commit" "$GUARD_OUT" "and HEAD is $HEAD_COMMIT"
+contains "names the paths it compared" "$GUARD_OUT" "src lib foundry.toml remappings.txt agree"
+contains "verifies the proxy anyway" "$GUARD_OUT" "DRY  proxy"
+
+echo "== another commit whose source differs =="
+# `git diff --quiet` exits 1 here, so the run stops.
+forge_commit "$OTHER_SOURCE"
+check    "exits non-zero on a source change" "$GUARD_RC" "1"
+contains "blames the source"             "$GUARD_OUT" "The source does not match the deployment"
+contains "names the record's commit"     "$GUARD_OUT" "names commit '$OTHER_SOURCE'"
+contains "names the checked-out commit"  "$GUARD_OUT" "HEAD is '$HEAD_COMMIT'"
+contains "names the paths that changed"  "$GUARD_OUT" "src lib foundry.toml remappings.txt changed"
+contains "gives the recovery command"    "$GUARD_OUT" "git checkout $OTHER_SOURCE"
+contains "names the rebuild"             "$GUARD_OUT" "forge build"
+contains "names the escape hatch"        "$GUARD_OUT" "ALLOW_COMMIT_MISMATCH=1"
+check    "verifies nothing at all"       "$(printf '%s' "$GUARD_OUT" | grep -c "DRY  " || true)" "0"
+
+echo "== a commit this clone cannot reach =="
+# `git diff --quiet` exits 128 here, which is not a verdict on the source. A
+# rebase or a shallow clone causes it, and it needs its own advice.
+forge_commit deadbee
+check    "exits non-zero on an unreachable commit" "$GUARD_RC" "1"
+contains "says the clone cannot reach it" "$GUARD_OUT" "cannot reach the deployed commit"
+contains "names the commit it wanted"     "$GUARD_OUT" "names commit 'deadbee'"
+contains "says the source is unchecked"   "$GUARD_OUT" "so the source is unchecked"
+contains "rules out a source change"      "$GUARD_OUT" "not a source change"
+contains "tells the operator to fetch"    "$GUARD_OUT" "git fetch --all"
+contains "names the escape hatch"         "$GUARD_OUT" "ALLOW_COMMIT_MISMATCH=1"
+check    "never blames the source" \
+  "$(printf '%s' "$GUARD_OUT" | grep -c "The source does not match" || true)" "0"
+check    "verifies nothing at all" "$(printf '%s' "$GUARD_OUT" | grep -c "DRY  " || true)" "0"
 
 echo "== the escape hatch =="
+# It must open the strictest case, which is a real source change.
+jq --arg c "$OTHER_SOURCE" '.gitCommit = $c' "$GUARD.bak" >"$GUARD"
 set +e
 OUT=$(ALLOW_COMMIT_MISMATCH=1 DRY_RUN=1 ETHERSCAN_API_KEY=x \
   DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)

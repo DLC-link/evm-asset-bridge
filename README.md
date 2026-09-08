@@ -72,12 +72,10 @@ command line reaches your shell history. Make expands the variable into the
 child process's argument list, where `ps` finds it. Make also exports the
 variable into the child process's environment.
 
-### Verify, then commit the records
+### Commit the records
 
-Verify the source before you commit the records. `make verify` stops when
-`HEAD` is not the deployed commit, and the record commit moves `HEAD`.
-
-Then commit the records. The deploy writes files that only your machine holds:
+The deploy writes files that only your machine holds. Commit them right after
+the deploy, or nobody can verify the source later:
 
 ```
 git add deployments/BETH.*.<chainId>.json
@@ -86,6 +84,9 @@ git commit -m "chore(deployments): record BETH on chain <chainId>"
 
 `script/verify.sh` reads the records. `broadcast/` and `out/` never leave your
 machine, so a record is the only lasting copy.
+
+That commit adds JSON files and changes no source. It therefore does not
+disturb `make verify`. Verify before it or after it.
 
 ## Deployment records
 
@@ -177,11 +178,19 @@ The command does not run in CI. It runs on an operator's machine.
 
 ### The build guard
 
-The command compares each record's `gitCommit` against your `HEAD`. It stops on
-a mismatch and names both commits. Without the guard a stale `out/` submits
+The command compares the source of each record's `gitCommit` against your
+`HEAD`. It compares four paths: `src`, `lib`, `foundry.toml`, and
+`remappings.txt`. Those four decide the compiled bytes. `script` and `test`
+decide none of them, because verification submits neither.
+
+The command compares the source, not the commit hash. A commit that only adds
+records therefore passes, and it prints one line saying so. A commit that
+changes the contract stops the run. Without the guard a stale `out/` submits
 source that never produced the deployed bytes, and nothing warns you.
 
-Go back to the deployed commit and build again:
+The command stops in two cases, and each one gets its own message.
+
+**The source changed.** Go back to the deployed commit and build again:
 
 ```
 git checkout $(jq -r .gitCommit deployments/BETH.proxy.11155111.json)
@@ -189,11 +198,17 @@ forge build
 make verify DEPLOYMENT=BETH CHAIN_ID=11155111
 ```
 
-`ALLOW_COMMIT_MISMATCH=1` skips the check. Use it only when you know the local
-build matches the deployed bytes.
+**This clone cannot reach the commit.** A rebase or a shallow clone causes
+this. git can then compare nothing, so the guard proves nothing. Fetch the
+commit and verify again:
 
-The record commit is one such case. It adds JSON files and changes no source,
-so the build still matches. Verifying before that commit avoids the question.
+```
+git fetch --all
+make verify DEPLOYMENT=BETH CHAIN_ID=11155111
+```
+
+`ALLOW_COMMIT_MISMATCH=1` skips the whole check. Use it only when you know the
+local build matches the deployed bytes.
 
 A teammate who never held that build compiles a different metadata hash, so the
 explorer may reject the submission. See the note on remappings below.
