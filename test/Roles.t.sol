@@ -168,6 +168,11 @@ contract RolesTest is BridgeTestBase {
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         vm.prank(user);
         bridge.depositETH{value: 1e8}(DEPOSIT_ID);
+        // Withdrawals revert while paused. whenNotPaused runs before the
+        // signature checks, so empty signatures suffice here.
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, user, 1e8, block.timestamp + 1 hours, new bytes[](0));
     }
 
     function test_sentry_cannotUnpause() public {
