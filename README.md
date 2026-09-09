@@ -44,6 +44,16 @@ Run with:
 forge script script/Deploy.s.sol:Deploy --rpc-url <RPC_URL> --broadcast
 ```
 
+### Post-deploy: the sentry pause role
+
+After deploy, the default admin MAY grant `SENTRY_ROLE` to one or more
+monitoring-bot keys with `grantRole(SENTRY_ROLE, <bot>)`. A sentry can only
+call `pause()`; only the bridge admin unpauses. A hot key is acceptable for
+this role: it grants only a denial power, and the admin can always reverse it.
+
+No sentry holder exists at launch. Until a monitoring bot exists, the runbook
+keeps a pre-signed `pause()` Safe transaction to cover the gap.
+
 ## Deposit granularity
 
 Canton expresses 10 decimal places. ETH has 18. A deposit of 1 wei therefore has
