@@ -11,10 +11,27 @@ BitSafeEvmAssetBridge: an upgradeable EVM contract that locks one asset
 
 ## Production deploy
 
-`script/Deploy.s.sol` deploys the implementation behind a
-`TransparentUpgradeableProxy` and writes
-`deployments/BitSafeEvmAssetBridge.<chainId>.json`. It reads its
-configuration entirely from environment variables:
+`script/Deploy_BETH.s.sol` deploys the implementation behind a
+`TransparentUpgradeableProxy`. The part of the file name after the underscore is
+the deployment name. A second bridged asset gets its own `Deploy_<NAME>.s.sol`.
+
+```
+make deploy DEPLOYMENT=BETH RPC_URL=<url> SIGNER="--account deployer --sender 0xYourDeployer"
+```
+
+That runs two steps. `forge script` broadcasts the deploy. `script/record.sh`
+then writes the deployment records. The `make record` target repeats the
+second step on its own:
+
+```
+make record DEPLOYMENT=BETH
+```
+
+`make record` reads the pending file that the deploy wrote. It needs
+`CHAIN_ID=<id>` when more than one pending file waits. It names every match
+when it stops. A local `forge test` run leaves one behind for chain 31337.
+
+The deploy reads its configuration from the environment:
 
 | Env var | Meaning |
 | --- | --- |
@@ -31,18 +48,46 @@ configuration entirely from environment variables:
 | `WITHDRAW_MIN` | Minimum withdrawal amount (0 = no minimum) |
 | `WITHDRAW_MAX` | Maximum withdrawal amount (`type(uint256).max` = no maximum) |
 
-The output JSON also records `assetDecimals`, `targetDecimals`, and
-`depositUnit`, so an operator can read the live granularity rule from the
-deployment record.
+### Signing the deploy
 
-`GIT_COMMIT` (optional) is recorded in the output JSON alongside the
-compiler version for provenance; it defaults to `"unknown"` when unset.
-
-Run with:
+`SIGNER` carries the signer flags straight to `forge script`. Foundry reads no
+private key from the environment, so a broadcast needs one of its wallet flags.
+`make deploy` stops when `SIGNER` is unset.
 
 ```
-forge script script/Deploy.s.sol:Deploy --rpc-url <RPC_URL> --broadcast
+cast wallet import deployer --interactive        # once, into the keystore
+make deploy DEPLOYMENT=BETH RPC_URL=https://... \
+  SIGNER="--account deployer --sender 0xYourDeployer"
 ```
+
+A hardware wallet works the same way:
+
+```
+make deploy DEPLOYMENT=BETH RPC_URL=https://... \
+  SIGNER="--ledger --sender 0xYourDeployer"
+```
+
+Prefer a keystore account or a hardware wallet. A raw private key on the
+command line reaches your shell history. Make expands the variable into the
+child process's argument list, where `ps` finds it. Make also exports the
+variable into the child process's environment.
+
+### Commit the records
+
+The deploy writes files that only your machine holds. Commit them right after
+the deploy, or the source can never be verified again:
+
+```
+git add deployments/BETH.*.<chainId>.json deployments/solcInputs/
+git commit -m "chore(deployments): record BETH on chain <chainId>"
+```
+
+Commit both parts. The record files name a compiler input by hash, and
+`deployments/solcInputs/` holds that input. `script/verify.sh` reads the
+committed files. `broadcast/` and `out/` never leave your machine.
+
+A local test run writes into the same folder. Its compiler input matches the
+deployed one whenever the source matches, so an extra file is harmless.
 
 ### Post-deploy: the withdrawal rate limit
 
@@ -78,6 +123,109 @@ this role: it grants only a denial power, and the admin can always reverse it.
 
 No sentry holder exists at launch. Until a monitoring bot exists, the runbook
 keeps a pre-signed `pause()` Safe transaction to cover the gap.
+
+## Deployment records
+
+One deploy creates three contracts. It therefore writes three records:
+
+```
+deployments/
+  BETH.proxy.<chainId>.json           <- the address every consumer calls
+  BETH.implementation.<chainId>.json  <- the bridge ABI
+  BETH.proxyAdmin.<chainId>.json      <- the contract that can upgrade the proxy
+  solcInputs/<hash>.json              <- the exact compiler input
+```
+
+The middle part of the name is the role, not the contract name. An upgrade that
+keeps the contract name still updates the same file.
+
+Every record holds the address, the ABI-encoded constructor arguments, the
+transaction receipt, the contract ABI, the compiler settings, and the git
+commit. It holds nothing that names the machine that ran the deploy. The proxy
+record holds five more fields: `implementation`,
+`proxyAdmin`, `bridgeConfig`, `numDeployments`, and `history`.
+
+Every record also opens with `schemaVersion`, which is `1` today. A consumer
+outside this repo reads it to detect a migration.
+
+`bridgeConfig` holds the whole `initialize` configuration, not just the
+decimals fields:
+
+```
+asset, assetDecimals, targetDecimals, depositUnit, defaultAdmin, adminDelay,
+bridgeAdmin, proxyOwner, attestors, threshold, depositLimits, withdrawLimits
+```
+
+The record holds the deploy-time configuration only. The post-deploy setters
+change live state that no record shows: `setWithdrawRateLimit`,
+`setWithdrawalHorizon`, and the `SENTRY_ROLE` grants. Read that state from
+the contract itself.
+
+An operator reads the live granularity rule from `targetDecimals` and
+`depositUnit`, both inside `bridgeConfig`.
+
+Each record holds the ABI of the contract at its own address. A consumer
+therefore reads the address from `BETH.proxy.<chainId>.json`. It reads the
+bridge ABI from `BETH.implementation.<chainId>.json`.
+
+`history[]` lists every past implementation. Each entry names the address, the
+contract name, the compiler input hash, the git commit, the transaction hash,
+and the time. The six fields describe the old implementation, never the proxy,
+so they are enough to verify that implementation later.
+
+`deployments/solcInputs/<hash>.json` is the standard-JSON compiler input that
+produced the deployed bytes. The verify command submits that file. The
+explorer then reaches an exact match with no local build.
+
+## Verifying the source on an explorer
+
+```
+export ETHERSCAN_API_KEY_11155111=<key>
+make verify DEPLOYMENT=BETH CHAIN_ID=11155111
+```
+
+The command reads every record for that deployment and chain, and it submits
+the stored compiler input. The
+explorer compiles the exact input that produced the deployed bytes, so it
+reaches an exact match. The command needs no local build and no matching
+checkout.
+
+It asks the explorer first and skips a contract that already has verified
+source, so you can run it as often as you like. It never runs during a deploy,
+so a slow explorer cannot fail one.
+
+| Env var | Required | Meaning |
+| --- | --- | --- |
+| `DEPLOYMENT` | yes | The deployment name, such as `BETH` |
+| `CHAIN_ID` | yes | Picks the record files |
+| `ETHERSCAN_API_KEY_<CHAIN_ID>` | one of the two | The key for that chain's explorer |
+| `ETHERSCAN_API_KEY` | one of the two | The fallback key |
+| `VERIFIER_URL_<CHAIN_ID>` | no | That chain's explorer host |
+| `VERIFIER_URL` | no | The fallback host. Defaults to Etherscan V2 |
+| `CONTRACT` | no | One recorded role only, such as `proxy` |
+| `DRY_RUN` | no | Set to `1` to print the request and send nothing |
+
+The command finds the roles by reading the file names in `deployments/`. The
+role is a free label that the deploy script chooses, so a standalone contract
+with one role works without a code change. `CONTRACT` accepts any role the
+command found, and it lists them when it rejects one.
+
+The script reads the per-chain key first, then the fallback. It prints which
+variable supplied the key, and it never prints the value.
+
+Etherscan's V2 endpoint accepts one key on every chain Etherscan itself
+operates. A chain whose explorer is Blockscout or Routescan needs its own host
+in `VERIFIER_URL_<CHAIN_ID>` and its own key.
+
+The command does not run in CI. It runs on an operator's machine.
+
+### Link the proxy on Etherscan
+
+The command verifies the source of all three contracts. It does not send
+Etherscan's separate proxy-link call, so the proxy page can miss the
+"Read as Proxy" and "Write as Proxy" tabs. When the tabs are missing, open
+the proxy address on Etherscan and use "More Options" > "Is this a proxy?".
+Confirm the detected implementation. Repeat the step after an upgrade.
 
 ## Deposit granularity
 
