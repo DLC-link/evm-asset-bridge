@@ -5,6 +5,7 @@ import {BridgeTestBase} from "./BridgeTestBase.t.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {ForceSend} from "./mocks/ForceSend.sol";
+import {RejectingReceiver} from "./mocks/RejectingReceiver.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
@@ -356,6 +357,20 @@ contract RolesTest is BridgeTestBase {
         vm.expectRevert(BitSafeEvmAssetBridge.InvalidAddress.selector);
         vm.prank(bridgeAdmin);
         erc20Bridge.rescueETH(address(0), 1 ether);
+    }
+
+    function test_rescueETH_rejectingReceiver_reverts() public {
+        MockERC20 token = new MockERC20();
+        BitSafeEvmAssetBridge erc20Bridge = _deployBridge(address(token));
+        ForceSend force = new ForceSend{value: 1 ether}();
+        force.boom(payable(address(erc20Bridge)));
+
+        RejectingReceiver rejecting = new RejectingReceiver();
+        vm.expectRevert(BitSafeEvmAssetBridge.EthTransferFailed.selector);
+        vm.prank(bridgeAdmin);
+        erc20Bridge.rescueETH(address(rejecting), 1 ether);
+        // The failed send leaves the balance in place for a retry.
+        assertEq(address(erc20Bridge).balance, 1 ether);
     }
 
     function test_rescueETH_requiresBridgeAdmin() public {

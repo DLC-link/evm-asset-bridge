@@ -8,6 +8,7 @@ import {ReentrantReceiver} from "./mocks/ReentrantReceiver.sol";
 import {IBridgeWithdraw} from "./mocks/ReentrantReceiver.sol";
 import {RejectingReceiver} from "./mocks/RejectingReceiver.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
@@ -221,19 +222,27 @@ contract WithdrawTest is BridgeTestBase {
     }
 
     function test_withdraw_tamperedField_reverts() public {
-        // signatures over amount 1 ether must not authorize amount 2 ether
+        // Signatures over amount 1 ether must not authorize amount 2 ether.
+        // The tampered call hashes a different digest, so the first signature
+        // recovers to some other address that holds no attestor role.
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
-        vm.expectRevert(); // recovered signers are garbage, role check fails
+        bytes32 tamperedDigest = bridge.withdrawalDigest(REQUEST_ID, destination, 2 ether, defaultDeadline);
+        (address recovered,,) = ECDSA.tryRecover(tamperedDigest, sigs[0]);
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, recovered));
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 2 ether, defaultDeadline, sigs);
     }
 
     function test_withdraw_tamperedDeadline_reverts() public {
-        // signatures over one deadline must not authorize a later deadline
+        // Signatures over one deadline must not authorize a later deadline.
+        // The tampered call hashes a different digest, so the first signature
+        // recovers to some other address that holds no attestor role.
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
-        vm.expectRevert(); // recovered signers are garbage, role check fails
+        bytes32 tamperedDigest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline + 1);
+        (address recovered,,) = ECDSA.tryRecover(tamperedDigest, sigs[0]);
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, recovered));
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline + 1, sigs);
     }
@@ -355,6 +364,20 @@ contract WithdrawTest is BridgeTestBase {
         );
         vm.prank(attestors[0]);
         bounded.withdraw(REQUEST_ID, destination, 11 ether, defaultDeadline, sigs);
+    }
+
+    function test_withdrawLimits_belowMinimum_reverts() public {
+        // The lower bound of the band, mirroring the above-max test.
+        BitSafeEvmAssetBridge bounded = _deployBridgeWithWithdrawLimits(1 ether, 10 ether);
+        vm.prank(user);
+        bounded.depositETH{value: 50 ether}(DEPOSIT_ID);
+        bytes32 digest = bounded.withdrawalDigest(REQUEST_ID, destination, 0.5 ether, defaultDeadline);
+        bytes[] memory sigs = _attestorSignatures(digest, 2);
+        vm.expectRevert(
+            abi.encodeWithSelector(BitSafeEvmAssetBridge.AmountOutsideLimits.selector, 0.5 ether, 1 ether, 10 ether)
+        );
+        vm.prank(attestors[0]);
+        bounded.withdraw(REQUEST_ID, destination, 0.5 ether, defaultDeadline, sigs);
     }
 
     function test_digest_matchesManualEip712Construction() public view {
