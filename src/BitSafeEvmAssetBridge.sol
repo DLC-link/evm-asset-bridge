@@ -13,6 +13,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {RateLimiter} from "@openzeppelin/contracts/utils/RateLimiter.sol";
 
 /// @title BitSafeEvmAssetBridge
 /// @notice Locks one configured asset (ETH or one ERC20) and releases it on
@@ -26,6 +27,7 @@ contract BitSafeEvmAssetBridge is
 {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
+    using RateLimiter for RateLimiter.RefillingBucket;
 
     /// Both bounds are inclusive. An amount passes when
     /// `minAmount <= amount <= maxAmount`, so `minAmount == maxAmount` names
@@ -50,6 +52,9 @@ contract BitSafeEvmAssetBridge is
     uint8 private constant ETH_DECIMALS = 18;
     bytes32 public constant WITHDRAWAL_TYPEHASH =
         keccak256("Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount,uint256 deadline)");
+    /// @dev The bridge rate-limits all withdrawals as one flow, so one
+    ///      constant key selects a single global bucket.
+    bytes32 private constant WITHDRAW_RATE_LIMIT_KEY = bytes32(0);
 
     /// @custom:storage-location erc7201:bitsafe.storage.BitSafeEvmAssetBridge
     struct BridgeStorage {
@@ -62,6 +67,11 @@ contract BitSafeEvmAssetBridge is
         Limits withdrawLimits;
         EnumerableSet.AddressSet attestors;
         mapping(bytes withdrawRequestId => bool used) usedWithdrawRequests;
+        // Bounds the withdrawal rate with a token bucket that refills
+        // linearly at `capacity / window` per second. A capacity of 0 turns
+        // the check off. There is no cross-validation against
+        // `withdrawLimits`; operations sizes both.
+        RateLimiter.RefillingBucket withdrawRateLimit;
     }
 
     // cast index-erc7201 bitsafe.storage.BitSafeEvmAssetBridge
@@ -80,6 +90,7 @@ contract BitSafeEvmAssetBridge is
     event ThresholdSet(uint256 newThreshold);
     event DepositLimitsSet(uint256 minAmount, uint256 maxAmount);
     event WithdrawLimitsSet(uint256 minAmount, uint256 maxAmount);
+    event WithdrawRateLimitSet(uint208 capacity, uint48 window);
     event ERC20Rescued(address indexed token, address indexed to, uint256 amount);
     event ETHRescued(address indexed to, uint256 amount);
 
@@ -177,6 +188,17 @@ contract BitSafeEvmAssetBridge is
         return _getBridgeStorage().withdrawLimits;
     }
 
+    /// @notice The withdrawal rate limit: the shared configuration and the
+    ///         budget that is available now. A capacity of 0 means the check
+    ///         is off; `availableBudget` reads 0 then, but nothing limits
+    ///         withdrawals.
+    function withdrawRateLimit() external view returns (uint208 capacity, uint48 window, uint256 availableBudget) {
+        RateLimiter.RefillingBucket storage limiter = _getBridgeStorage().withdrawRateLimit;
+        capacity = limiter._capacity;
+        window = limiter._window;
+        availableBudget = limiter.available(WITHDRAW_RATE_LIMIT_KEY);
+    }
+
     function getAttestors() external view returns (address[] memory) {
         return _getBridgeStorage().attestors.values();
     }
@@ -244,6 +266,24 @@ contract BitSafeEvmAssetBridge is
         _setWithdrawLimits(newLimits);
     }
 
+    /// @notice Sets the withdrawal rate limit: a token bucket with a maximum
+    ///         of `capacity` base units that refills at `capacity / window`
+    ///         per second. A `capacity` of 0 disables the check.
+    /// @dev A `window` of 0 with a non-zero `capacity` reverts: the library
+    ///      treats it as 1 second, which refills the whole bucket every
+    ///      second and silently turns the limit off. New settings do not
+    ///      reset the bucket's use, so a lowered capacity acts immediately.
+    function setWithdrawRateLimit(uint208 capacity, uint48 window) external onlyRole(BRIDGE_ADMIN_ROLE) {
+        if (capacity != 0 && window == 0) revert InvalidLimits();
+        BridgeStorage storage $ = _getBridgeStorage();
+        // Freeze the debt under the old settings before they change. Without
+        // the sync, updateSettings re-prices the elapsed time at the new
+        // rate, and a window change mid-drain grants a full bucket at once.
+        $.withdrawRateLimit.sync(WITHDRAW_RATE_LIMIT_KEY);
+        $.withdrawRateLimit.updateSettings(window, capacity);
+        emit WithdrawRateLimitSet(capacity, window);
+    }
+
     /// @notice Rescues tokens sent to the bridge by mistake. Never the bridged asset.
     function rescueERC20(address token, address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) {
         if (token == _getBridgeStorage().asset) revert CannotRescueBridgedAsset();
@@ -299,6 +339,22 @@ contract BitSafeEvmAssetBridge is
         uint8 targetDecimals_ = $.targetDecimals;
         if (targetDecimals_ >= assetDecimals_) return 1;
         return 10 ** (assetDecimals_ - targetDecimals_);
+    }
+
+    /// @dev Draws `amount` from the withdrawal rate limit and reverts with
+    ///      the library's RateLimitExceeded when the bucket holds less. A
+    ///      capacity of 0 turns the check off: the library reports an
+    ///      uninitialized bucket as empty, so without this gate a zero
+    ///      config would block every withdrawal instead of none. The write
+    ///      is safe before the signature checks: any later revert in the
+    ///      same call unwinds it.
+    function _consumeWithdrawRateLimit(BridgeStorage storage $, uint256 amount) internal {
+        RateLimiter.RefillingBucket storage limiter = $.withdrawRateLimit;
+        // Consumption while the limiter is off is never recorded; a later
+        // sync cannot recover it. Re-enabling starts from the pre-disable
+        // debt only.
+        if (limiter._capacity == 0) return;
+        limiter.consume(WITHDRAW_RATE_LIMIT_KEY, amount);
     }
 
     function _checkLimits(uint256 amount, Limits storage limits) internal view {
@@ -426,6 +482,7 @@ contract BitSafeEvmAssetBridge is
         }
         if (amount == 0) revert ZeroAmount();
         _checkLimits(amount, $.withdrawLimits);
+        _consumeWithdrawRateLimit($, amount);
         // Inclusive bound: the bundle stays valid through the deadline second.
         if (block.timestamp > deadline) revert WithdrawalExpired(deadline);
         if (signatures.length < threshold_) revert NotEnoughSignatures();
