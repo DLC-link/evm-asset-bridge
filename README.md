@@ -148,13 +148,18 @@ record holds five more fields: `implementation`,
 Every record also opens with `schemaVersion`, which is `1` today. A consumer
 outside this repo reads it to detect a migration.
 
-`bridgeConfig` holds the whole deploy configuration, not just the decimals
-fields:
+`bridgeConfig` holds the whole `initialize` configuration, not just the
+decimals fields:
 
 ```
 asset, assetDecimals, targetDecimals, depositUnit, defaultAdmin, adminDelay,
 bridgeAdmin, proxyOwner, attestors, threshold, depositLimits, withdrawLimits
 ```
+
+The record holds the deploy-time configuration only. The post-deploy setters
+change live state that no record shows: `setWithdrawRateLimit`,
+`setWithdrawalHorizon`, and the `SENTRY_ROLE` grants. Read that state from
+the contract itself.
 
 An operator reads the live granularity rule from `targetDecimals` and
 `depositUnit`, both inside `bridgeConfig`.
@@ -213,6 +218,14 @@ operates. A chain whose explorer is Blockscout or Routescan needs its own host
 in `VERIFIER_URL_<CHAIN_ID>` and its own key.
 
 The command does not run in CI. It runs on an operator's machine.
+
+### Link the proxy on Etherscan
+
+The command verifies the source of all three contracts. It does not send
+Etherscan's separate proxy-link call, so the proxy page can miss the
+"Read as Proxy" and "Write as Proxy" tabs. When the tabs are missing, open
+the proxy address on Etherscan and use "More Options" > "Is this a proxy?".
+Confirm the detected implementation. Repeat the step after an upgrade.
 
 ## Deposit granularity
 

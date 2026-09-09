@@ -52,6 +52,13 @@ has_line_break() { # has_line_break <value>
   esac
 }
 
+is_solc_input_hash() { # is_solc_input_hash <value>
+  case "$1" in
+    *[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#1}" -eq 16 ]
+}
+
 # ---- the API key ------------------------------------------------------------
 # The per-chain variable wins. The script prints which one it used, so the
 # fallback is never silent. It never prints the value.
@@ -212,6 +219,15 @@ for ROLE in $ROLES; do
 
   if has_line_break "$ADDRESS$CONTRACT_NAME$SOURCE_PATH$ARGS$SOLC_HASH$COMPILER"; then
     echo "  FAIL $ROLE: $RECORD holds a line break in a field this script sends"
+    FAILED=$((FAILED + 1))
+    continue
+  fi
+
+  # The hash becomes part of the path this script uploads. A crafted record
+  # could hold "../evil" and send any .json file in the repo to the explorer,
+  # so only the exact format record.sh writes passes.
+  if ! is_solc_input_hash "$SOLC_HASH"; then
+    echo "  FAIL $ROLE: $RECORD holds a solcInputHash that is not 16 hex characters"
     FAILED=$((FAILED + 1))
     continue
   fi

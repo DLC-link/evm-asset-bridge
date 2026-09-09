@@ -247,6 +247,22 @@ contains "names the line break" "$STUB_OUT" "holds a line break"
 check    "reaches no explorer" \
   "$([ -s "$STUB_DIR/log" ] && echo sent || echo nothing)" "nothing"
 
+echo "== a record naming a compiler input outside solcInputs =="
+# The hash becomes part of the path the script uploads. A crafted record could
+# hold "../evil" and make the script send any .json file in the repo to the
+# host that VERIFIER_URL names. The decoy file proves the format check stops
+# the role, not the missing-file check.
+cp "$BAD" "$BAD.bak"
+jq '.solcInputHash = "../evil"' "$BAD.bak" >"$BAD"
+printf '{}' >deployments/evil.json
+run_stub "$NOT_VERIFIED" "$GUID" "$PASSED"
+rm -f deployments/evil.json
+mv "$BAD.bak" "$BAD"
+check    "exits non-zero on a traversal hash" "$STUB_RC" "1"
+contains "names the bad hash" "$STUB_OUT" "is not 16 hex characters"
+check    "reaches no explorer" \
+  "$([ -s "$STUB_DIR/log" ] && echo sent || echo nothing)" "nothing"
+
 echo "== a poisoned explorer host =="
 # The host, the key and the chain id all reach the same curl config. The script
 # checks them once, before it reads any record. This case also proves the check
