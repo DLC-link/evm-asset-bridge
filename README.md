@@ -380,6 +380,29 @@ of the oldest pending request; the attestors re-derive and re-sign; the admin
 lowers the horizon after the backlog clears. The request ids stay unused, so
 no funds are at risk.
 
+## Voiding a withdraw request
+
+`voidWithdrawRequest(bytes withdrawRequestId)` (`BRIDGE_ADMIN_ROLE`) marks an
+id used without paying it and emits `WithdrawRequestVoided`. A signed
+`Withdrawal` bundle stays valid until its deadline, so only a used id stops
+it at once.
+The order matters: void first, cancel second. When an operator proposes a
+cancel for the matching Canton withdraw request, the admin voids the id
+before the attestors confirm the cancel. Each attestor confirms only after
+it sees the `WithdrawRequestVoided` event for the id in a **finalized**
+block on its own RPC node. That check is positive evidence with one
+finality anchor: a reorg or an incomplete log scan cannot fake it. A
+`Withdraw` event for the id means the payout happened, so the attestor
+rejects the cancel. The confirmed cancel then credits the user back on
+Canton. A void after the credit leaves a window where an old bundle still
+pays the id. The function reverts with `EmptyId` or
+`WithdrawRequestAlreadyUsed` exactly as `withdraw` does, so a paid id
+cannot be voided and a voided id cannot be paid. It works while the bridge
+is paused, since a pause is the incident response and the void is part of
+resolving it. A wrongful void locks no funds: the ETH stays in the bridge,
+the Canton cancel credits the user back, and the `WithdrawRequestVoided`
+event makes every void auditable.
+
 Before rollout, cross-check the encoding against the live contract: the view
 `withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline)`
 returns the exact digest the contract verifies. Assert your locally computed

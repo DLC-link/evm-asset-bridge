@@ -88,6 +88,7 @@ contract BitSafeEvmAssetBridge is
         uint256 amount,
         uint256 deadline
     );
+    event WithdrawRequestVoided(bytes32 indexed withdrawRequestIdHash, bytes withdrawRequestId);
     event AttestorSetChanged(address[] attestors, uint256 threshold);
     event ThresholdSet(uint256 newThreshold);
     event DepositLimitsSet(uint256 minAmount, uint256 maxAmount);
@@ -603,5 +604,19 @@ contract BitSafeEvmAssetBridge is
             IERC20(asset_).safeTransfer(destinationAddress, amount);
         }
         emit Withdraw(keccak256(withdrawRequestId), withdrawRequestId, destinationAddress, amount, deadline);
+    }
+
+    /// @notice Marks `withdrawRequestId` used without paying it, so no signed
+    ///         `Withdrawal` bundle for that id can ever execute.
+    /// @dev Void the id before the attestors confirm the matching Canton
+    ///      cancel; see the README section "Voiding a withdraw request".
+    ///      Not `whenNotPaused` on purpose: the void must work during an
+    ///      incident pause.
+    function voidWithdrawRequest(bytes calldata withdrawRequestId) external onlyRole(BRIDGE_ADMIN_ROLE) {
+        BridgeStorage storage $ = _getBridgeStorage();
+        if (withdrawRequestId.length == 0) revert EmptyId();
+        if ($.usedWithdrawRequests[withdrawRequestId]) revert WithdrawRequestAlreadyUsed();
+        $.usedWithdrawRequests[withdrawRequestId] = true;
+        emit WithdrawRequestVoided(keccak256(withdrawRequestId), withdrawRequestId);
     }
 }
