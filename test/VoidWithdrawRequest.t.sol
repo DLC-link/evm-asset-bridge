@@ -7,9 +7,13 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 
 contract VoidWithdrawRequestTest is BridgeTestBase {
     address internal destination = makeAddr("destination");
+    // Fixture default: a deadline safely in the future. Expiry itself is
+    // exercised in Withdraw.t.sol, not here.
+    uint256 internal defaultDeadline;
 
     function setUp() public override {
         super.setUp();
+        defaultDeadline = block.timestamp + 1 hours;
         vm.deal(user, 1_000 ether);
         vm.prank(user);
         bridge.depositETH{value: 100 ether}(DEPOSIT_ID);
@@ -18,7 +22,7 @@ contract VoidWithdrawRequestTest is BridgeTestBase {
     /// A fully valid, threshold-signed bundle for REQUEST_ID, as the
     /// coordinator would have collected it before the Canton cancel.
     function _validBundle() internal view returns (bytes[] memory) {
-        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
         return _attestorSignatures(digest, 2);
     }
 
@@ -47,14 +51,14 @@ contract VoidWithdrawRequestTest is BridgeTestBase {
 
         vm.expectRevert(BitSafeEvmAssetBridge.WithdrawRequestAlreadyUsed.selector);
         vm.prank(attestors[0]);
-        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
         assertEq(destination.balance, 0);
     }
 
     function test_void_afterPaid_reverts() public {
         bytes[] memory sigs = _validBundle();
         vm.prank(attestors[0]);
-        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
         assertEq(destination.balance, 1 ether);
 
         vm.expectRevert(BitSafeEvmAssetBridge.WithdrawRequestAlreadyUsed.selector);
@@ -124,7 +128,7 @@ contract VoidWithdrawRequestTest is BridgeTestBase {
 
         vm.expectRevert(BitSafeEvmAssetBridge.WithdrawRequestAlreadyUsed.selector);
         vm.prank(attestors[0]);
-        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
     }
 
     function test_void_isPerId_otherIdsStillPayable() public {
@@ -133,10 +137,10 @@ contract VoidWithdrawRequestTest is BridgeTestBase {
         vm.prank(bridgeAdmin);
         bridge.voidWithdrawRequest(REQUEST_ID);
 
-        bytes32 digest = bridge.withdrawalDigest(otherId, destination, 1 ether);
+        bytes32 digest = bridge.withdrawalDigest(otherId, destination, 1 ether, defaultDeadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
         vm.prank(attestors[0]);
-        bridge.withdraw(otherId, destination, 1 ether, sigs);
+        bridge.withdraw(otherId, destination, 1 ether, defaultDeadline, sigs);
         assertEq(destination.balance, 1 ether);
     }
 

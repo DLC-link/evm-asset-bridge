@@ -57,6 +57,8 @@ contract DeployIT is Script {
 
     uint48 internal constant ADMIN_DELAY = 0; // IT: no timelock friction on the default-admin handover
     uint256 internal constant THRESHOLD = 2;
+    /// Canton expresses 10 decimal places, so a deposit must be a multiple of 1e8 wei.
+    uint8 internal constant CANTON_DECIMALS = 10;
 
     // Expected addresses on a fresh anvil chain (deployer nonce starts at 0).
     // See the contract-level natspec for how these were derived.
@@ -85,6 +87,7 @@ contract DeployIT is Script {
             BitSafeEvmAssetBridge.initialize,
             (
                 address(0), // asset = ETH
+                CANTON_DECIMALS,
                 defaultAdmin,
                 ADMIN_DELAY,
                 bridgeAdmin,
@@ -113,5 +116,7 @@ contract DeployIT is Script {
         console2.log("testUser (6):                   ", testUser);
         console2.log("implementation:                 ", address(implementation));
         console2.log("proxy (bridge):                 ", address(proxy));
+        console2.log("targetDecimals:                 ", CANTON_DECIMALS);
+        console2.log("depositUnit (wei):              ", BitSafeEvmAssetBridge(payable(address(proxy))).depositUnit());
     }
 }

@@ -6,6 +6,7 @@ import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 import {BridgeV2Mock} from "./mocks/BridgeV2Mock.sol";
 import {ForceSend} from "./mocks/ForceSend.sol";
 import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 contract UpgradeTest is BridgeTestBase {
@@ -26,32 +27,43 @@ contract UpgradeTest is BridgeTestBase {
         vm.prank(user);
         bridgeB.depositETH{value: 50 ether}(DEPOSIT_ID);
 
-        bytes32 digestA = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 digestA = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, deadline);
         bytes[] memory sigs = _attestorSignatures(digestA, 2);
-        vm.expectRevert(); // digest differs on B, recovered signers are not attestors
+        // Bridge B hashes a different digest (its own verifyingContract), so
+        // the first signature recovers to some other, non-attestor address.
+        bytes32 digestB = bridgeB.withdrawalDigest(REQUEST_ID, destination, 1 ether, deadline);
+        (address recovered,,) = ECDSA.tryRecover(digestB, sigs[0]);
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, recovered));
         vm.prank(attestors[0]);
-        bridgeB.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+        bridgeB.withdraw(REQUEST_ID, destination, 1 ether, deadline, sigs);
     }
 
     function test_crossChainReplay_reverts() public {
-        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, deadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
         vm.chainId(11155111); // domain rebuilds with the live chainid
-        vm.expectRevert();
+        // The new chain id changes the digest, so the first signature
+        // recovers to some other, non-attestor address.
+        bytes32 foreignDigest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, deadline);
+        (address recovered,,) = ECDSA.tryRecover(foreignDigest, sigs[0]);
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, recovered));
         vm.prank(attestors[0]);
-        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, deadline, sigs);
     }
 
     function test_upgrade_preservesStorageAndDomain() public {
         // consume one id before the upgrade
-        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, deadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
         vm.prank(attestors[0]);
-        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, deadline, sigs);
 
         // sign a second withdrawal BEFORE the upgrade
         bytes memory secondId = hex"5ec0";
-        bytes32 digest2 = bridge.withdrawalDigest(secondId, destination, 2 ether);
+        bytes32 digest2 = bridge.withdrawalDigest(secondId, destination, 2 ether, deadline);
         bytes[] memory sigs2 = _attestorSignatures(digest2, 2);
 
         // upgrade
@@ -68,7 +80,7 @@ contract UpgradeTest is BridgeTestBase {
 
         // pre-upgrade signatures stay valid: the domain did not change
         vm.prank(attestors[0]);
-        bridge.withdraw(secondId, destination, 2 ether, sigs2);
+        bridge.withdraw(secondId, destination, 2 ether, deadline, sigs2);
         assertEq(destination.balance, 3 ether);
     }
 
@@ -80,9 +92,10 @@ contract UpgradeTest is BridgeTestBase {
         // deposits and withdrawals still work
         vm.prank(user);
         bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
-        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, deadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
         vm.prank(attestors[0]);
-        bridge.withdraw(REQUEST_ID, destination, 1 ether, sigs);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, deadline, sigs);
     }
 }

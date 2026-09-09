@@ -5,7 +5,6 @@ import {BridgeTestBase} from "./BridgeTestBase.t.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {FeeOnTransferERC20} from "./mocks/FeeOnTransferERC20.sol";
-import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 contract DepositTest is BridgeTestBase {
@@ -89,16 +88,21 @@ contract DepositTest is BridgeTestBase {
         vm.stopPrank();
     }
 
-    function testFuzz_depositETH_respectsLimits(uint96 amount) public {
+    /// Every drawn amount is a whole multiple of the deposit unit, so the limits
+    /// band is the only rule under test. Decimals.t.sol fuzzes the granularity
+    /// rule on its own.
+    function testFuzz_depositETH_respectsLimits(uint96 raw) public {
         BitSafeEvmAssetBridge bounded = _deployBridgeWithDepositLimits(1 ether, 10 ether);
-        vm.assume(amount > 0);
+        uint256 amount = bound(uint256(raw), 1, 20 ether / DEFAULT_DEPOSIT_UNIT) * DEFAULT_DEPOSIT_UNIT;
         vm.deal(user, type(uint96).max);
         vm.prank(user);
         if (amount >= 1 ether && amount <= 10 ether) {
             bounded.depositETH{value: amount}(DEPOSIT_ID);
             assertEq(address(bounded).balance, amount);
         } else {
-            vm.expectRevert();
+            vm.expectRevert(
+                abi.encodeWithSelector(BitSafeEvmAssetBridge.AmountOutsideLimits.selector, amount, 1 ether, 10 ether)
+            );
             bounded.depositETH{value: amount}(DEPOSIT_ID);
         }
     }
@@ -120,27 +124,25 @@ contract DepositTest is BridgeTestBase {
         bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
     }
 
+    function test_depositERC20_whenPaused_reverts() public {
+        vm.prank(bridgeAdmin);
+        erc20Bridge.pause();
+        vm.startPrank(user);
+        token.approve(address(erc20Bridge), 1 ether);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        erc20Bridge.depositERC20(1 ether, DEPOSIT_ID);
+        vm.stopPrank();
+    }
+
     function _deployBridgeWithDepositLimits(uint256 minAmount, uint256 maxAmount)
         internal
         returns (BitSafeEvmAssetBridge)
     {
-        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
-        bytes memory initData = abi.encodeCall(
-            BitSafeEvmAssetBridge.initialize,
-            (
-                address(0),
-                defaultAdmin,
-                ADMIN_DELAY,
-                bridgeAdmin,
-                attestors,
-                THRESHOLD,
-                BitSafeEvmAssetBridge.Limits(minAmount, maxAmount),
-                BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
-            )
+        return _deployBridgeWith(
+            address(0),
+            DEFAULT_TARGET_DECIMALS,
+            BitSafeEvmAssetBridge.Limits(minAmount, maxAmount),
+            BitSafeEvmAssetBridge.Limits(0, type(uint256).max)
         );
-        return
-            BitSafeEvmAssetBridge(
-                payable(address(new TransparentUpgradeableProxy(address(impl2), proxyOwner, initData)))
-            );
     }
 }
