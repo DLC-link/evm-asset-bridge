@@ -332,7 +332,11 @@ contract BitSafeEvmAssetBridge is
     }
 
     /// @notice Rescues tokens sent to the bridge by mistake. Never the bridged asset.
-    function rescueERC20(address token, address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) {
+    /// @dev The reentrancy guard is transient and shared across all guarded
+    ///      functions, so a guarded function cannot nest inside another
+    ///      guarded call. For a bridge this is intended: no flow legitimately
+    ///      moves value from within a value-moving call.
+    function rescueERC20(address token, address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) nonReentrant {
         if (token == _getBridgeStorage().asset) revert CannotRescueBridgedAsset();
         if (to == address(0)) revert InvalidAddress();
         IERC20(token).safeTransfer(to, amount);
@@ -341,7 +345,7 @@ contract BitSafeEvmAssetBridge is
 
     /// @notice Rescues stray ETH (for example forced in via selfdestruct).
     ///         Only callable when the bridged asset is not ETH.
-    function rescueETH(address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) {
+    function rescueETH(address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) nonReentrant {
         if (_getBridgeStorage().asset == address(0)) revert CannotRescueBridgedAsset();
         if (to == address(0)) revert InvalidAddress();
         (bool ok,) = to.call{value: amount}("");
@@ -353,7 +357,7 @@ contract BitSafeEvmAssetBridge is
     ///         forced-in ETH or direct token transfers. The only rescue path
     ///         that touches the bridged asset, and the counter bounds it:
     ///         deposited funds stay out of reach.
-    function rescueSurplus(address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) {
+    function rescueSurplus(address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) nonReentrant {
         if (to == address(0)) revert InvalidAddress();
         uint256 surplus_ = surplus();
         if (amount > surplus_) revert AmountExceedsSurplus(amount, surplus_);
@@ -487,7 +491,7 @@ contract BitSafeEvmAssetBridge is
     }
 
     /// @notice Locks the configured ERC20 asset. Requires prior approval.
-    function depositERC20(uint256 amount, bytes calldata depositAccountId) external whenNotPaused {
+    function depositERC20(uint256 amount, bytes calldata depositAccountId) external whenNotPaused nonReentrant {
         BridgeStorage storage $ = _getBridgeStorage();
         address asset_ = $.asset;
         if (asset_ == address(0)) revert AssetIsNotERC20();

@@ -5,6 +5,7 @@ import {BridgeTestBase} from "./BridgeTestBase.t.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {ForceSend} from "./mocks/ForceSend.sol";
+import {RejectingReceiver} from "./mocks/RejectingReceiver.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 contract TotalLockedTest is BridgeTestBase {
@@ -150,6 +151,18 @@ contract TotalLockedTest is BridgeTestBase {
         assertEq(erc20Bridge.surplus(), 0);
         assertEq(erc20Bridge.totalLocked(), DEPOSIT);
         assertEq(token.balanceOf(address(erc20Bridge)), DEPOSIT);
+    }
+
+    function test_rescueSurplus_eth_rejectingReceiver_reverts() public {
+        new ForceSend{value: STRAY}().boom(payable(address(bridge)));
+        assertEq(bridge.surplus(), STRAY);
+
+        RejectingReceiver rejecting = new RejectingReceiver();
+        vm.expectRevert(BitSafeEvmAssetBridge.EthTransferFailed.selector);
+        vm.prank(bridgeAdmin);
+        bridge.rescueSurplus(address(rejecting), STRAY);
+        // The failed send leaves the surplus in place for a retry.
+        assertEq(bridge.surplus(), STRAY);
     }
 
     // -------------------------------------------------- counter corruption
