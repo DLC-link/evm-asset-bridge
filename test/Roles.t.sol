@@ -5,10 +5,19 @@ import {BridgeTestBase} from "./BridgeTestBase.t.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {ForceSend} from "./mocks/ForceSend.sol";
+import {RejectingReceiver} from "./mocks/RejectingReceiver.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 contract RolesTest is BridgeTestBase {
+    address internal sentry = makeAddr("sentry");
+
+    function _grantSentry() internal {
+        bytes32 role = bridge.SENTRY_ROLE();
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, sentry);
+    }
+
     // Cache role ids in locals: an inline bridge.ROLE() view call would
     // consume a pending vm.prank or vm.expectRevert.
     function test_attestor_cannotRenounce() public {
@@ -43,11 +52,33 @@ contract RolesTest is BridgeTestBase {
             expected[i] = attestors[i];
         }
         expected[3] = newAttestor;
+        // Growth runs raise-then-grant: 2 of 4 would sit at half.
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3);
         vm.expectEmit(false, false, false, true);
-        emit BitSafeEvmAssetBridge.AttestorSetChanged(expected, THRESHOLD);
+        emit BitSafeEvmAssetBridge.AttestorSetChanged(expected, 3);
         vm.prank(defaultAdmin);
         bridge.grantRole(role, newAttestor);
         assertEq(bridge.getAttestors().length, 4);
+    }
+
+    function test_grantAttestor_dilutingThreshold_reverts() public {
+        // 2 of 3 is a majority; a fourth attestor puts 2 exactly at half.
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.ThresholdBelowMajority.selector, 2, 4));
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor4"));
+    }
+
+    function test_grantAttestor_afterRaise_passes() public {
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3);
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor4")); // 3 of 4 is a majority
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor5")); // 3 of 5 is a majority
+        assertEq(bridge.getAttestors().length, 5);
     }
 
     function test_revokeAttestor_belowThreshold_allowed() public {
@@ -69,6 +100,36 @@ contract RolesTest is BridgeTestBase {
         vm.expectRevert(BitSafeEvmAssetBridge.ThresholdOutOfBounds.selector);
         bridge.setThreshold(4); // above attestor count
         vm.stopPrank();
+    }
+
+    function test_setThreshold_atHalf_reverts() public {
+        // The base fixture has 3 attestors; grow the set to 4 in the safe
+        // order, then try to lower the threshold to exactly half.
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3);
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor4"));
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.ThresholdBelowMajority.selector, 2, 4));
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(2);
+    }
+
+    function test_setThreshold_aboveHalf_passes() public {
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3);
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor4"));
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(3); // 4 / 2 + 1, re-set on the grown set
+        assertEq(bridge.threshold(), 3);
+    }
+
+    function test_setThreshold_twoOfThree_passes() public {
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(2); // boundary: 2 > 3 / 2
+        assertEq(bridge.threshold(), 2);
     }
 
     function test_setThreshold_requiresBridgeAdmin() public {
@@ -144,11 +205,80 @@ contract RolesTest is BridgeTestBase {
         assertEq(stray.balanceOf(user), 5 ether);
     }
 
-    function test_pause_requiresBridgeAdmin() public {
-        bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
-        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, user, role));
+    function test_rescueERC20_emitsEvent() public {
+        MockERC20 stray = new MockERC20();
+        stray.mint(address(bridge), 5 ether); // ETH instance, any ERC20 is foreign
+        vm.expectEmit(true, true, false, true);
+        emit BitSafeEvmAssetBridge.ERC20Rescued(address(stray), user, 5 ether);
+        vm.prank(bridgeAdmin);
+        bridge.rescueERC20(address(stray), user, 5 ether);
+    }
+
+    function test_pause_withoutRole_reverts() public {
+        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.NotPauser.selector, user));
         vm.prank(user);
         bridge.pause();
+    }
+
+    function test_sentry_pauses() public {
+        _grantSentry();
+        vm.prank(sentry);
+        bridge.pause();
+        assertTrue(bridge.paused());
+        // Deposits revert while paused.
+        vm.deal(user, 1 ether);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.prank(user);
+        bridge.depositETH{value: 1e8}(DEPOSIT_ID);
+        // Withdrawals revert while paused. whenNotPaused runs before the
+        // signature checks, so empty signatures suffice here.
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, user, 1e8, block.timestamp + 1 hours, new bytes[](0));
+    }
+
+    function test_sentry_cannotUnpause() public {
+        _grantSentry();
+        vm.prank(sentry);
+        bridge.pause();
+        bytes32 role = bridge.BRIDGE_ADMIN_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, sentry, role));
+        vm.prank(sentry);
+        bridge.unpause();
+    }
+
+    function test_bridgeAdmin_stillPausesAndUnpauses() public {
+        vm.startPrank(bridgeAdmin);
+        bridge.pause();
+        bridge.unpause();
+        vm.stopPrank();
+        assertFalse(bridge.paused());
+    }
+
+    function test_sentry_canRenounce() public {
+        _grantSentry();
+        bytes32 role = bridge.SENTRY_ROLE();
+        vm.prank(sentry);
+        bridge.renounceRole(role, sentry);
+        assertFalse(bridge.hasRole(role, sentry));
+    }
+
+    function test_grantSentry_emitsRoleGranted() public {
+        bytes32 role = bridge.SENTRY_ROLE();
+        vm.expectEmit(true, true, true, true);
+        emit IAccessControl.RoleGranted(role, sentry, defaultAdmin);
+        vm.prank(defaultAdmin);
+        bridge.grantRole(role, sentry);
+    }
+
+    function test_revokeSentry_emitsRoleRevoked() public {
+        _grantSentry();
+        bytes32 role = bridge.SENTRY_ROLE();
+        vm.expectEmit(true, true, true, true);
+        emit IAccessControl.RoleRevoked(role, sentry, defaultAdmin);
+        vm.prank(defaultAdmin);
+        bridge.revokeRole(role, sentry);
+        assertFalse(bridge.hasRole(role, sentry));
     }
 
     function test_unpause_requiresBridgeAdmin() public {
@@ -200,6 +330,18 @@ contract RolesTest is BridgeTestBase {
         assertEq(user.balance, 3 ether);
     }
 
+    function test_rescueETH_emitsEvent() public {
+        MockERC20 token = new MockERC20();
+        BitSafeEvmAssetBridge erc20Bridge = _deployBridge(address(token));
+        ForceSend force = new ForceSend{value: 3 ether}();
+        force.boom(payable(address(erc20Bridge)));
+
+        vm.expectEmit(true, false, false, true);
+        emit BitSafeEvmAssetBridge.ETHRescued(user, 3 ether);
+        vm.prank(bridgeAdmin);
+        erc20Bridge.rescueETH(user, 3 ether);
+    }
+
     function test_rescueETH_blocksBridgedAsset() public {
         vm.expectRevert(BitSafeEvmAssetBridge.CannotRescueBridgedAsset.selector);
         vm.prank(bridgeAdmin);
@@ -215,6 +357,20 @@ contract RolesTest is BridgeTestBase {
         vm.expectRevert(BitSafeEvmAssetBridge.InvalidAddress.selector);
         vm.prank(bridgeAdmin);
         erc20Bridge.rescueETH(address(0), 1 ether);
+    }
+
+    function test_rescueETH_rejectingReceiver_reverts() public {
+        MockERC20 token = new MockERC20();
+        BitSafeEvmAssetBridge erc20Bridge = _deployBridge(address(token));
+        ForceSend force = new ForceSend{value: 1 ether}();
+        force.boom(payable(address(erc20Bridge)));
+
+        RejectingReceiver rejecting = new RejectingReceiver();
+        vm.expectRevert(BitSafeEvmAssetBridge.EthTransferFailed.selector);
+        vm.prank(bridgeAdmin);
+        erc20Bridge.rescueETH(address(rejecting), 1 ether);
+        // The failed send leaves the balance in place for a retry.
+        assertEq(address(erc20Bridge).balance, 1 ether);
     }
 
     function test_rescueETH_requiresBridgeAdmin() public {

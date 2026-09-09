@@ -124,6 +124,16 @@ contract DepositTest is BridgeTestBase {
         bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
     }
 
+    function test_depositERC20_whenPaused_reverts() public {
+        vm.prank(bridgeAdmin);
+        erc20Bridge.pause();
+        vm.startPrank(user);
+        token.approve(address(erc20Bridge), 1 ether);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        erc20Bridge.depositERC20(1 ether, DEPOSIT_ID);
+        vm.stopPrank();
+    }
+
     function _deployBridgeWithDepositLimits(uint256 minAmount, uint256 maxAmount)
         internal
         returns (BitSafeEvmAssetBridge)
