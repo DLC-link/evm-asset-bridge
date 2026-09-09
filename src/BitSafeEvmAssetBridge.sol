@@ -349,17 +349,10 @@ contract BitSafeEvmAssetBridge is
 
     /// @notice Marks `withdrawRequestId` used without paying it, so no signed
     ///         `Withdrawal` bundle for that id can ever execute.
-    /// @dev Void the id when a cancel is proposed for the matching Canton
-    ///      withdraw request, before the attestors confirm it. The attestors
-    ///      confirm only a used id with no `Withdraw` event, and the confirmed
-    ///      cancel credits the user back on Canton. A bundle collected earlier
-    ///      has no deadline, so only the void makes it unusable. Reverts with
-    ///      the same errors as `withdraw` for an empty or already used id, so a
-    ///      paid id cannot be voided and a voided id cannot be paid.
-    ///      Deliberately NOT `whenNotPaused`: a pause is the response to an
-    ///      incident and voiding is part of resolving it, so it must remain
-    ///      available while paused. Same role as `pause`; adds no power the
-    ///      role lacks.
+    /// @dev Void the id before the attestors confirm the matching Canton
+    ///      cancel; see the README section "Voiding a withdraw request".
+    ///      Not `whenNotPaused` on purpose: the void must work during an
+    ///      incident pause.
     function voidWithdrawRequest(bytes calldata withdrawRequestId) external onlyRole(BRIDGE_ADMIN_ROLE) {
         BridgeStorage storage $ = _getBridgeStorage();
         if (withdrawRequestId.length == 0) revert EmptyId();
