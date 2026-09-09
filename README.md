@@ -44,6 +44,17 @@ Run with:
 forge script script/Deploy.s.sol:Deploy --rpc-url <RPC_URL> --broadcast
 ```
 
+### Post-deploy: the withdrawal rate limit
+
+After deploy, the bridge admin sets the withdrawal rate limit with
+`setWithdrawRateLimit(capacity, window)`. Withdrawals draw from a token
+bucket that holds at most `capacity` base units and refills at
+`capacity / window` per second, so a drained bucket is full again after
+`window` seconds. A `capacity` of `0` disables the check, and the contract
+deploys with `0`, so this step is what turns the limit on. `initialize`
+cannot take the limit as a parameter because it already sits at the EVM
+stack limit.
+
 ### Post-deploy: the sentry pause role
 
 After deploy, the default admin MAY grant `SENTRY_ROLE` to one or more
