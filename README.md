@@ -89,6 +89,41 @@ committed files. `broadcast/` and `out/` never leave your machine.
 A local test run writes into the same folder. Its compiler input matches the
 deployed one whenever the source matches, so an extra file is harmless.
 
+### Post-deploy: the withdrawal rate limit
+
+After deploy, the bridge admin sets the withdrawal rate limit with
+`setWithdrawRateLimit(capacity, window)`. Withdrawals draw from a token
+bucket that holds at most `capacity` base units and refills at
+`capacity / window` per second, so a drained bucket is full again after
+`window` seconds. A `capacity` of `0` disables the check, and the contract
+deploys with `0`, so this step is what turns the limit on. `initialize`
+cannot take the limit as a parameter because it already sits at the EVM
+stack limit.
+
+### Post-deploy: the withdrawal horizon
+
+The horizon bounds how far a withdrawal `deadline` can sit past
+`block.timestamp` (inclusive). The contract deploys with `0`, which disables
+the bound. The attestors derive their signing mode from the
+`withdrawalHorizon()` view. While the view returns `0`, they sign the fixed
+sentinel deadline. When the view returns a non-zero value, they derive real
+deadlines. Activation is therefore one admin transaction:
+`setWithdrawalHorizon(horizon)`. That transaction invalidates every
+unsubmitted sentinel bundle, and the attestors re-sign those requests in
+derived mode. The suggested first value is 48 hours; tighten it later with
+one admin transaction. `initialize` cannot take the horizon as a parameter
+because it already sits at the EVM stack limit.
+
+### Post-deploy: the sentry pause role
+
+After deploy, the default admin MAY grant `SENTRY_ROLE` to one or more
+monitoring-bot keys with `grantRole(SENTRY_ROLE, <bot>)`. A sentry can only
+call `pause()`; only the bridge admin unpauses. A hot key is acceptable for
+this role: it grants only a denial power, and the admin can always reverse it.
+
+No sentry holder exists at launch. Until a monitoring bot exists, the runbook
+keeps a pre-signed `pause()` Safe transaction to cover the gap.
+
 ## Deployment records
 
 One deploy creates three contracts. It therefore writes three records:
@@ -229,7 +264,7 @@ The signed struct and its type string (field names are part of the digest —
 they must match byte for byte):
 
 ```
-Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount)
+Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount,uint256 deadline)
 ```
 
 The domain has four fields. `verifyingContract` is the bridge PROXY address
@@ -255,6 +290,7 @@ sol! {
         bytes withdrawRequestId;
         address destinationAddress;
         uint256 amount;
+        uint256 deadline;
     }
 }
 
@@ -265,6 +301,7 @@ fn sign_withdrawal(
     cid_bytes: Vec<u8>,        // the raw Canton WithdrawRequest cid bytes
     destination: Address,
     amount_wei: U256,
+    deadline: U256,            // Unix seconds; see the derivation rule below
 ) -> eyre::Result<Vec<u8>> {
     let domain = eip712_domain! {
         name: "BitSafeEvmAssetBridge",
@@ -277,6 +314,7 @@ fn sign_withdrawal(
         withdrawRequestId: Bytes::from(cid_bytes),
         destinationAddress: destination,
         amount: amount_wei,
+        deadline,
     };
 
     let digest: B256 = message.eip712_signing_hash(&domain);
@@ -295,13 +333,46 @@ Rules the contract enforces on submission (`withdraw`):
 - At least `threshold` signatures are required; the caller must hold
   `ATTESTOR_ROLE`.
 - Each `withdrawRequestId` executes once, forever.
+- A bundle expires after its `deadline` (a Unix timestamp, inclusive): the
+  contract rejects it when `block.timestamp > deadline`.
+- A `deadline` further than the admin-set `withdrawalHorizon()` past
+  `block.timestamp` is rejected. The bound is inclusive:
+  `deadline == block.timestamp + horizon` passes. A horizon of `0` disables
+  the bound.
+
+The deadline runs in one of two modes, and the contract's
+`withdrawalHorizon()` view selects the mode. While the view returns `0`,
+every attestor signs the same fixed sentinel deadline, a far-future constant
+in the shared release, and the bound stays off. When the view returns a
+non-zero value, every attestor derives the deadline alone, with the same
+rule: `deadline = ledgerTimeOf(WithdrawRequest create) + withdrawalHorizon`.
+Every input is a ledger record or the on-chain view: no local clocks, no
+slack constant, no per-node horizon config. All attestors compute the same
+value, so the signatures combine with no coordinator-proposed field.
+Activation is one admin transaction (see the deploy notes); start long — 48
+hours is suggested — and tighten later with one admin transaction.
+
+A horizon change can land between two attestors' reads. The attestors then
+derive different deadlines, sign different digests, and the signatures do not
+combine. An attestor that sees a deadline mismatch defers the request to the
+next signing tick, re-reads the horizon, and re-signs. The request ids stay
+unused, so no funds are at risk. The same deferral covers activation day:
+every unsubmitted sentinel bundle fails the new bound, and the attestors
+re-sign those requests in derived mode.
+
+A pause longer than the horizon expires every pending bundle. A re-sign alone
+does not recover them: the derivation rule is deterministic, so it computes
+the same expired deadline. The bridge admin raises the horizon above the age
+of the oldest pending request; the attestors re-derive and re-sign; the admin
+lowers the horizon after the backlog clears. The request ids stay unused, so
+no funds are at risk.
 
 Before rollout, cross-check the encoding against the live contract: the view
-`withdrawalDigest(withdrawRequestId, destinationAddress, amount)` returns the
-exact digest the contract verifies. Assert your locally computed digest equals
-it. Note for raw-key or KMS setups: sign the digest bytes directly (no
-`personal_sign` / Ethereum Signed Message prefix — the EIP-712 `\x19\x01`
-envelope is already inside the digest).
+`withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline)`
+returns the exact digest the contract verifies. Assert your locally computed
+digest equals it. Note for raw-key or KMS setups: sign the digest bytes
+directly (no `personal_sign` / Ethereum Signed Message prefix — the EIP-712
+`\x19\x01` envelope is already inside the digest).
 
 ## Watching Deposit events (Rust)
 

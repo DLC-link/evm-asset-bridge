@@ -13,6 +13,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {RateLimiter} from "@openzeppelin/contracts/utils/RateLimiter.sol";
 
 /// @title BitSafeEvmAssetBridge
 /// @notice Locks one configured asset (ETH or one ERC20) and releases it on
@@ -26,6 +27,7 @@ contract BitSafeEvmAssetBridge is
 {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
+    using RateLimiter for RateLimiter.RefillingBucket;
 
     /// Both bounds are inclusive. An amount passes when
     /// `minAmount <= amount <= maxAmount`, so `minAmount == maxAmount` names
@@ -37,6 +39,7 @@ contract BitSafeEvmAssetBridge is
 
     bytes32 public constant BRIDGE_ADMIN_ROLE = keccak256("BRIDGE_ADMIN_ROLE");
     bytes32 public constant ATTESTOR_ROLE = keccak256("ATTESTOR_ROLE");
+    bytes32 public constant SENTRY_ROLE = keccak256("SENTRY_ROLE");
     uint256 public constant MIN_THRESHOLD = 2;
     /// @dev 18 is the idiomatic maximum precision for an ERC20.
     uint8 public constant MAX_ASSET_DECIMALS = 18;
@@ -48,7 +51,10 @@ contract BitSafeEvmAssetBridge is
     /// @dev ETH has no contract to ask, so its precision is a convention.
     uint8 private constant ETH_DECIMALS = 18;
     bytes32 public constant WITHDRAWAL_TYPEHASH =
-        keccak256("Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount)");
+        keccak256("Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount,uint256 deadline)");
+    /// @dev The bridge rate-limits all withdrawals as one flow, so one
+    ///      constant key selects a single global bucket.
+    bytes32 private constant WITHDRAW_RATE_LIMIT_KEY = bytes32(0);
 
     /// @custom:storage-location erc7201:bitsafe.storage.BitSafeEvmAssetBridge
     struct BridgeStorage {
@@ -61,6 +67,13 @@ contract BitSafeEvmAssetBridge is
         Limits withdrawLimits;
         EnumerableSet.AddressSet attestors;
         mapping(bytes withdrawRequestId => bool used) usedWithdrawRequests;
+        // Bounds the withdrawal rate with a token bucket that refills
+        // linearly at `capacity / window` per second. A capacity of 0 turns
+        // the check off. There is no cross-validation against
+        // `withdrawLimits`; operations sizes both.
+        RateLimiter.RefillingBucket withdrawRateLimit;
+        uint256 totalLocked;
+        uint256 withdrawalHorizon;
     }
 
     // cast index-erc7201 bitsafe.storage.BitSafeEvmAssetBridge
@@ -72,12 +85,18 @@ contract BitSafeEvmAssetBridge is
         bytes32 indexed withdrawRequestIdHash,
         bytes withdrawRequestId,
         address indexed destinationAddress,
-        uint256 amount
+        uint256 amount,
+        uint256 deadline
     );
     event AttestorSetChanged(address[] attestors, uint256 threshold);
     event ThresholdSet(uint256 newThreshold);
     event DepositLimitsSet(uint256 minAmount, uint256 maxAmount);
     event WithdrawLimitsSet(uint256 minAmount, uint256 maxAmount);
+    event WithdrawRateLimitSet(uint208 capacity, uint48 window);
+    event WithdrawalHorizonSet(uint256 horizon);
+    event ERC20Rescued(address indexed token, address indexed to, uint256 amount);
+    event ETHRescued(address indexed to, uint256 amount);
+    event SurplusRescued(address indexed to, uint256 amount);
 
     error InvalidAddress();
     error InvalidLimits();
@@ -90,16 +109,21 @@ contract BitSafeEvmAssetBridge is
     error AssetIsNotEther();
     error AssetIsNotERC20();
     error WithdrawRequestAlreadyUsed();
+    error WithdrawalExpired(uint256 deadline);
+    error DeadlineBeyondHorizon(uint256 deadline, uint256 horizon);
     error InvalidDestination();
     error NotEnoughSignatures();
     error InvalidSignature();
     error DuplicateSigner(address signer);
     error SignerIsNotAttestor(address signer);
     error AttestorCannotRenounce();
+    error NotPauser(address caller);
     error UnexpectedBalanceChange();
     error CannotRescueBridgedAsset();
+    error AmountExceedsSurplus(uint256 amount, uint256 surplus);
     error EthTransferFailed();
     error DirectEthTransferNotAllowed();
+    error ThresholdBelowMajority(uint256 threshold, uint256 attestorCount);
 
     constructor() {
         _disableInitializers();
@@ -170,12 +194,50 @@ contract BitSafeEvmAssetBridge is
         return _getBridgeStorage().withdrawLimits;
     }
 
+    /// @notice The withdrawal rate limit: the shared configuration and the
+    ///         budget that is available now. A capacity of 0 means the check
+    ///         is off; `availableBudget` reads 0 then, but nothing limits
+    ///         withdrawals.
+    function withdrawRateLimit() external view returns (uint208 capacity, uint48 window, uint256 availableBudget) {
+        RateLimiter.RefillingBucket storage limiter = _getBridgeStorage().withdrawRateLimit;
+        capacity = limiter._capacity;
+        window = limiter._window;
+        availableBudget = limiter.available(WITHDRAW_RATE_LIMIT_KEY);
+    }
+
+    /// @notice The maximum distance a withdrawal `deadline` can sit past
+    ///         `block.timestamp`, in seconds (inclusive). `0` turns the bound
+    ///         off. The attestor stack reads this value to pick its signing
+    ///         mode and to derive deadlines.
+    function withdrawalHorizon() external view returns (uint256) {
+        return _getBridgeStorage().withdrawalHorizon;
+    }
+
     function getAttestors() external view returns (address[] memory) {
         return _getBridgeStorage().attestors.values();
     }
 
     function isWithdrawRequestUsed(bytes calldata withdrawRequestId) external view returns (bool) {
         return _getBridgeStorage().usedWithdrawRequests[withdrawRequestId];
+    }
+
+    /// @notice Base units the deposit paths locked and `withdraw` has not
+    ///         released. Bounds `rescueSurplus` and feeds monitoring only;
+    ///         `withdraw` never reads it.
+    function totalLocked() external view returns (uint256) {
+        return _getBridgeStorage().totalLocked;
+    }
+
+    /// @notice Bridged-asset balance above `totalLocked`: funds no deposit
+    ///         backs, such as forced-in ETH or direct token transfers.
+    function surplus() public view returns (uint256) {
+        BridgeStorage storage $ = _getBridgeStorage();
+        address asset_ = $.asset;
+        uint256 balance = asset_ == address(0) ? address(this).balance : IERC20(asset_).balanceOf(address(this));
+        uint256 tl = $.totalLocked;
+        // Clamps to 0: a counter above the balance reports no surplus, so the
+        // view stays readable for monitors instead of reverting on underflow.
+        return balance > tl ? balance - tl : 0;
     }
 
     // ------------------------------------------------------- role overrides
@@ -185,6 +247,14 @@ contract BitSafeEvmAssetBridge is
         if (granted && role == ATTESTOR_ROLE) {
             BridgeStorage storage $ = _getBridgeStorage();
             $.attestors.add(account);
+            // A grant must not dilute the threshold to half or below. Growth
+            // therefore runs raise-then-grant. During initialize the
+            // threshold is still 0; _setThreshold checks the final set then.
+            uint256 threshold_ = $.threshold;
+            uint256 count = $.attestors.length();
+            if (threshold_ != 0 && threshold_ <= count / 2) {
+                revert ThresholdBelowMajority(threshold_, count);
+            }
             emit AttestorSetChanged($.attestors.values(), $.threshold);
         }
     }
@@ -202,7 +272,14 @@ contract BitSafeEvmAssetBridge is
 
     // ------------------------------------------------------------- admin
 
-    function pause() external onlyRole(BRIDGE_ADMIN_ROLE) {
+    /// @notice A sentry or the bridge admin pauses. Only the bridge admin unpauses.
+    /// @dev A sentry key may be hot: the role grants only a denial power, and the
+    ///      admin can always reverse it. A pause auto-expiry (as Optimism's
+    ///      Guardian has) is a possible future extension.
+    function pause() external {
+        if (!hasRole(BRIDGE_ADMIN_ROLE, msg.sender) && !hasRole(SENTRY_ROLE, msg.sender)) {
+            revert NotPauser(msg.sender);
+        }
         _pause();
     }
 
@@ -222,20 +299,76 @@ contract BitSafeEvmAssetBridge is
         _setWithdrawLimits(newLimits);
     }
 
+    /// @notice Sets the withdrawal rate limit: a token bucket with a maximum
+    ///         of `capacity` base units that refills at `capacity / window`
+    ///         per second. A `capacity` of 0 disables the check.
+    /// @dev A `window` of 0 with a non-zero `capacity` reverts: the library
+    ///      treats it as 1 second, which refills the whole bucket every
+    ///      second and silently turns the limit off. New settings do not
+    ///      reset the bucket's use, so a lowered capacity acts immediately.
+    function setWithdrawRateLimit(uint208 capacity, uint48 window) external onlyRole(BRIDGE_ADMIN_ROLE) {
+        if (capacity != 0 && window == 0) revert InvalidLimits();
+        BridgeStorage storage $ = _getBridgeStorage();
+        // Freeze the debt under the old settings before they change. Without
+        // the sync, updateSettings re-prices the elapsed time at the new
+        // rate, and a window change mid-drain grants a full bucket at once.
+        $.withdrawRateLimit.sync(WITHDRAW_RATE_LIMIT_KEY);
+        $.withdrawRateLimit.updateSettings(window, capacity);
+        emit WithdrawRateLimitSet(capacity, window);
+    }
+
+    /// @notice Sets the withdrawal horizon: the maximum distance a withdrawal
+    ///         `deadline` can sit past `block.timestamp`, in seconds. The
+    ///         bound is inclusive. `0` disables the bound.
+    /// @dev The attestor stack reads this view to pick its signing mode and
+    ///      to derive deadlines: 0 means the sentinel deadline, non-zero
+    ///      means derived deadlines. This one transaction therefore
+    ///      activates the bound. A change that lands between two attestors'
+    ///      reads splits their digests; the attestors defer the request to
+    ///      the next signing tick and re-sign.
+    function setWithdrawalHorizon(uint256 horizon) external onlyRole(BRIDGE_ADMIN_ROLE) {
+        _getBridgeStorage().withdrawalHorizon = horizon;
+        emit WithdrawalHorizonSet(horizon);
+    }
+
     /// @notice Rescues tokens sent to the bridge by mistake. Never the bridged asset.
-    function rescueERC20(address token, address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) {
+    /// @dev The reentrancy guard is transient and shared across all guarded
+    ///      functions, so a guarded function cannot nest inside another
+    ///      guarded call. For a bridge this is intended: no flow legitimately
+    ///      moves value from within a value-moving call.
+    function rescueERC20(address token, address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) nonReentrant {
         if (token == _getBridgeStorage().asset) revert CannotRescueBridgedAsset();
         if (to == address(0)) revert InvalidAddress();
         IERC20(token).safeTransfer(to, amount);
+        emit ERC20Rescued(token, to, amount);
     }
 
     /// @notice Rescues stray ETH (for example forced in via selfdestruct).
     ///         Only callable when the bridged asset is not ETH.
-    function rescueETH(address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) {
+    function rescueETH(address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) nonReentrant {
         if (_getBridgeStorage().asset == address(0)) revert CannotRescueBridgedAsset();
         if (to == address(0)) revert InvalidAddress();
         (bool ok,) = to.call{value: amount}("");
         if (!ok) revert EthTransferFailed();
+        emit ETHRescued(to, amount);
+    }
+
+    /// @notice Rescues the bridged-asset balance above `totalLocked`, such as
+    ///         forced-in ETH or direct token transfers. The only rescue path
+    ///         that touches the bridged asset, and the counter bounds it:
+    ///         deposited funds stay out of reach.
+    function rescueSurplus(address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) nonReentrant {
+        if (to == address(0)) revert InvalidAddress();
+        uint256 surplus_ = surplus();
+        if (amount > surplus_) revert AmountExceedsSurplus(amount, surplus_);
+        address asset_ = _getBridgeStorage().asset;
+        if (asset_ == address(0)) {
+            (bool ok,) = to.call{value: amount}("");
+            if (!ok) revert EthTransferFailed();
+        } else {
+            IERC20(asset_).safeTransfer(to, amount);
+        }
+        emit SurplusRescued(to, amount);
     }
 
     /// @dev Attestors leave only through revokeRole.
@@ -277,6 +410,33 @@ contract BitSafeEvmAssetBridge is
         return 10 ** (assetDecimals_ - targetDecimals_);
     }
 
+    /// @dev Draws `amount` from the withdrawal rate limit and reverts with
+    ///      the library's RateLimitExceeded when the bucket holds less. A
+    ///      capacity of 0 turns the check off: the library reports an
+    ///      uninitialized bucket as empty, so without this gate a zero
+    ///      config would block every withdrawal instead of none. The write
+    ///      is safe before the signature checks: any later revert in the
+    ///      same call unwinds it.
+    function _consumeWithdrawRateLimit(BridgeStorage storage $, uint256 amount) internal {
+        RateLimiter.RefillingBucket storage limiter = $.withdrawRateLimit;
+        // Consumption while the limiter is off is never recorded; a later
+        // sync cannot recover it. Re-enabling starts from the pre-disable
+        // debt only.
+        if (limiter._capacity == 0) return;
+        limiter.consume(WITHDRAW_RATE_LIMIT_KEY, amount);
+    }
+
+    /// @dev Reverts when `deadline` sits further than `horizon` past
+    ///      `block.timestamp`. The bound is inclusive:
+    ///      `deadline == block.timestamp + horizon` passes. A horizon of 0
+    ///      turns the check off. A helper, not inline code: `withdraw` sits
+    ///      at the EVM stack limit.
+    function _checkHorizon(uint256 horizon, uint256 deadline) internal view {
+        if (horizon != 0 && deadline > block.timestamp + horizon) {
+            revert DeadlineBeyondHorizon(deadline, horizon);
+        }
+    }
+
     function _checkLimits(uint256 amount, Limits storage limits) internal view {
         if (amount < limits.minAmount || amount > limits.maxAmount) {
             revert AmountOutsideLimits(amount, limits.minAmount, limits.maxAmount);
@@ -285,6 +445,8 @@ contract BitSafeEvmAssetBridge is
 
     function _setThreshold(uint256 newThreshold, uint256 attestorCount) internal {
         if (newThreshold < MIN_THRESHOLD || newThreshold > attestorCount) revert ThresholdOutOfBounds();
+        // A threshold at or below half lets a key-theft minority sign releases.
+        if (newThreshold <= attestorCount / 2) revert ThresholdBelowMajority(newThreshold, attestorCount);
         _getBridgeStorage().threshold = newThreshold;
         emit ThresholdSet(newThreshold);
     }
@@ -324,11 +486,12 @@ contract BitSafeEvmAssetBridge is
         BridgeStorage storage $ = _getBridgeStorage();
         if ($.asset != address(0)) revert AssetIsNotEther();
         _validateDeposit(depositAccountId, msg.value, $);
+        $.totalLocked += msg.value;
         emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, msg.value);
     }
 
     /// @notice Locks the configured ERC20 asset. Requires prior approval.
-    function depositERC20(uint256 amount, bytes calldata depositAccountId) external whenNotPaused {
+    function depositERC20(uint256 amount, bytes calldata depositAccountId) external whenNotPaused nonReentrant {
         BridgeStorage storage $ = _getBridgeStorage();
         address asset_ = $.asset;
         if (asset_ == address(0)) revert AssetIsNotERC20();
@@ -338,6 +501,8 @@ contract BitSafeEvmAssetBridge is
         if (IERC20(asset_).balanceOf(address(this)) - balanceBefore != amount) {
             revert UnexpectedBalanceChange();
         }
+        // After the balance-delta check: the counter records confirmed amounts only.
+        $.totalLocked += amount;
         // Emitted after the transfer: the amount is only confirmed by the balance-delta check above.
         emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, amount);
     }
@@ -363,23 +528,31 @@ contract BitSafeEvmAssetBridge is
     // ----------------------------------------------------------- withdrawals
 
     /// @notice The exact EIP-712 digest attestors must sign for a withdrawal.
-    function withdrawalDigest(bytes calldata withdrawRequestId, address destinationAddress, uint256 amount)
-        public
-        view
-        returns (bytes32)
-    {
+    function withdrawalDigest(
+        bytes calldata withdrawRequestId,
+        address destinationAddress,
+        uint256 amount,
+        uint256 deadline
+    ) public view returns (bytes32) {
         return _hashTypedDataV4(
-            keccak256(abi.encode(WITHDRAWAL_TYPEHASH, keccak256(withdrawRequestId), destinationAddress, amount))
+            keccak256(
+                abi.encode(WITHDRAWAL_TYPEHASH, keccak256(withdrawRequestId), destinationAddress, amount, deadline)
+            )
         );
     }
 
     /// @notice Releases `amount` of the bridged asset to `destinationAddress`.
     /// @dev Requires `threshold` valid, distinct attestor signatures over the
     ///      EIP-712 digest. Signer order does not matter.
+    ///      The attestor stack derives the deadline when it signs. The
+    ///      contract compares the deadline against `block.timestamp`
+    ///      (inclusive) and bounds it by `withdrawalHorizon` (inclusive,
+    ///      0 disables).
     function withdraw(
         bytes calldata withdrawRequestId,
         address destinationAddress,
         uint256 amount,
+        uint256 deadline,
         bytes[] calldata signatures
     ) external onlyRole(ATTESTOR_ROLE) whenNotPaused nonReentrant {
         BridgeStorage storage $ = _getBridgeStorage();
@@ -394,9 +567,13 @@ contract BitSafeEvmAssetBridge is
         }
         if (amount == 0) revert ZeroAmount();
         _checkLimits(amount, $.withdrawLimits);
+        _consumeWithdrawRateLimit($, amount);
+        // Inclusive bound: the bundle stays valid through the deadline second.
+        if (block.timestamp > deadline) revert WithdrawalExpired(deadline);
+        _checkHorizon($.withdrawalHorizon, deadline);
         if (signatures.length < threshold_) revert NotEnoughSignatures();
 
-        bytes32 digest = withdrawalDigest(withdrawRequestId, destinationAddress, amount);
+        bytes32 digest = withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline);
         address[] memory seenSigners = new address[](signatures.length);
         for (uint256 i; i < signatures.length; ++i) {
             (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signatures[i]);
@@ -410,6 +587,12 @@ contract BitSafeEvmAssetBridge is
 
         // Effect before interaction: consume the request id.
         $.usedWithdrawRequests[withdrawRequestId] = true;
+        // Saturates, never gates: a drifted counter must never block a
+        // release. The block scope frees the local again (stack limit).
+        {
+            uint256 tl = $.totalLocked;
+            $.totalLocked = tl >= amount ? tl - amount : 0;
+        }
 
         // Interaction.
         address asset_ = $.asset;
@@ -419,6 +602,6 @@ contract BitSafeEvmAssetBridge is
         } else {
             IERC20(asset_).safeTransfer(destinationAddress, amount);
         }
-        emit Withdraw(keccak256(withdrawRequestId), withdrawRequestId, destinationAddress, amount);
+        emit Withdraw(keccak256(withdrawRequestId), withdrawRequestId, destinationAddress, amount, deadline);
     }
 }

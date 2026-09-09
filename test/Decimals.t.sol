@@ -305,10 +305,11 @@ contract DecimalsTest is BridgeTestBase {
 
         address destination = makeAddr("destination");
         uint256 amount = 1 ether + 1; // not a multiple of ETH_UNIT
-        bytes32 digest = ethBridge.withdrawalDigest(REQUEST_ID, destination, amount);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 digest = ethBridge.withdrawalDigest(REQUEST_ID, destination, amount, deadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
         vm.prank(attestors[0]);
-        ethBridge.withdraw(REQUEST_ID, destination, amount, sigs);
+        ethBridge.withdraw(REQUEST_ID, destination, amount, deadline, sigs);
         assertEq(destination.balance, amount);
         assertTrue(ethBridge.isWithdrawRequestUsed(REQUEST_ID));
     }
