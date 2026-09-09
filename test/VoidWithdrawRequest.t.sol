@@ -104,6 +104,7 @@ contract VoidWithdrawRequestTest is BridgeTestBase {
         );
         vm.prank(defaultAdmin);
         bridge.voidWithdrawRequest(REQUEST_ID);
+        assertFalse(bridge.isWithdrawRequestUsed(REQUEST_ID));
     }
 
     function test_void_worksWhilePaused() public {
@@ -137,7 +138,6 @@ contract VoidWithdrawRequestTest is BridgeTestBase {
         vm.prank(attestors[0]);
         bridge.withdraw(otherId, destination, 1 ether, sigs);
         assertEq(destination.balance, 1 ether);
-        assertFalse(bridge.isWithdrawRequestUsed(hex"0011"));
     }
 
     function testFuzz_void_anyNonEmptyId(bytes calldata id) public {
