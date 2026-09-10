@@ -4,8 +4,8 @@
 # nothing. It needs no AWS credentials. It therefore never requests an
 # identity token.
 #
-# A push to main publishes. A manual dispatch publishes too. A push to
-# main also moves `latest`.
+# A push to main publishes. A manual dispatch publishes only when it
+# runs on main. A push to main also moves `latest`.
 #
 # The publish job assumes the IAM role gh-oidc-build-evm-asset-bridge.
 # The org names a build role after the ECR repository. That role allows
@@ -14,7 +14,8 @@
 #
 # A run that cannot assume the role means the role does not exist.
 # Someone with IAM access must then create it. It must trust
-# repo:DLC-link/evm-asset-bridge. It also needs public-ECR push rights.
+# repo:DLC-link/evm-asset-bridge:ref:refs/heads/main. It also needs
+# public-ECR push rights.
 #
 # The Trivy scan runs after a publish. A pull request gets no scan,
 # because no image reaches the registry for the scan to read.
@@ -68,12 +69,16 @@ jobs:
       - name: Smoke test the image
         run: bash infra/docker/smoke-eth.sh evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
 
-  # This job never runs on a pull request. Publishing an image built from
-  # unmerged code would put untested tags in a public registry.
+  # This job holds the publish credential, so it runs only for the ref
+  # that carries reviewed code. The condition keys on the ref, not the
+  # event: a pull request never reaches it, and neither does a push or a
+  # manual dispatch on any branch other than main. Publishing an image
+  # built from unmerged code would put untested tags in a public
+  # registry, and would hand the build role to that code.
   publish:
     name: Publish to public ECR
     needs: build
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
