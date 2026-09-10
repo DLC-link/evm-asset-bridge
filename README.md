@@ -6,8 +6,33 @@ BitSafeEvmAssetBridge: an upgradeable EVM contract that locks one asset
 
 - Build: `forge build`
 - Test: `forge test`
+- Symbolic tests: `FOUNDRY_PROFILE=halmos halmos` (see below)
 - Integration-test image: `make it-verify` (see `infra/docker/README.md`)
 - The design spec is maintained locally, outside git (not tracked in this repo).
+
+## Symbolic tests (halmos)
+
+The `test/halmos/` suite proves properties of the value-moving paths
+with [halmos](https://github.com/a16z/halmos), a symbolic executor.
+A fuzz test samples random inputs; a `check_` test passes only when the
+SMT solver shows that no input violates the assertion, within the
+bounds each test states in its comment. The suite covers withdraw
+authorization, replay protection, exact payout, the deadline and
+horizon bounds, the void interplay, deposit-withdraw solvency, and the
+withdrawal rate limit.
+
+Run it locally:
+
+```sh
+uv tool install halmos
+FOUNDRY_PROFILE=halmos halmos                  # whole suite
+FOUNDRY_PROFILE=halmos halmos --contract WithdrawSymbolic
+```
+
+The `halmos` foundry profile is required: halmos cannot execute the
+`deployCode()` calls that foundry's dynamic test linking injects.
+CI runs the suite in the `Halmos symbolic tests` job. A failure prints
+a counterexample: concrete input values you can replay in a forge test.
 
 ## Production deploy
 

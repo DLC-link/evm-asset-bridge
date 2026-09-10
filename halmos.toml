@@ -1,0 +1,12 @@
+# Configuration for the halmos symbolic suite in test/halmos/.
+# Run locally with: FOUNDRY_PROFILE=halmos halmos   (or add --contract <Name>)
+# The profile is required: halmos cannot execute the deployCode() calls
+# that foundry's dynamic test linking injects into test bytecode.
+[global]
+forge-build-out = "out-halmos"
+# withdraw loops over the signatures array. The fixtures submit at most
+# two signatures, and the duplicate-signer check nests one loop deeper.
+loop = 4
+# Milliseconds per assertion query. The default (1s) is too tight for
+# the sequence proofs; the CI job timeout is the real upper bound.
+solver-timeout-assertion = 300000

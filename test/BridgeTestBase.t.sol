@@ -97,7 +97,10 @@ contract BridgeTestBase is Test {
         return BitSafeEvmAssetBridge(payable(address(proxy)));
     }
 
-    function _sign(uint256 pk, bytes32 digest) internal pure returns (bytes memory) {
+    /// Virtual: the halmos suite normalizes the signature to low-s,
+    /// because the symbolic vm.sign model allows both s halves while
+    /// forge's concrete vm.sign only ever returns low-s.
+    function _sign(uint256 pk, bytes32 digest) internal pure virtual returns (bytes memory) {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
         return abi.encodePacked(r, s, v);
     }

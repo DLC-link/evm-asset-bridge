@@ -10,3 +10,16 @@ fs_permissions = [{ access = "read-write", path = "./deployments" }]
 
 [fuzz]
 runs = 512
+
+# Profile for the halmos symbolic suite (test/halmos/). Halmos cannot
+# execute the deployCode() calls that dynamic test linking injects, so
+# this profile turns the feature off. A separate out directory keeps
+# the two build caches from invalidating each other.
+[profile.halmos]
+dynamic_test_linking = false
+out = "out-halmos"
+
+# The halmos runs invoke forge build internally; the lint pass would
+# spam every halmos log with repeated findings.
+[profile.halmos.lint]
+lint_on_build = false
