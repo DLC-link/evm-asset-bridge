@@ -588,12 +588,10 @@ contract BitSafeEvmAssetBridge is
 
         // Effect before interaction: consume the request id.
         $.usedWithdrawRequests[withdrawRequestId] = true;
-        // Saturates, never gates: a drifted counter must never block a
-        // release. The block scope frees the local again (stack limit).
-        {
-            uint256 tl = $.totalLocked;
-            $.totalLocked = tl >= amount ? tl - amount : 0;
-        }
+        // Canton cannot burn more BETH than it minted, so a legitimate
+        // `amount` never exceeds `totalLocked`. The checked subtraction
+        // reverts on a drifted counter instead of paying unbacked funds.
+        $.totalLocked -= amount;
 
         // Interaction.
         address asset_ = $.asset;

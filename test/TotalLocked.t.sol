@@ -7,6 +7,7 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {ForceSend} from "./mocks/ForceSend.sol";
 import {RejectingReceiver} from "./mocks/RejectingReceiver.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {stdError} from "forge-std/StdError.sol";
 
 contract TotalLockedTest is BridgeTestBase {
     address internal destination = makeAddr("destination");
@@ -176,7 +177,7 @@ contract TotalLockedTest is BridgeTestBase {
         assertEq(uint256(vm.load(address(erc20Bridge), _totalLockedSlot(erc20Bridge))), 3 ether);
     }
 
-    function test_corruptedCounter_neverBlocksWithdraw() public {
+    function test_corruptedCounter_blocksWithdraw() public {
         _depositETH(DEPOSIT);
         assertEq(uint256(vm.load(address(bridge), _totalLockedSlot(bridge))), DEPOSIT);
 
@@ -184,10 +185,14 @@ contract TotalLockedTest is BridgeTestBase {
         vm.store(address(bridge), _totalLockedSlot(bridge), bytes32(uint256(1)));
         assertEq(bridge.totalLocked(), 1);
 
-        // The withdrawal still pays: the subtraction saturates, no gate.
-        _withdraw(bridge, REQUEST_ID, 6 ether);
-        assertEq(destination.balance, 6 ether);
-        assertEq(bridge.totalLocked(), 0);
+        // A withdrawal above the counter reverts: the checked subtraction
+        // halts on a drifted counter instead of paying unbacked funds.
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 6 ether, deadline);
+        bytes[] memory sigs = _attestorSignatures(digest, THRESHOLD);
+        vm.expectRevert(stdError.arithmeticError);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 6 ether, deadline, sigs);
     }
 
     // ------------------------------------------------------ access control
