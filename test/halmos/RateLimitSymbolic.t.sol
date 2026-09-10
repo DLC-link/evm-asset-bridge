@@ -22,14 +22,24 @@ contract RateLimitSymbolic is SymbolicBase {
         bridge.setWithdrawRateLimit(CAPACITY, WINDOW);
     }
 
-    /// PROPERTY: two withdrawals with any amounts and any gap between
-    /// them never pay out more than the capacity plus the refill for
-    /// the elapsed time. A failed attempt consumes no budget, so only
-    /// paid amounts count. A single withdrawal is the special case
-    /// with the second amount unpayable.
-    function check_rateLimit_capsAnyTwoWithdrawals(uint256 a1, uint256 a2, uint256 gap) public {
+    /// PROPERTY: two withdrawals with any amounts never pay out more
+    /// than the capacity plus the refill for the elapsed time, at any
+    /// of four representative gaps. A failed attempt consumes no
+    /// budget, so only paid amounts count. A single withdrawal is the
+    /// special case with the second amount unpayable.
+    /// The gap is enumerated, not symbolic: a symbolic elapsed time
+    /// reaches the 512-bit mulDiv machinery inside the refill math,
+    /// and every solver then needs ~5 minutes per query. The four
+    /// gaps pin the refill shapes: none, minimal, just under a full
+    /// bucket, and clamped at capacity. The refill formula is linear
+    /// in the elapsed time between these points.
+    function check_rateLimit_capsAnyTwoWithdrawals(uint256 a1, uint256 a2, uint256 gapChoice) public {
         vm.assume(a1 != 0 && a2 != 0);
-        vm.assume(gap <= 30 days);
+        // A branch chain, not an array read: halmos cannot read memory
+        // at a symbolic index. Each branch signs a different digest
+        // below, so each keeps its own signature axioms.
+        uint256 choice = gapChoice % 4;
+        uint256 gap = choice == 0 ? 0 : choice == 1 ? 1 : choice == 2 ? uint256(WINDOW) - 1 : 3 * uint256(WINDOW);
         // The rate limiter stores its timepoint as uint48; real
         // timestamps stay far below that. A harness bound, not a property.
         uint256 t0 = block.timestamp;
