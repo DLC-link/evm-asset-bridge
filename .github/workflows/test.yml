@@ -35,6 +35,29 @@ jobs:
       - name: Run Forge tests
         run: forge test -vvv
 
+  halmos:
+    name: Halmos symbolic tests
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install Halmos
+        run: pipx install halmos==0.3.3
+
+      - name: Run the symbolic suite
+        run: halmos
+        env:
+          FOUNDRY_PROFILE: halmos
+
   tooling:
     name: Deployment record tooling
     timeout-minutes: 10
