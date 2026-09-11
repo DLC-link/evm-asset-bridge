@@ -10,4 +10,22 @@ abstract contract BethManage is ManageBase {
     function deploymentName() public pure override returns (string memory) {
         return "BETH";
     }
+
+    /// Maps a role name to its hash. A name is safer than a raw bytes32.
+    /// A mistyped hash names a role nobody holds. The grant then succeeds
+    /// silently, with no effect.
+    /// @dev Solidity refuses a qualified constant read on a contract type
+    ///      here. This restates the three role hashes as literals instead.
+    ///      They must match BitSafeEvmAssetBridge exactly. The test in
+    ///      DefaultAdminActions.t.sol checks them against the live contract.
+    function roleByName(string memory name) public pure returns (bytes32) {
+        bytes32 h = keccak256(bytes(name));
+        if (h == keccak256("BRIDGE_ADMIN")) return keccak256("BRIDGE_ADMIN_ROLE");
+        if (h == keccak256("ATTESTOR")) return keccak256("ATTESTOR_ROLE");
+        if (h == keccak256("SENTRY")) return keccak256("SENTRY_ROLE");
+        // AccessControlDefaultAdminRules rejects a direct grant of its own
+        // role. BeginDefaultAdminTransfer is the only route for that role.
+        require(h != keccak256("DEFAULT_ADMIN"), "use BeginDefaultAdminTransfer for DEFAULT_ADMIN");
+        revert("unknown role name");
+    }
 }
