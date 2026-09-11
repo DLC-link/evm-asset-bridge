@@ -4,6 +4,25 @@ pragma solidity 0.8.34;
 import {BridgeTestBase} from "../BridgeTestBase.t.sol";
 import {ManageBase} from "../../script/manage/ManageBase.s.sol";
 import {Pause} from "../../script/manage/BETH/Pause.s.sol";
+import {Unpause} from "../../script/manage/BETH/Unpause.s.sol";
+import {SetThreshold} from "../../script/manage/BETH/SetThreshold.s.sol";
+import {SetDepositLimits} from "../../script/manage/BETH/SetDepositLimits.s.sol";
+import {SetWithdrawLimits} from "../../script/manage/BETH/SetWithdrawLimits.s.sol";
+import {SetWithdrawRateLimit} from "../../script/manage/BETH/SetWithdrawRateLimit.s.sol";
+import {SetWithdrawalHorizon} from "../../script/manage/BETH/SetWithdrawalHorizon.s.sol";
+import {RescueERC20} from "../../script/manage/BETH/RescueERC20.s.sol";
+import {RescueETH} from "../../script/manage/BETH/RescueETH.s.sol";
+import {RescueSurplus} from "../../script/manage/BETH/RescueSurplus.s.sol";
+import {VoidWithdrawRequest} from "../../script/manage/BETH/VoidWithdrawRequest.s.sol";
+import {GrantRole} from "../../script/manage/BETH/GrantRole.s.sol";
+import {RevokeRole} from "../../script/manage/BETH/RevokeRole.s.sol";
+import {RenounceRole} from "../../script/manage/BETH/RenounceRole.s.sol";
+import {BeginDefaultAdminTransfer} from "../../script/manage/BETH/BeginDefaultAdminTransfer.s.sol";
+import {AcceptDefaultAdminTransfer} from "../../script/manage/BETH/AcceptDefaultAdminTransfer.s.sol";
+import {CancelDefaultAdminTransfer} from "../../script/manage/BETH/CancelDefaultAdminTransfer.s.sol";
+import {ChangeDefaultAdminDelay} from "../../script/manage/BETH/ChangeDefaultAdminDelay.s.sol";
+import {RollbackDefaultAdminDelay} from "../../script/manage/BETH/RollbackDefaultAdminDelay.s.sol";
+import {Status} from "../../script/manage/BETH/Status.s.sol";
 import {BitSafeEvmAssetBridge} from "../../src/BitSafeEvmAssetBridge.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
@@ -208,5 +227,47 @@ contract ManageBaseTest is BridgeTestBase {
         assertEq(pauseScript.encode(), abi.encodeCall(BitSafeEvmAssetBridge.pause, ()));
         assertEq(pauseScript.deploymentName(), "BETH");
         assertEq(pauseScript.action(), "pause");
+    }
+
+    function test_status_readsTheLiveConfiguration() public {
+        Status status = new Status();
+        // The report function takes the address as an argument.
+        // The test needs no deployment record file.
+        status.report(address(bridge));
+    }
+
+    /// Every BETH script must return a unique action name.
+    /// The action name picks the Safe envelope file path.
+    /// Two scripts with one name would overwrite each other's envelope file.
+    function test_actionNames_areAllUnique() public {
+        string[20] memory names = [
+            (new Pause()).action(),
+            (new Unpause()).action(),
+            (new SetThreshold()).action(),
+            (new SetDepositLimits()).action(),
+            (new SetWithdrawLimits()).action(),
+            (new SetWithdrawRateLimit()).action(),
+            (new SetWithdrawalHorizon()).action(),
+            (new RescueERC20()).action(),
+            (new RescueETH()).action(),
+            (new RescueSurplus()).action(),
+            (new VoidWithdrawRequest()).action(),
+            (new GrantRole()).action(),
+            (new RevokeRole()).action(),
+            (new RenounceRole()).action(),
+            (new BeginDefaultAdminTransfer()).action(),
+            (new AcceptDefaultAdminTransfer()).action(),
+            (new CancelDefaultAdminTransfer()).action(),
+            (new ChangeDefaultAdminDelay()).action(),
+            (new RollbackDefaultAdminDelay()).action(),
+            (new Status()).action()
+        ];
+
+        for (uint256 i; i < names.length; ++i) {
+            assertTrue(bytes(names[i]).length > 0, "action name must not be empty");
+            for (uint256 j = i + 1; j < names.length; ++j) {
+                assertTrue(keccak256(bytes(names[i])) != keccak256(bytes(names[j])), "action names must be unique");
+            }
+        }
     }
 }
