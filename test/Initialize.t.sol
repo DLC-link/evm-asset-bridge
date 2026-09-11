@@ -90,18 +90,20 @@ contract InitializeTest is BridgeTestBase {
         _expectInitRevert(4, BitSafeEvmAssetBridge.ThresholdOutOfBounds.selector);
     }
 
-    function test_initialize_thresholdBelowMajority_reverts() public {
-        // 2 of 4 is exactly half; the rule rejects it.
+    function test_initialize_halfThreshold_passes() public {
+        // 2 of 4 passes: MIN_THRESHOLD is the only lower bound.
         uint256[] memory pks = new uint256[](4);
         pks[0] = 0xA11CE1;
         pks[1] = 0xA11CE2;
         pks[2] = 0xA11CE3;
         pks[3] = 0xA11CE4;
         _setAttestorsSortedByAddress(pks);
-        _expectInitRevert(2, abi.encodeWithSelector(BitSafeEvmAssetBridge.ThresholdBelowMajority.selector, 2, 4));
+        BitSafeEvmAssetBridge fourOfWhichTwo = _deployBridgeWithThreshold(2);
+        assertEq(fourOfWhichTwo.threshold(), 2);
+        assertEq(fourOfWhichTwo.getAttestors().length, 4);
     }
 
-    function test_initialize_majorityThreshold_passes() public {
+    function test_initialize_threeOfFour_passes() public {
         // 3 of 4 passes.
         uint256[] memory pks = new uint256[](4);
         pks[0] = 0xA11CE1;
@@ -115,7 +117,7 @@ contract InitializeTest is BridgeTestBase {
     }
 
     function test_initialize_twoOfTwo_passes() public {
-        // 2 of 2 stays valid: 2 > 2 / 2.
+        // 2 of 2 stays valid: it meets the MIN_THRESHOLD floor.
         uint256[] memory pks = new uint256[](2);
         pks[0] = 0xA11CE1;
         pks[1] = 0xA11CE2;
