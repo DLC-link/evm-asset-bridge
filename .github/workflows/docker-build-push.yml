@@ -7,15 +7,10 @@
 # A push to main publishes. A manual dispatch publishes only when it
 # runs on main. A push to main also moves `latest`.
 #
-# The publish job assumes the IAM role gh-oidc-build-evm-asset-bridge.
-# The org names a build role after the ECR repository. That role allows
-# pushes to that one repository only. The image name must therefore
-# equal this repository's name. Do not rename either one on its own.
-#
-# A run that cannot assume the role means the role does not exist.
-# Someone with IAM access must then create it. It must trust
-# repo:DLC-link/evm-asset-bridge:ref:refs/heads/main. It also needs
-# public-ECR push rights.
+# Publishing and scanning use gh-oidc-publish-evm-asset-bridge.
+# This role allows public-ECR access to this repository and trusts only
+# main. A failed role assumption can mean the role is missing or the
+# workflow's OIDC subject is not trusted.
 #
 # The Trivy scan runs after a publish. A pull request gets no scan,
 # because no image reaches the registry for the scan to read.
@@ -74,11 +69,11 @@ jobs:
   # event: a pull request never reaches it, and neither does a push or a
   # manual dispatch on any branch other than main. Publishing an image
   # built from unmerged code would put untested tags in a public
-  # registry, and would hand the build role to that code.
+  # registry, and would hand the publish role to that code.
   publish:
     name: Publish to public ECR
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -101,13 +96,11 @@ jobs:
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      # The role name derives from the repository name by org convention.
-      # Do not rename the repository without updating the role's trust
-      # policy.
+      # Use the dedicated public publishing role, whose trust is pinned to main.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
-          role-to-assume: arn:aws:iam::903295530547:role/gh-oidc-build-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::903295530547:role/gh-oidc-publish-evm-asset-bridge
           aws-region: us-east-1
           role-session-name: gha-${{ github.run_id }}
 
@@ -169,7 +162,7 @@ jobs:
 
   scan-image:
     name: Trivy scan
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: publish
     uses: DLC-link/dlc-infra/.github/workflows/trivy-image-scan.yaml@main
     with:
@@ -177,6 +170,7 @@ jobs:
       image_tag: ${{ needs.publish.outputs.version_tag }}
       registry_type: public
       registry: public.ecr.aws/dlc-link
+      role_arn: arn:aws:iam::903295530547:role/gh-oidc-publish-evm-asset-bridge
     permissions:
       id-token: write
       contents: read
