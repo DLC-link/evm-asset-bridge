@@ -124,6 +124,12 @@ this role: it grants only a denial power, and the admin can always reverse it.
 No sentry holder exists at launch. Until a monitoring bot exists, the runbook
 keeps a pre-signed `pause()` Safe transaction to cover the gap.
 
+### Post-deploy: the admin runbook
+
+Post-deploy admin actions live in `script/manage/`. See
+[script/manage/README.md](script/manage/README.md) for the action list, the
+Safe flow, and the ordering rules.
+
 ## Deployment records
 
 One deploy creates three contracts. It therefore writes three records:

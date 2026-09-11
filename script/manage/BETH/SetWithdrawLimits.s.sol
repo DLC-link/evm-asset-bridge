@@ -6,8 +6,9 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
 /// @notice Sets the minimum and maximum withdraw amount, in asset base units.
 ///         Both bounds are inclusive.
-/// @dev The maximum must stay above 0, and the minimum must stay at or below
-///      the maximum. Use `pause` to block traffic, not a zero maximum.
+/// @dev The maximum must stay above 0. The minimum must stay at or below the
+///      maximum. Use `pause` to block traffic. A zero maximum is always a
+///      misconfiguration.
 ///
 /// Direct:
 ///   forge script script/manage/BETH/SetWithdrawLimits.s.sol \

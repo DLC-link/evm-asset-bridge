@@ -74,8 +74,8 @@ abstract contract ManageBase is Script {
     /// Bubbles the target's own revert data, so a role failure reports the
     /// contract's error and not a generic one.
     /// @dev Rejects a target with no code. A low-level call to an empty
-    ///      address returns success with no data, which would let a stale
-    ///      record or a wrong chain look like a real call that succeeded.
+    ///      address returns success with no data. A stale record or a wrong
+    ///      chain would then report a false success.
     function _call(address to, bytes memory data) private {
         if (to.code.length == 0) {
             revert TargetHasNoCode(to);

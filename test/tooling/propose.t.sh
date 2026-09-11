@@ -21,16 +21,16 @@ export SIGNER="--account proposer"
 export FAKE_CURL_DIR="$WORK"
 export FAKE_CURL_LOG="$WORK/requests.log"
 
-# A valid envelope. Each test copies it and edits one field. "to" is
-# lowercase on purpose. This makes the script's own checksum call
-# load-bearing.
+# This is a valid envelope. Each test copies the envelope. Each test then
+# edits one field. The "safe" and "to" addresses are lowercase on purpose.
+# The script must run its own checksum call to pass the checks below.
 ENVELOPE="$WORK/envelope.json"
 cat >"$ENVELOPE" <<'JSON'
 {
   "deployment": "BETH",
   "chainId": 11155111,
   "action": "setThreshold",
-  "safe": "0xaAafDA111EAf5a49359e5C15B9B58DED7313f979",
+  "safe": "0xaaafda111eaf5a49359e5c15b9b58ded7313f979",
   "to": "0xc2dbb9af52da4ba877c13fdf55d128da76aee950",
   "value": "0",
   "data": "0x960bfe0400000000000000000000000000000000000000000000000000000000000003",
@@ -40,8 +40,8 @@ JSON
 
 echo "== a good envelope reaches the service =="
 printf '\n201' >"$WORK/post.txt"
-# A lowercase FAKE_SIGNER_ADDRESS also makes the sender checksum call
-# load-bearing. The envelope's lowercase "to" does the same for TO.
+# A lowercase FAKE_SIGNER_ADDRESS forces the sender checksum call to run.
+# The lowercase "safe" and "to" fields force the same call for SAFE and TO.
 OUT=$(FAKE_SIGNER_ADDRESS="0x7038f8a64ce8f879705a48e962b55d56aecd60d8" \
   ./script/manage/safe/propose.sh "$ENVELOPE" 2>&1)
 check "exit status" "$?" "0"

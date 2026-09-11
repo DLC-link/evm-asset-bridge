@@ -4,8 +4,10 @@ pragma solidity 0.8.34;
 import {BethManage} from "./BethManage.s.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
-/// @notice Rescues tokens sent to the bridge by mistake. Never the bridged asset.
-/// @dev The bridge rejects a `token` equal to the configured asset.
+/// @notice Rescues tokens sent to the bridge by mistake. This script never
+///         moves the bridged asset.
+/// @dev The bridge rejects a `token` equal to the configured asset. Use
+///      RescueSurplus for a bridged-asset balance above `totalLocked`.
 ///
 /// Direct:
 ///   forge script script/manage/BETH/RescueERC20.s.sol \

@@ -4,10 +4,12 @@ pragma solidity 0.8.34;
 import {BethManage} from "./BethManage.s.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
-/// @notice Sets the withdrawal horizon: the maximum distance a withdrawal
-///         deadline can sit past the current time, in seconds. 0 disables it.
+/// @notice Sets the withdrawal horizon in seconds. The horizon is the maximum
+///         distance a withdrawal deadline can sit past the current time. A
+///         horizon of 0 disables the bound.
 /// @dev The attestor stack reads this value to pick its signing mode. A
-///      change mid-signing splits attestors; they re-sign on the next tick.
+///      change during signing splits the attestors. The attestors then
+///      re-sign on the next signing tick.
 ///
 /// Direct:
 ///   forge script script/manage/BETH/SetWithdrawalHorizon.s.sol \

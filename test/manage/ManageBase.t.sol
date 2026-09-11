@@ -26,9 +26,9 @@ import {Status} from "../../script/manage/BETH/Status.s.sol";
 import {BitSafeEvmAssetBridge} from "../../src/BitSafeEvmAssetBridge.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
-/// A stand-in action. It overrides the two getters that read the outside
-/// world, so a test controls the target and the Safe without a real
-/// deployment record or a `SAFE` environment variable.
+/// A stand-in action. It overrides the two getters that read external state.
+/// A test therefore controls the target and the Safe. The test needs no
+/// deployment record and no `SAFE` environment variable.
 /// `action()` stays abstract here: `ManageBase.action()` is `pure`, and
 /// Solidity refuses an override that widens `pure` to `view`. A leaf
 /// contract below fixes each name, so forge runs test functions in

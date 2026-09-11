@@ -5,7 +5,8 @@ import {BethManage} from "./BethManage.s.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
 /// @notice Rescues stray ETH, such as ETH forced in via selfdestruct.
-/// @dev Only callable when the bridged asset is not ETH itself.
+/// @dev The bridge rejects this call when the bridged asset is ETH. Use
+///      RescueSurplus for a stray ETH balance on an ETH bridge.
 ///
 /// Direct:
 ///   forge script script/manage/BETH/RescueETH.s.sol \

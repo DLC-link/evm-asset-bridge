@@ -58,3 +58,6 @@ jobs:
 
       - name: Run the verify tooling test
         run: ./test/tooling/verify.t.sh
+
+      - name: Run the propose tooling test
+        run: bash test/tooling/propose.t.sh

@@ -8,12 +8,17 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 ///         that refills over `window` seconds. A capacity of 0 turns the
 ///         check off.
 /// @dev A lowered capacity acts at once, because new settings never reset the
-///      bucket's use.
+///      bucket's use. A `window` of 0 with a non-zero `capacity` reverts with
+///      `InvalidLimits`.
 ///
 /// Direct:
 ///   forge script script/manage/BETH/SetWithdrawRateLimit.s.sol \
 ///     --sig 'run(uint256,uint256)' 100000000000000000000 86400 \
 ///     --rpc-url $RPC_URL --broadcast --account bridgeAdmin
+///
+/// Safe:
+///   SAFE=0xYourSafe forge script script/manage/BETH/SetWithdrawRateLimit.s.sol \
+///     --sig 'run(uint256,uint256)' 100000000000000000000 86400 --rpc-url $RPC_URL
 contract SetWithdrawRateLimit is BethManage {
     function action() public pure override returns (string memory) {
         return "setWithdrawRateLimit";

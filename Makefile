@@ -101,3 +101,36 @@ ifndef CHAIN_ID
 endif
 	DEPLOYMENT="$(DEPLOYMENT)" CHAIN_ID="$(CHAIN_ID)" \
 	  CONTRACT="$(CONTRACT)" DRY_RUN="$(DRY_RUN)" ./script/verify.sh
+
+# ---- Management ------------------------------------------------------------
+#
+# The management scripts live in script/manage/<DEPLOYMENT>/. Each file is one
+# admin action. script/manage/README.md holds the full list and the raw
+# `forge script` commands.
+#
+# make manage-status DEPLOYMENT=BETH RPC_URL=https://...
+#   Prints the live configuration of the recorded bridge. It sends nothing.
+#
+# make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json \
+#   RPC_URL=https://... SIGNER="--account proposer"
+#   Proposes one written envelope to its Safe. A management script in Safe
+#   mode writes the envelope first.
+
+.PHONY: manage-status propose
+
+manage-status:
+ifndef DEPLOYMENT
+	$(error DEPLOYMENT is not set. Example: make manage-status DEPLOYMENT=BETH RPC_URL=...)
+endif
+ifndef RPC_URL
+	$(error RPC_URL is not set. Example: make manage-status DEPLOYMENT=BETH RPC_URL=...)
+endif
+	PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	  script/manage/$(DEPLOYMENT)/Status.s.sol:Status \
+	  --sig 'run()' --rpc-url "$(RPC_URL)"
+
+propose:
+ifndef ENVELOPE
+	$(error ENVELOPE is not set. Example: make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json)
+endif
+	PATH="$(FOUNDRY_BIN):$$PATH" ./script/manage/safe/propose.sh "$(ENVELOPE)"

@@ -6,8 +6,13 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
 /// @notice Sets the minimum and maximum deposit amount, in asset base units.
 ///         Both bounds are inclusive.
-/// @dev The maximum must stay above 0, and the minimum must stay at or below
-///      the maximum. Use `pause` to block traffic, not a zero maximum.
+/// @dev The maximum must stay above 0. The minimum must stay at or below the
+///      maximum. Use `pause` to block traffic.
+///
+///      The band must also hold one amount the target chain can express. The
+///      bridge rounds `maxAmount` down to a multiple of `depositUnit()`. A
+///      rounded value of 0 reverts with `InvalidLimits`. A rounded value
+///      below `minAmount` reverts the same way.
 ///
 /// Direct:
 ///   forge script script/manage/BETH/SetDepositLimits.s.sol \

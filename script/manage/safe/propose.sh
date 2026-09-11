@@ -174,9 +174,6 @@ cfg_escape() {
   printf '%s' "$s"
 }
 
-# The body is a large, multi-line JSON document. It therefore travels by
-# file reference. curl reads the file itself. The config text on stdin never
-# carries the body bytes.
 AUTH_LINE=""
 if [ -n "${SAFE_API_KEY:-}" ]; then
   if has_line_break "$SAFE_API_KEY"; then
@@ -186,6 +183,9 @@ if [ -n "${SAFE_API_KEY:-}" ]; then
   AUTH_LINE="header = \"Authorization: Bearer $(cfg_escape "$SAFE_API_KEY")\""
 fi
 
+# The body is a large, multi-line JSON document. It therefore travels by file
+# reference on the `data-binary` line. curl reads the file itself. The config
+# text on stdin never carries the body bytes.
 RESPONSE=$(curl -sS --connect-timeout 10 --max-time 60 -K - <<CFG || true
 url = "$(cfg_escape "$URL")"
 request = "POST"

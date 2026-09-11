@@ -7,7 +7,7 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 /// @notice Marks a withdraw request id used without paying it. No signed
 ///         bundle for that id can execute after this call.
 /// @dev Void the id before the attestors confirm the matching Canton cancel.
-///      This works during an incident pause; it is not blocked by pause.
+///      The call works during an incident pause. Pause does not block it.
 ///
 /// Direct:
 ///   forge script script/manage/BETH/VoidWithdrawRequest.s.sol \
@@ -26,7 +26,7 @@ contract VoidWithdrawRequest is BethManage {
         return abi.encodeCall(BitSafeEvmAssetBridge.voidWithdrawRequest, (withdrawRequestId));
     }
 
-    function run(bytes memory withdrawRequestId) external {
+    function run(bytes calldata withdrawRequestId) external {
         _send(encode(withdrawRequestId));
     }
 }
