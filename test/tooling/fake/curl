@@ -29,7 +29,10 @@ if [ -n "${FAKE_CURL_LOG:-}" ]; then
 fi
 
 DIR="${FAKE_CURL_DIR:-.}"
+# The nonce query and the proposal share the multisig-transactions path. Only
+# the query carries `ordering=-nonce`. This case therefore comes first.
 case "$REQUEST" in
+  *ordering=-nonce*) BODY="$DIR/queue.txt" ;;
   *multisig-transactions*) BODY="$DIR/post.txt" ;;
   *checkverifystatus*) BODY="$DIR/poll.txt" ;;
   *verifysourcecode*) BODY="$DIR/submit.txt" ;;

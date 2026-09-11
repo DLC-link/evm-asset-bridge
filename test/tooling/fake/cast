@@ -12,6 +12,11 @@ case "$1 ${2:-}" in
     echo "${FAKE_CHAIN_ID:-11155111}"
     ;;
   "call "*)
+    # A test can assert the arguments of each call, such as the nonce that
+    # reaches getTransactionHash.
+    if [ -n "${FAKE_CAST_LOG:-}" ]; then
+      echo "$*" >>"$FAKE_CAST_LOG"
+    fi
     # $3 holds the signature. nonce() and getTransactionHash() are the two.
     case "$3" in
       nonce*) echo "${FAKE_SAFE_NONCE:-7}" ;;

@@ -87,7 +87,7 @@ the contract accepts. In Safe mode that sender is the Safe itself.
 | `ChangeDefaultAdminDelay.s.sol` | `DEFAULT_ADMIN` | `run(uint256)` | `259200` |
 | `RollbackDefaultAdminDelay.s.sol` | `DEFAULT_ADMIN` | `run()` | none |
 
-Four notes on the table:
+Read these four notes with the table:
 
 - `GrantRole` and `RevokeRole` take a role name. They do not take a role hash.
   The three legal names are `BRIDGE_ADMIN`, `ATTESTOR` and `SENTRY`. The
@@ -113,56 +113,57 @@ Read the live configuration first. The `make` target needs no wallet:
 make manage-status DEPLOYMENT=BETH RPC_URL=https://...
 ```
 
-## 4. Ordering rules that the contract enforces
+## 4. Rules for the attestor set and the limits
 
-Two changes need a fixed order. The contract enforces that order. No script
-can enforce it for you. This section gives the order for each change.
+The contract sets no order between a role change and a threshold change. One
+order still prevents a stop in withdrawals. This section gives the rules.
 
-### Grow the attestor set: raise, then grant
+### Grow the attestor set: any order
 
-Run `SetThreshold` first. Run `GrantRole ATTESTOR` second.
-
-A grant of the `ATTESTOR` role counts the new set. The grant reverts when the
-threshold is at or below half of the new attestor count. Growing from 3
-attestors to 4 therefore fails at a threshold of 2.
+Run `GrantRole ATTESTOR` and `SetThreshold` in either order. The contract
+accepts both. A threshold above the current attestor count still reverts. The
+contract checks no other ratio between the two values. The team sets that
+ratio by governance policy.
 
 ```bash
-# 3 attestors, threshold 2. Add a fourth attestor.
-forge script script/manage/BETH/SetThreshold.s.sol --sig 'run(uint256)' 3 \
-  --rpc-url $RPC_URL --broadcast --account bridgeAdmin
+# 3 attestors, threshold 2. Add a fourth attestor. Then raise the threshold.
 forge script script/manage/BETH/GrantRole.s.sol \
   --sig 'run(string,address)' ATTESTOR 0xNewAttestor \
   --rpc-url $RPC_URL --broadcast --account defaultAdmin
+forge script script/manage/BETH/SetThreshold.s.sol --sig 'run(uint256)' 3 \
+  --rpc-url $RPC_URL --broadcast --account bridgeAdmin
 ```
 
-### Shrink the attestor set: revoke, then lower
+### Shrink the attestor set: lower, then revoke
 
-Run `RevokeRole ATTESTOR` first. Run `SetThreshold` second.
+Run `SetThreshold` first. Run `RevokeRole ATTESTOR` second. The contract
+accepts the reverse order too. The order above prevents an outage.
 
-The reverse order fails. `SetThreshold` measures the threshold against the
-current attestor count. That count is still the old, larger one. A threshold
-of 2 against 4 attestors is not above half. The call therefore reverts.
+A revoke never reverts on the threshold. A revoke can leave the attestor count
+below the threshold. The remaining attestors cannot collect enough signatures.
+Every withdrawal then halts.
 
-A revoke never reverts on the threshold. The revoke can therefore leave the
-attestor count below the threshold. Every withdrawal halts until you lower the
-threshold. Lower it in the same session.
+An admin lowers the threshold to recover. One remaining attestor blocks that
+recovery. `MIN_THRESHOLD` is 2. The attestor count is the upper bound. No
+threshold value obeys both bounds at a count of 1. Only a grant of more
+attestors recovers the bridge from that state. Never let the attestor count
+fall below 2.
 
 ```bash
 # 4 attestors, threshold 3. Remove one attestor.
+forge script script/manage/BETH/SetThreshold.s.sol --sig 'run(uint256)' 2 \
+  --rpc-url $RPC_URL --broadcast --account bridgeAdmin
 forge script script/manage/BETH/RevokeRole.s.sol \
   --sig 'run(string,address)' ATTESTOR 0xOldAttestor \
   --rpc-url $RPC_URL --broadcast --account defaultAdmin
-forge script script/manage/BETH/SetThreshold.s.sol --sig 'run(uint256)' 2 \
-  --rpc-url $RPC_URL --broadcast --account bridgeAdmin
 ```
 
 ### The threshold bounds
 
-`SetThreshold` accepts a value that obeys three rules:
+`SetThreshold` accepts a value that obeys two rules:
 
 - The value must be 2 or more. `MIN_THRESHOLD` is 2.
 - The value must not exceed the attestor count.
-- The value must stay above half of the attestor count.
 
 ### The deposit limit granularity
 
@@ -197,7 +198,8 @@ forge script script/manage/BETH/SetWithdrawalHorizon.s.sol \
 ## 6. The default admin transfer
 
 `DEFAULT_ADMIN_ROLE` moves in two steps, with one delay between them. Five
-scripts govern the role. Three drive the transfer. Two drive the delay.
+scripts govern the role. Three scripts drive the transfer. Two scripts drive
+the delay.
 
 | Step | Script | Sender |
 | --- | --- | --- |
@@ -209,7 +211,7 @@ The incoming admin sends step 2. The current admin cannot send it. Step 2
 reverts before the scheduled delay passes. Read `pendingAdminAt` from
 `make manage-status` to see the schedule.
 
-An incoming Safe proposes step 2 with `SAFE` set to that incoming Safe:
+An incoming Safe proposes step 2. Set `SAFE` to that incoming Safe:
 
 ```bash
 SAFE=0xYourIncomingSafe forge script \
@@ -223,12 +225,13 @@ takes effect only after its own wait period passes. An increase waits up to
 `defaultAdminDelayIncreaseWait()`. A decrease waits the difference between the
 old delay and the new delay.
 
-## 7. The Safe flow, end to end
+## 7. The complete Safe flow
 
 The flow has three parts. You write the envelope. You propose it. The owners
 then confirm it.
 
-**Step 1. Write the envelope.** Set `SAFE` and omit `--broadcast`:
+**Step 1. Write the envelope.** Set `SAFE` to your Safe address. Omit
+`--broadcast`:
 
 ```bash
 SAFE=0xYourSafe forge script script/manage/BETH/Pause.s.sol --sig 'run()' \
@@ -254,8 +257,16 @@ RPC_URL=https://... SIGNER="--account proposer" \
   ./script/manage/safe/propose.sh deployments/.safe/BETH.11155111.pause.json
 ```
 
-Set `DRY_RUN=1` to print the request. A dry run sends nothing. A dry run also
-never reads the signing key.
+The script prints the action, the Safe, the target, the calldata, the nonce and
+the hash. Read the target and the calldata before you sign. An envelope file
+name carries no arguments. A later run of the same action overwrites the file.
+
+Set `DRY_RUN=1` to print the request. A dry run posts nothing. A dry run also
+never reads the signing key. A dry run still reads the queue of the service.
+
+Give `SIGNER` a keystore account or a hardware wallet. `--private-key` puts the
+key into the argument list of `cast`. A local `ps` then shows that key to every
+user on the machine.
 
 **Step 3. The owners confirm.** The script prints the queue link on success.
 The owners open that link. The owners then confirm the transaction. One owner
@@ -264,11 +275,60 @@ executes it.
 The proposer needs no ETH. The proposer needs no owner rights. The proposer
 must be a registered delegate of the Safe. Section 8 covers that registration.
 
+### The signing prompt needs a terminal
+
+`cast wallet sign --account <name>` opens a password prompt. The prompt needs a
+real terminal. A non-interactive shell fails with
+`Error: Device not configured (os error 6)`.
+
+An operator therefore runs `propose.sh` in a real terminal. Automation passes
+the `--password-file` option of `cast` instead:
+
+```bash
+SIGNER="--account proposer --password-file /run/secrets/proposer.pass"
+```
+
+### The nonce that a proposal takes
+
+The Safe contract holds the executed nonce. The Safe Transaction Service holds
+a separate queue of proposed transactions. `propose.sh` reads both sources. It
+takes the first free slot above both values. Two proposals in one queue
+therefore take two different nonces. The script prints the chosen nonce and its
+source in one line.
+
+Set `NONCE` to pin the value. An operator needs this variable for a batch of
+proposals. The value must be a non-negative integer:
+
+```bash
+NONCE=12 RPC_URL=https://... SIGNER="--account proposer" \
+  ./script/manage/safe/propose.sh deployments/.safe/BETH.11155111.pause.json
+```
+
+The script prints a loud warning when the service gives no queue answer. The
+run then continues with the on-chain nonce. A queued proposal can hold that
+nonce already. The Safe interface shows such a conflict to the owners. Open the
+queue after every warning of this kind.
+
+### Safe mode cannot pre-stage a time-gated action
+
+Safe mode simulates the call from the Safe address first. The simulation must
+succeed at the current block. Two actions fail that simulation before their
+time arrives:
+
+- `AcceptDefaultAdminTransfer` reverts until the schedule of the transfer
+  passes.
+- `Unpause` reverts while the bridge runs.
+
+An operator cannot build these two envelopes in advance. The operator waits for
+the condition. The operator then writes the envelope. The operator proposes it
+in the same session. Plan the owner confirmations for that later moment.
+
 ## 8. Delegate registration stays manual
 
 A Safe **owner** must register the delegate. The proposer cannot register
-itself. This repo holds no script for the step, because owners keep their keys
-in hardware wallets. A script here would serve almost nobody.
+itself. Owners keep their keys in hardware wallets. This repo therefore holds
+no script for the step. safe-cli and the Safe interface already sign the
+registration message with a hardware wallet.
 
 ### The mechanism
 
@@ -276,12 +336,12 @@ The delegate signs an EIP-712 message. The message type is
 `Delegate{address delegateAddress,uint256 totp}`. The domain is
 `{name: "Safe Transaction Service", version: "1.0", chainId: <chainId>}`.
 `totp` is the current Unix time divided by 3600. The division drops the
-remainder, so the value changes once per hour.
+remainder. The value therefore changes once per hour.
 
-The service records the delegate on the Safe. A proposal from that delegate
-arrives with the `proposed_by_delegate` field set. The service never counts a
-delegate as a confirmation. A proposer can therefore propose a transaction.
-A proposer can never approve one.
+The service records the delegate on the Safe. The service then fills the
+`proposedByDelegate` field of each proposal from that delegate. The service
+never counts a delegate as a confirmation. A proposer can therefore propose a
+transaction. A proposer can never approve one.
 
 ### Route A: safe-cli
 
@@ -311,15 +371,18 @@ Some Safe releases hide this list. Use route A when you cannot find it.
 
 The Safe Transaction Service limits an anonymous client to 2 requests per
 second. `SAFE_API_KEY` raises that limit. Get a key at
-https://developer.safe.global. Export the key before you propose:
+https://developer.safe.global.
+
+Export the key before you propose:
 
 ```bash
 export SAFE_API_KEY=...
 ```
 
-`propose.sh` sends the key as a bearer token. The key travels on stdin, so a
-local `ps` cannot show it. The variable is optional. One proposal sends one
-request to the service, so a single run stays inside the anonymous limit.
+`propose.sh` sends the key as a bearer token. The key travels on stdin. A local
+`ps` therefore cannot show it. The variable stays optional. One proposal sends
+two requests to the service. A single run therefore stays inside the anonymous
+limit.
 
 ## 10. Status of this tooling
 
@@ -327,22 +390,30 @@ request to the service, so a single run stays inside the anonymous limit.
 `test/tooling/propose.t.sh`. A fake `curl` answers the service. A fake `cast`
 answers the chain. CI runs the suite on every push.
 
-**The script has never run against the live Safe Transaction Service.** Treat
-the first live proposal as a test. Use a Safe that holds no funds. Choose an
-action you can cancel.
-
-Record the first successful live run here:
+The whole flow also ran against the live Safe Transaction Service. This repo
+becomes public. The record therefore names no address and no transaction hash.
 
 | Field | Value |
 | --- | --- |
-| Date of first live proposal | _not yet run_ |
-| Chain | _not yet run_ |
-| Safe address | _not yet run_ |
-| Operator | _not yet run_ |
+| Date | 2026-09-11 |
+| Network | Sepolia |
+| Action | `setWithdrawRateLimit` |
+| Result | The Safe executed the transaction. |
+| Proposer record | The service set the `proposedByDelegate` field. |
+| Confirmations | The list held the Safe owner only. |
+| Hash agreement | The stored `safeTxHash` matched the computed hash. |
+
+The run proves three points. A delegate proposes a transaction. A delegate
+never confirms a transaction. The hash that the script computes before the
+signature matches the hash that the service stores.
+
+One item stays unproven. The propose path itself has no untested step now. The
+script maps each chain to a Safe short name. Only the Sepolia short name `sep`
+ran live. Treat the first run on another chain as a test.
 
 ## 11. Open question: how many Safes govern a deployment
 
-The team has not decided this. Three shapes are under discussion:
+The team has not decided this. The team discusses three shapes:
 
 1. **Three Safes.** The deployment uses one Safe for each authority. The three
    authorities are `DEFAULT_ADMIN`, `BRIDGE_ADMIN` and the `ProxyAdmin` owner.

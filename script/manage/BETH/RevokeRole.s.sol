@@ -6,8 +6,13 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 
 /// @notice Revokes one role from one account. The default admin governs all
 ///         three grantable roles: BRIDGE_ADMIN, ATTESTOR and SENTRY.
-/// @dev A revoke that drops the attestor count below the threshold blocks
-///      every later withdrawal. Lower the threshold first.
+/// @dev The contract lets a revoke drop the attestor count below the
+///      threshold. Every withdrawal then halts. An admin lowers the threshold
+///      to recover. One remaining attestor blocks that recovery. No value
+///      obeys both bounds at a count of 1. Only a grant of more attestors
+///      recovers the bridge from that state. Never let the attestor count
+///      fall below 2. Lower the threshold before the revoke to prevent the
+///      stop.
 ///
 /// Direct:
 ///   forge script script/manage/BETH/RevokeRole.s.sol \

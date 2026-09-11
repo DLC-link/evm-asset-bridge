@@ -60,4 +60,4 @@ jobs:
         run: ./test/tooling/verify.t.sh
 
       - name: Run the propose tooling test
-        run: bash test/tooling/propose.t.sh
+        run: ./test/tooling/propose.t.sh

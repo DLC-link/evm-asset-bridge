@@ -18,9 +18,14 @@
 # Environment:
 #   RPC_URL       required. The chain to read the Safe from.
 #   SIGNER        required. Wallet flags for cast, such as --account proposer.
+#                 Prefer --account or a hardware wallet. --private-key puts the
+#                 key into the argument list of cast. A local `ps` then shows
+#                 that key to every user on the machine.
 #   SAFE_API_KEY  optional. Raises the rate limit. Get one at
 #                 https://developer.safe.global.
-#   DRY_RUN=1     print the request and send nothing.
+#   NONCE         optional. Overrides the computed nonce. Use it to batch
+#                 several proposals. The value must be a non-negative integer.
+#   DRY_RUN=1     print the request and post nothing.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -37,6 +42,24 @@ done
 [ -n "${RPC_URL:-}" ] || { echo "propose.sh: RPC_URL is not set" >&2; exit 2; }
 [ -n "${SIGNER:-}" ] || [ -n "${DRY_RUN:-}" ] || \
   { echo "propose.sh: SIGNER is not set. Example: SIGNER=\"--account proposer\"" >&2; exit 2; }
+
+# The operator can pin the nonce. NONCE later holds the value that the run
+# uses. The script therefore keeps the override in its own variable.
+NONCE_ENV="${NONCE:-}"
+if [ -n "$NONCE_ENV" ]; then
+  case "$NONCE_ENV" in
+    *[!0-9]*)
+      echo "propose.sh: NONCE must be a non-negative integer, not '$NONCE_ENV'" >&2
+      exit 2
+      ;;
+  esac
+  # 007 and 7 name the same slot. The body carries the nonce as a JSON string.
+  # This loop therefore removes the leading zeros. A shell arithmetic expansion
+  # would overflow on a very long value. This loop cannot.
+  while [ "${#NONCE_ENV}" -gt 1 ] && [ "${NONCE_ENV:0:1}" = "0" ]; do
+    NONCE_ENV="${NONCE_ENV:1}"
+  done
+fi
 
 ZERO="0x0000000000000000000000000000000000000000"
 
@@ -87,10 +110,96 @@ esac
 SAFE=$(cast to-check-sum-address "$SAFE")
 TO=$(cast to-check-sum-address "$TO")
 
+# ---- curl helpers -----------------------------------------------------------
+# Every request travels on stdin as a curl config file. A local `ps` therefore
+# cannot show the API key.
+#
+# A curl config file holds one directive per line. A newline inside a value
+# would start a new directive. has_line_break refuses such a value.
+has_line_break() { # has_line_break <value>
+  case "$1" in
+    *$'\n'* | *$'\r'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# This escapes backslash and double quote for curl's quoted config-file syntax.
+cfg_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
+AUTH_LINE=""
+if [ -n "${SAFE_API_KEY:-}" ]; then
+  if has_line_break "$SAFE_API_KEY"; then
+    echo "propose.sh: SAFE_API_KEY holds a line break" >&2
+    exit 2
+  fi
+  AUTH_LINE="header = \"Authorization: Bearer $(cfg_escape "$SAFE_API_KEY")\""
+fi
+
 # ---- read the Safe ----------------------------------------------------------
-NONCE=$(cast call "$SAFE" "nonce()(uint256)" --rpc-url "$RPC_URL")
-NONCE="${NONCE%%$'\n'*}"
-NONCE="${NONCE%% *}"
+# The Safe contract holds the executed nonce. The service holds a separate
+# queue of proposed transactions. Two proposals that take the same nonce
+# exclude each other, and only one of them can ever run. This script therefore
+# reads both sources and takes the first free slot above both.
+ONCHAIN_NONCE=$(cast call "$SAFE" "nonce()(uint256)" --rpc-url "$RPC_URL")
+ONCHAIN_NONCE="${ONCHAIN_NONCE%%$'\n'*}"
+ONCHAIN_NONCE="${ONCHAIN_NONCE%% *}"
+
+# The service offers no next-nonce endpoint. A list request sorted by
+# descending nonce gives the highest queued nonce in its first result. An
+# executed transaction stays in that list. The on-chain value therefore still
+# wins when the queue holds no pending entry.
+QUEUE_URL="https://api.safe.global/tx-service/$SHORT/api/v1/safes/$SAFE/multisig-transactions/?ordering=-nonce&limit=1"
+
+# queue_nonce prints the next free nonce that the service queue allows. It
+# prints 0 for an empty queue. It returns 1 when the request or the body fails.
+queue_nonce() {
+  local response status body
+  response=$(curl -sS --connect-timeout 10 --max-time 30 -K - <<CFG || true
+url = "$(cfg_escape "$QUEUE_URL")"
+header = "Accept: application/json"
+$AUTH_LINE
+write-out = "\n%{http_code}"
+CFG
+)
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  [ "$status" = "200" ] || return 1
+  printf '%s' "$body" | jq -e -r \
+    'if (.results | type) != "array" then error("no results")
+     elif (.results | length) == 0 then 0
+     elif (.results[0].nonce | type) != "number" then error("no nonce")
+     else .results[0].nonce + 1 end' 2>/dev/null
+}
+
+if [ -n "$NONCE_ENV" ]; then
+  NONCE="$NONCE_ENV"
+  NONCE_REASON="the NONCE override"
+else
+  NONCE="$ONCHAIN_NONCE"
+  NONCE_REASON="the on-chain nonce"
+  if QUEUED_NONCE=$(queue_nonce); then
+    if [ "$QUEUED_NONCE" -gt "$NONCE" ]; then
+      NONCE="$QUEUED_NONCE"
+      NONCE_REASON="the highest queued nonce at the service"
+    fi
+  else
+    # RULING: a service outage must not block every proposal. The Safe
+    # interface shows a nonce conflict to the owners. The failure is
+    # therefore recoverable.
+    echo "propose.sh: ##########################################################" >&2
+    echo "propose.sh: ## WARNING. The Safe service gave no queue answer.      ##" >&2
+    echo "propose.sh: ## This run falls back to the on-chain nonce.           ##" >&2
+    echo "propose.sh: ## A queued proposal can hold that nonce already.       ##" >&2
+    echo "propose.sh: ## Open the Safe queue and check for a nonce conflict.  ##" >&2
+    echo "propose.sh: ##########################################################" >&2
+    NONCE_REASON="the on-chain nonce, after a failed queue request"
+  fi
+fi
 
 # The Safe contract computes its own EIP-712 hash. This script therefore
 # builds no EIP-712 encoding itself. safeTxGas, baseGas, gasPrice, gasToken
@@ -103,7 +212,14 @@ SAFE_TX_HASH=$(cast call "$SAFE" \
 SAFE_TX_HASH="${SAFE_TX_HASH%%$'\n'*}"
 SAFE_TX_HASH="${SAFE_TX_HASH%% *}"
 
-echo "propose.sh: action $ACTION, safe $SAFE, nonce $NONCE"
+# An envelope file name carries no arguments. A later run of the same action
+# overwrites the file. The operator therefore reads the target and the calldata
+# here, before the signature exists.
+echo "propose.sh: action $ACTION, safe $SAFE"
+echo "propose.sh: to $TO"
+echo "propose.sh: value $VALUE, operation $OPERATION"
+echo "propose.sh: data $DATA"
+echo "propose.sh: nonce $NONCE from $NONCE_REASON. The on-chain nonce is $ONCHAIN_NONCE"
 echo "propose.sh: safeTxHash $SAFE_TX_HASH"
 
 # ---- sign -------------------------------------------------------------------
@@ -140,7 +256,7 @@ jq -n \
     safeTxGas: "0", baseGas: "0", gasPrice: "0",
     gasToken: $zero, refundReceiver: $zero, nonce: $nonce,
     contractTransactionHash: $hash, sender: $sender, signature: $signature,
-    origin: ("{\"name\":\"evm-asset-bridge\",\"action\":\"" + $origin + "\"}")}' \
+    origin: ({name: "evm-asset-bridge", action: $origin} | tojson)}' \
   >"$BODY"
 
 URL="https://api.safe.global/tx-service/$SHORT/api/v2/safes/$SAFE/multisig-transactions/"
@@ -153,36 +269,9 @@ if [ -n "${DRY_RUN:-}" ]; then
 fi
 
 # ---- post -------------------------------------------------------------------
-# The request travels on stdin. A local `ps` therefore cannot show the API
-# key. write-out appends the status code. The last line of the answer is
-# therefore the status code.
+# write-out appends the status code. The last line of the answer is therefore
+# the status code.
 #
-# A curl config file holds one directive per line. A newline inside a value
-# would start a new directive. has_line_break refuses such a value.
-has_line_break() { # has_line_break <value>
-  case "$1" in
-    *$'\n'* | *$'\r'*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-# This escapes backslash and double quote for curl's quoted config-file syntax.
-cfg_escape() {
-  local s="$1"
-  s="${s//\\/\\\\}"
-  s="${s//\"/\\\"}"
-  printf '%s' "$s"
-}
-
-AUTH_LINE=""
-if [ -n "${SAFE_API_KEY:-}" ]; then
-  if has_line_break "$SAFE_API_KEY"; then
-    echo "propose.sh: SAFE_API_KEY holds a line break" >&2
-    exit 2
-  fi
-  AUTH_LINE="header = \"Authorization: Bearer $(cfg_escape "$SAFE_API_KEY")\""
-fi
-
 # The body is a large, multi-line JSON document. It therefore travels by file
 # reference on the `data-binary` line. curl reads the file itself. The config
 # text on stdin never carries the body bytes.

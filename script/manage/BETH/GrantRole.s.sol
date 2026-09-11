@@ -6,9 +6,10 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 
 /// @notice Grants one role to one account. The default admin governs all
 ///         three grantable roles: BRIDGE_ADMIN, ATTESTOR and SENTRY.
-/// @dev Grow the attestor set with raise-then-grant. Raise the threshold
-///      first with SetThreshold. Then grant the new attestor. A grant that
-///      drops the threshold to half the attestor count or below reverts.
+/// @dev The contract sets no order rule for a grant. An operator adds an
+///      attestor before a threshold change or after it. The contract checks
+///      no ratio between the threshold and the attestor count. The team sets
+///      that ratio by governance policy.
 ///
 /// Direct:
 ///   forge script script/manage/BETH/GrantRole.s.sol \
