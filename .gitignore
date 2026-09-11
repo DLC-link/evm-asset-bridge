@@ -11,3 +11,8 @@ deployments/*.31337.json
 
 # Pending deploy hand-off files; script/record.sh consumes and removes them
 deployments/.pending/
+
+# forge auto-loads a bare .env from the project root, so that name attracts
+# private keys. The per-network .env.<network> files hold no secret and stay
+# tracked.
+.env
