@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#
+# A fake cast for the propose tests. It answers the calls that need a chain or
+# a key. It passes every other call to the real cast. The checksum tests
+# therefore run against the real implementation.
+#
+# The test picks each answer by exporting a variable.
+REAL_CAST="${REAL_CAST:-$HOME/.foundry/bin/cast}"
+
+case "$1 ${2:-}" in
+  "chain-id "*|"chain-id")
+    echo "${FAKE_CHAIN_ID:-11155111}"
+    ;;
+  "call "*)
+    # $3 holds the signature. nonce() and getTransactionHash() are the two.
+    case "$3" in
+      nonce*) echo "${FAKE_SAFE_NONCE:-7}" ;;
+      getTransactionHash*) echo "${FAKE_SAFE_TX_HASH:-0x1111111111111111111111111111111111111111111111111111111111111111}" ;;
+      *) echo "fake cast: unexpected call $3" >&2; exit 9 ;;
+    esac
+    ;;
+  "wallet sign")
+    # --no-hash is mandatory. Without it, cast adds the EIP-191 prefix. The
+    # service then rejects the signature. This guard fails the call the same
+    # way a missing flag fails in production.
+    case " $* " in
+      *" --no-hash "*) ;;
+      *) echo "fake cast: wallet sign without --no-hash" >&2; exit 8 ;;
+    esac
+    echo "${FAKE_SIGNATURE:-0x222222222222222222222222222222222222222222222222222222222222222233333333333333333333333333333333333333333333333333333333333333331b}"
+    ;;
+  "wallet address")
+    echo "${FAKE_SIGNER_ADDRESS:-0x7038f8a64cE8F879705A48e962B55d56aEcd60D8}"
+    ;;
+  *)
+    exec "$REAL_CAST" "$@"
+    ;;
+esac

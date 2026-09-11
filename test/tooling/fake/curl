@@ -12,10 +12,21 @@ REQUEST=$(cat)
 
 if [ -n "${FAKE_CURL_LOG:-}" ]; then
   printf '%s\n--\n' "$REQUEST" >>"$FAKE_CURL_LOG"
+
+  # propose.sh sends its JSON body by file reference, not inline. A local
+  # `ps` therefore cannot show it. This resolves that one reference. A test
+  # can then assert the real wire bytes curl would read from disk.
+  DATA_LINE=$(printf '%s\n' "$REQUEST" | grep '^data-binary = "@' || true)
+  if [ -n "$DATA_LINE" ]; then
+    REF="${DATA_LINE#data-binary = \"@}"
+    REF="${REF%\"}"
+    [ -f "$REF" ] && cat "$REF" >>"$FAKE_CURL_LOG"
+  fi
 fi
 
 DIR="${FAKE_CURL_DIR:-.}"
 case "$REQUEST" in
+  *multisig-transactions*) BODY="$DIR/post.txt" ;;
   *checkverifystatus*) BODY="$DIR/poll.txt" ;;
   *verifysourcecode*) BODY="$DIR/submit.txt" ;;
   *) BODY="$DIR/getabi.txt" ;;
