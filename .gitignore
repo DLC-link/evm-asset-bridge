@@ -12,6 +12,10 @@ deployments/*.31337.json
 # Pending deploy hand-off files; script/record.sh consumes and removes them
 deployments/.pending/
 
+# Safe transaction envelopes that script/manage writes. The Safe UI holds the
+# authoritative record of a proposal.
+deployments/.safe/
+
 # forge auto-loads a bare .env from the project root, so that name attracts
 # private keys. The per-network .env.<network> files hold no secret and stay
 # tracked.
