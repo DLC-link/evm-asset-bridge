@@ -2,14 +2,14 @@
 pragma solidity 0.8.34;
 
 import {BridgeTestBase} from "../BridgeTestBase.t.sol";
-import {GrantRole} from "../../script/manage/BETH/GrantRole.s.sol";
-import {RevokeRole} from "../../script/manage/BETH/RevokeRole.s.sol";
-import {RenounceRole} from "../../script/manage/BETH/RenounceRole.s.sol";
-import {BeginDefaultAdminTransfer} from "../../script/manage/BETH/BeginDefaultAdminTransfer.s.sol";
-import {AcceptDefaultAdminTransfer} from "../../script/manage/BETH/AcceptDefaultAdminTransfer.s.sol";
-import {CancelDefaultAdminTransfer} from "../../script/manage/BETH/CancelDefaultAdminTransfer.s.sol";
-import {ChangeDefaultAdminDelay} from "../../script/manage/BETH/ChangeDefaultAdminDelay.s.sol";
-import {RollbackDefaultAdminDelay} from "../../script/manage/BETH/RollbackDefaultAdminDelay.s.sol";
+import {GrantRole} from "../../script/manage/BitSafeEvmAssetBridge/GrantRole.s.sol";
+import {RevokeRole} from "../../script/manage/BitSafeEvmAssetBridge/RevokeRole.s.sol";
+import {RenounceRole} from "../../script/manage/BitSafeEvmAssetBridge/RenounceRole.s.sol";
+import {BeginDefaultAdminTransfer} from "../../script/manage/BitSafeEvmAssetBridge/BeginDefaultAdminTransfer.s.sol";
+import {AcceptDefaultAdminTransfer} from "../../script/manage/BitSafeEvmAssetBridge/AcceptDefaultAdminTransfer.s.sol";
+import {CancelDefaultAdminTransfer} from "../../script/manage/BitSafeEvmAssetBridge/CancelDefaultAdminTransfer.s.sol";
+import {ChangeDefaultAdminDelay} from "../../script/manage/BitSafeEvmAssetBridge/ChangeDefaultAdminDelay.s.sol";
+import {RollbackDefaultAdminDelay} from "../../script/manage/BitSafeEvmAssetBridge/RollbackDefaultAdminDelay.s.sol";
 
 contract DefaultAdminActionsTest is BridgeTestBase {
     function _runAs(address sender, bytes memory data) internal {

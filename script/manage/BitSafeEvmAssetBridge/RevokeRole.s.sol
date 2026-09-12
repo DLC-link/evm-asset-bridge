@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 /// @notice Revokes one role from one account. The default admin governs all
@@ -15,14 +15,14 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 ///      stop.
 ///
 /// Direct:
-///   forge script script/manage/BETH/RevokeRole.s.sol \
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/RevokeRole.s.sol \
 ///     --sig 'run(string,address)' SENTRY 0xOldSentry \
 ///     --rpc-url $RPC_URL --broadcast --account defaultAdmin
 ///
 /// Safe:
-///   SAFE=0xYourSafe forge script script/manage/BETH/RevokeRole.s.sol \
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/RevokeRole.s.sol \
 ///     --sig 'run(string,address)' SENTRY 0xOldSentry --rpc-url $RPC_URL
-contract RevokeRole is BethManage {
+contract RevokeRole is BridgeManage {
     function action() public pure override returns (string memory) {
         return "revokeRole";
     }

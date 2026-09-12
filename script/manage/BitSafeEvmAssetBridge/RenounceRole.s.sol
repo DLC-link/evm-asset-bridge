@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 /// @notice Drops one of the caller's own roles. The caller must pass its own
@@ -10,14 +10,14 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 ///      through RevokeRole, called by the default admin.
 ///
 /// Direct:
-///   forge script script/manage/BETH/RenounceRole.s.sol \
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/RenounceRole.s.sol \
 ///     --sig 'run(string,address)' SENTRY 0xYourOwnAddress \
 ///     --rpc-url $RPC_URL --broadcast --account sentry
 ///
 /// Safe:
-///   SAFE=0xYourSafe forge script script/manage/BETH/RenounceRole.s.sol \
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/RenounceRole.s.sol \
 ///     --sig 'run(string,address)' SENTRY 0xYourSafe --rpc-url $RPC_URL
-contract RenounceRole is BethManage {
+contract RenounceRole is BridgeManage {
     function action() public pure override returns (string memory) {
         return "renounceRole";
     }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
 /// @notice Sets the minimum and maximum deposit amount, in asset base units.
@@ -15,14 +15,14 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 ///      below `minAmount` reverts the same way.
 ///
 /// Direct:
-///   forge script script/manage/BETH/SetDepositLimits.s.sol \
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/SetDepositLimits.s.sol \
 ///     --sig 'run(uint256,uint256)' 100000000 900000000 \
 ///     --rpc-url $RPC_URL --broadcast --account bridgeAdmin
 ///
 /// Safe:
-///   SAFE=0xYourSafe forge script script/manage/BETH/SetDepositLimits.s.sol \
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/SetDepositLimits.s.sol \
 ///     --sig 'run(uint256,uint256)' 100000000 900000000 --rpc-url $RPC_URL
-contract SetDepositLimits is BethManage {
+contract SetDepositLimits is BridgeManage {
     function action() public pure override returns (string memory) {
         return "setDepositLimits";
     }

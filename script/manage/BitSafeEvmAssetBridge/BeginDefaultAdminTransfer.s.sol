@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {
     AccessControlDefaultAdminRulesUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
@@ -13,14 +13,14 @@ import {
 ///      AcceptDefaultAdminTransfer itself.
 ///
 /// Direct:
-///   forge script script/manage/BETH/BeginDefaultAdminTransfer.s.sol \
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/BeginDefaultAdminTransfer.s.sol \
 ///     --sig 'run(address)' 0xNewAdmin \
 ///     --rpc-url $RPC_URL --broadcast --account defaultAdmin
 ///
 /// Safe:
-///   SAFE=0xYourSafe forge script script/manage/BETH/BeginDefaultAdminTransfer.s.sol \
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/BeginDefaultAdminTransfer.s.sol \
 ///     --sig 'run(address)' 0xNewAdmin --rpc-url $RPC_URL
-contract BeginDefaultAdminTransfer is BethManage {
+contract BeginDefaultAdminTransfer is BridgeManage {
     function action() public pure override returns (string memory) {
         return "beginDefaultAdminTransfer";
     }

@@ -3,14 +3,13 @@ pragma solidity 0.8.34;
 
 import {ManageBase} from "../ManageBase.s.sol";
 
-/// @title BethManage
-/// @notice Binds the management base to the BETH deployment records. Every
-///         BETH action script extends this contract.
-abstract contract BethManage is ManageBase {
-    function deploymentName() public pure override returns (string memory) {
-        return "BETH";
-    }
-
+/// @title BridgeManage
+/// @notice Binds the management base to BitSafeEvmAssetBridge. Every action
+///         script for this contract extends it.
+/// @dev This file names no deployment. The folder names the contract, and
+///      the DEPLOYMENT environment variable names one instance of it. A
+///      second deployment therefore needs no new Solidity file.
+abstract contract BridgeManage is ManageBase {
     function contractName() public pure override returns (string memory) {
         return "BitSafeEvmAssetBridge";
     }

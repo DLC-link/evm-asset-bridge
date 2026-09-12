@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
 /// @notice Resumes deposits and withdrawals.
 /// @dev Only the bridge admin may unpause. A sentry cannot reverse its own pause.
 ///
 /// Direct:
-///   forge script script/manage/BETH/Unpause.s.sol --sig 'run()' \
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/Unpause.s.sol --sig 'run()' \
 ///     --rpc-url $RPC_URL --broadcast --account bridgeAdmin
 ///
 /// Safe:
-///   SAFE=0xYourSafe forge script script/manage/BETH/Unpause.s.sol --sig 'run()' \
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/Unpause.s.sol --sig 'run()' \
 ///     --rpc-url $RPC_URL
-contract Unpause is BethManage {
+contract Unpause is BridgeManage {
     function action() public pure override returns (string memory) {
         return "unpause";
     }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
 /// @notice Rescues tokens sent to the bridge by mistake. This script never
@@ -10,14 +10,14 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 ///      RescueSurplus for a bridged-asset balance above `totalLocked`.
 ///
 /// Direct:
-///   forge script script/manage/BETH/RescueERC20.s.sol \
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/RescueERC20.s.sol \
 ///     --sig 'run(address,address,uint256)' 0xToken 0xTo 100 \
 ///     --rpc-url $RPC_URL --broadcast --account bridgeAdmin
 ///
 /// Safe:
-///   SAFE=0xYourSafe forge script script/manage/BETH/RescueERC20.s.sol \
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/RescueERC20.s.sol \
 ///     --sig 'run(address,address,uint256)' 0xToken 0xTo 100 --rpc-url $RPC_URL
-contract RescueERC20 is BethManage {
+contract RescueERC20 is BridgeManage {
     function action() public pure override returns (string memory) {
         return "rescueERC20";
     }

@@ -4,17 +4,17 @@ pragma solidity 0.8.34;
 import {BridgeTestBase} from "../BridgeTestBase.t.sol";
 import {BitSafeEvmAssetBridge} from "../../src/BitSafeEvmAssetBridge.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
-import {Pause} from "../../script/manage/BETH/Pause.s.sol";
-import {Unpause} from "../../script/manage/BETH/Unpause.s.sol";
-import {SetThreshold} from "../../script/manage/BETH/SetThreshold.s.sol";
-import {SetDepositLimits} from "../../script/manage/BETH/SetDepositLimits.s.sol";
-import {SetWithdrawLimits} from "../../script/manage/BETH/SetWithdrawLimits.s.sol";
-import {SetWithdrawRateLimit} from "../../script/manage/BETH/SetWithdrawRateLimit.s.sol";
-import {SetWithdrawalHorizon} from "../../script/manage/BETH/SetWithdrawalHorizon.s.sol";
-import {RescueERC20} from "../../script/manage/BETH/RescueERC20.s.sol";
-import {RescueETH} from "../../script/manage/BETH/RescueETH.s.sol";
-import {RescueSurplus} from "../../script/manage/BETH/RescueSurplus.s.sol";
-import {VoidWithdrawRequest} from "../../script/manage/BETH/VoidWithdrawRequest.s.sol";
+import {Pause} from "../../script/manage/BitSafeEvmAssetBridge/Pause.s.sol";
+import {Unpause} from "../../script/manage/BitSafeEvmAssetBridge/Unpause.s.sol";
+import {SetThreshold} from "../../script/manage/BitSafeEvmAssetBridge/SetThreshold.s.sol";
+import {SetDepositLimits} from "../../script/manage/BitSafeEvmAssetBridge/SetDepositLimits.s.sol";
+import {SetWithdrawLimits} from "../../script/manage/BitSafeEvmAssetBridge/SetWithdrawLimits.s.sol";
+import {SetWithdrawRateLimit} from "../../script/manage/BitSafeEvmAssetBridge/SetWithdrawRateLimit.s.sol";
+import {SetWithdrawalHorizon} from "../../script/manage/BitSafeEvmAssetBridge/SetWithdrawalHorizon.s.sol";
+import {RescueERC20} from "../../script/manage/BitSafeEvmAssetBridge/RescueERC20.s.sol";
+import {RescueETH} from "../../script/manage/BitSafeEvmAssetBridge/RescueETH.s.sol";
+import {RescueSurplus} from "../../script/manage/BitSafeEvmAssetBridge/RescueSurplus.s.sol";
+import {VoidWithdrawRequest} from "../../script/manage/BitSafeEvmAssetBridge/VoidWithdrawRequest.s.sol";
 
 contract BridgeAdminActionsTest is BridgeTestBase {
     /// Sends one script's calldata from the bridge admin and requires success.

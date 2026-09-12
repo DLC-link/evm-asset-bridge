@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
 /// @notice Pauses deposits and withdrawals.
@@ -9,13 +9,13 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 ///      role, so either sender works.
 ///
 /// Direct:
-///   forge script script/manage/BETH/Pause.s.sol --sig 'run()' \
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/Pause.s.sol --sig 'run()' \
 ///     --rpc-url $RPC_URL --broadcast --account sentry
 ///
 /// Safe:
-///   SAFE=0xYourSafe forge script script/manage/BETH/Pause.s.sol --sig 'run()' \
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/Pause.s.sol --sig 'run()' \
 ///     --rpc-url $RPC_URL
-contract Pause is BethManage {
+contract Pause is BridgeManage {
     function action() public pure override returns (string memory) {
         return "pause";
     }

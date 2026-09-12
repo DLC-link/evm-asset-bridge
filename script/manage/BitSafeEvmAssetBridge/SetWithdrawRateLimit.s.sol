@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
 /// @notice Sets the withdrawal rate limit: a bucket of `capacity` base units
@@ -12,14 +12,14 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 ///      `InvalidLimits`.
 ///
 /// Direct:
-///   forge script script/manage/BETH/SetWithdrawRateLimit.s.sol \
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/SetWithdrawRateLimit.s.sol \
 ///     --sig 'run(uint256,uint256)' 100000000000000000000 86400 \
 ///     --rpc-url $RPC_URL --broadcast --account bridgeAdmin
 ///
 /// Safe:
-///   SAFE=0xYourSafe forge script script/manage/BETH/SetWithdrawRateLimit.s.sol \
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/SetWithdrawRateLimit.s.sol \
 ///     --sig 'run(uint256,uint256)' 100000000000000000000 86400 --rpc-url $RPC_URL
-contract SetWithdrawRateLimit is BethManage {
+contract SetWithdrawRateLimit is BridgeManage {
     function action() public pure override returns (string memory) {
         return "setWithdrawRateLimit";
     }

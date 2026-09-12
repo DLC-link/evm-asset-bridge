@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {console2} from "forge-std/console2.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
@@ -9,8 +9,8 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 ///         sends no transaction. It therefore needs no sender and no
 ///         broadcast flag.
 ///
-///   forge script script/manage/BETH/Status.s.sol --sig 'run()' --rpc-url $RPC_URL
-contract Status is BethManage {
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/Status.s.sol --sig 'run()' --rpc-url $RPC_URL
+contract Status is BridgeManage {
     function action() public pure override returns (string memory) {
         return "status";
     }

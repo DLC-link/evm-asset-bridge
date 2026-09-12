@@ -3,26 +3,26 @@ pragma solidity 0.8.34;
 
 import {BridgeTestBase} from "../BridgeTestBase.t.sol";
 import {ManageBase} from "../../script/manage/ManageBase.s.sol";
-import {Pause} from "../../script/manage/BETH/Pause.s.sol";
-import {Unpause} from "../../script/manage/BETH/Unpause.s.sol";
-import {SetThreshold} from "../../script/manage/BETH/SetThreshold.s.sol";
-import {SetDepositLimits} from "../../script/manage/BETH/SetDepositLimits.s.sol";
-import {SetWithdrawLimits} from "../../script/manage/BETH/SetWithdrawLimits.s.sol";
-import {SetWithdrawRateLimit} from "../../script/manage/BETH/SetWithdrawRateLimit.s.sol";
-import {SetWithdrawalHorizon} from "../../script/manage/BETH/SetWithdrawalHorizon.s.sol";
-import {RescueERC20} from "../../script/manage/BETH/RescueERC20.s.sol";
-import {RescueETH} from "../../script/manage/BETH/RescueETH.s.sol";
-import {RescueSurplus} from "../../script/manage/BETH/RescueSurplus.s.sol";
-import {VoidWithdrawRequest} from "../../script/manage/BETH/VoidWithdrawRequest.s.sol";
-import {GrantRole} from "../../script/manage/BETH/GrantRole.s.sol";
-import {RevokeRole} from "../../script/manage/BETH/RevokeRole.s.sol";
-import {RenounceRole} from "../../script/manage/BETH/RenounceRole.s.sol";
-import {BeginDefaultAdminTransfer} from "../../script/manage/BETH/BeginDefaultAdminTransfer.s.sol";
-import {AcceptDefaultAdminTransfer} from "../../script/manage/BETH/AcceptDefaultAdminTransfer.s.sol";
-import {CancelDefaultAdminTransfer} from "../../script/manage/BETH/CancelDefaultAdminTransfer.s.sol";
-import {ChangeDefaultAdminDelay} from "../../script/manage/BETH/ChangeDefaultAdminDelay.s.sol";
-import {RollbackDefaultAdminDelay} from "../../script/manage/BETH/RollbackDefaultAdminDelay.s.sol";
-import {Status} from "../../script/manage/BETH/Status.s.sol";
+import {Pause} from "../../script/manage/BitSafeEvmAssetBridge/Pause.s.sol";
+import {Unpause} from "../../script/manage/BitSafeEvmAssetBridge/Unpause.s.sol";
+import {SetThreshold} from "../../script/manage/BitSafeEvmAssetBridge/SetThreshold.s.sol";
+import {SetDepositLimits} from "../../script/manage/BitSafeEvmAssetBridge/SetDepositLimits.s.sol";
+import {SetWithdrawLimits} from "../../script/manage/BitSafeEvmAssetBridge/SetWithdrawLimits.s.sol";
+import {SetWithdrawRateLimit} from "../../script/manage/BitSafeEvmAssetBridge/SetWithdrawRateLimit.s.sol";
+import {SetWithdrawalHorizon} from "../../script/manage/BitSafeEvmAssetBridge/SetWithdrawalHorizon.s.sol";
+import {RescueERC20} from "../../script/manage/BitSafeEvmAssetBridge/RescueERC20.s.sol";
+import {RescueETH} from "../../script/manage/BitSafeEvmAssetBridge/RescueETH.s.sol";
+import {RescueSurplus} from "../../script/manage/BitSafeEvmAssetBridge/RescueSurplus.s.sol";
+import {VoidWithdrawRequest} from "../../script/manage/BitSafeEvmAssetBridge/VoidWithdrawRequest.s.sol";
+import {GrantRole} from "../../script/manage/BitSafeEvmAssetBridge/GrantRole.s.sol";
+import {RevokeRole} from "../../script/manage/BitSafeEvmAssetBridge/RevokeRole.s.sol";
+import {RenounceRole} from "../../script/manage/BitSafeEvmAssetBridge/RenounceRole.s.sol";
+import {BeginDefaultAdminTransfer} from "../../script/manage/BitSafeEvmAssetBridge/BeginDefaultAdminTransfer.s.sol";
+import {AcceptDefaultAdminTransfer} from "../../script/manage/BitSafeEvmAssetBridge/AcceptDefaultAdminTransfer.s.sol";
+import {CancelDefaultAdminTransfer} from "../../script/manage/BitSafeEvmAssetBridge/CancelDefaultAdminTransfer.s.sol";
+import {ChangeDefaultAdminDelay} from "../../script/manage/BitSafeEvmAssetBridge/ChangeDefaultAdminDelay.s.sol";
+import {RollbackDefaultAdminDelay} from "../../script/manage/BitSafeEvmAssetBridge/RollbackDefaultAdminDelay.s.sol";
+import {Status} from "../../script/manage/BitSafeEvmAssetBridge/Status.s.sol";
 import {BitSafeEvmAssetBridge} from "../../src/BitSafeEvmAssetBridge.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
@@ -288,7 +288,7 @@ contract ManageBaseTest is BridgeTestBase {
     function test_pause_encodesTheBridgeCall() public {
         Pause pauseScript = new Pause();
         assertEq(pauseScript.encode(), abi.encodeCall(BitSafeEvmAssetBridge.pause, ()));
-        assertEq(pauseScript.deploymentName(), "BETH");
+        assertEq(pauseScript.contractName(), "BitSafeEvmAssetBridge");
         assertEq(pauseScript.action(), "pause");
     }
 

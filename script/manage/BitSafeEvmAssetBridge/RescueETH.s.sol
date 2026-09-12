@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
 /// @notice Rescues stray ETH, such as ETH forced in via selfdestruct.
@@ -9,14 +9,14 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 ///      RescueSurplus for a stray ETH balance on an ETH bridge.
 ///
 /// Direct:
-///   forge script script/manage/BETH/RescueETH.s.sol \
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/RescueETH.s.sol \
 ///     --sig 'run(address,uint256)' 0xTo 1000000000000000000 \
 ///     --rpc-url $RPC_URL --broadcast --account bridgeAdmin
 ///
 /// Safe:
-///   SAFE=0xYourSafe forge script script/manage/BETH/RescueETH.s.sol \
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/RescueETH.s.sol \
 ///     --sig 'run(address,uint256)' 0xTo 1000000000000000000 --rpc-url $RPC_URL
-contract RescueETH is BethManage {
+contract RescueETH is BridgeManage {
     function action() public pure override returns (string memory) {
         return "rescueETH";
     }

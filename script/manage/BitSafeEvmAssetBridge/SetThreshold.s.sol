@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 
 /// @notice Sets the number of attestor signatures a withdrawal needs.
@@ -10,13 +10,13 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 ///      exceed the attestor count.
 ///
 /// Direct:
-///   forge script script/manage/BETH/SetThreshold.s.sol --sig 'run(uint256)' 3 \
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/SetThreshold.s.sol --sig 'run(uint256)' 3 \
 ///     --rpc-url $RPC_URL --broadcast --account bridgeAdmin
 ///
 /// Safe:
-///   SAFE=0xYourSafe forge script script/manage/BETH/SetThreshold.s.sol \
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/SetThreshold.s.sol \
 ///     --sig 'run(uint256)' 3 --rpc-url $RPC_URL
-contract SetThreshold is BethManage {
+contract SetThreshold is BridgeManage {
     function action() public pure override returns (string memory) {
         return "setThreshold";
     }

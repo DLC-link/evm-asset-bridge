@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {BethManage} from "./BethManage.s.sol";
+import {BridgeManage} from "./BridgeManage.s.sol";
 import {
     AccessControlDefaultAdminRulesUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
@@ -11,13 +11,13 @@ import {
 ///      delay and schedule. The current delay stays in effect.
 ///
 /// Direct:
-///   forge script script/manage/BETH/RollbackDefaultAdminDelay.s.sol --sig 'run()' \
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/RollbackDefaultAdminDelay.s.sol --sig 'run()' \
 ///     --rpc-url $RPC_URL --broadcast --account defaultAdmin
 ///
 /// Safe:
-///   SAFE=0xYourSafe forge script script/manage/BETH/RollbackDefaultAdminDelay.s.sol \
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/RollbackDefaultAdminDelay.s.sol \
 ///     --sig 'run()' --rpc-url $RPC_URL
-contract RollbackDefaultAdminDelay is BethManage {
+contract RollbackDefaultAdminDelay is BridgeManage {
     function action() public pure override returns (string memory) {
         return "rollbackDefaultAdminDelay";
     }
