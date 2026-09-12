@@ -41,6 +41,10 @@ abstract contract DummyAction is ManageBase {
         return "MANAGETEST";
     }
 
+    function contractName() public pure override returns (string memory) {
+        return "BitSafeEvmAssetBridge";
+    }
+
     function configure(address target_, address safe_) external {
         _target = target_;
         _safe = safe_;
@@ -109,6 +113,65 @@ contract RecordReader is ManageBase {
 
     function action() public pure override returns (string memory) {
         return "read";
+    }
+
+    function contractName() public pure override returns (string memory) {
+        return "BitSafeEvmAssetBridge";
+    }
+}
+
+/// Reaches the real `target()`, so it reaches the contract guard. Only ONE
+/// test function uses it, because it writes files.
+contract GuardOkAction is ManageBase {
+    function deploymentName() public pure override returns (string memory) {
+        return "GUARDOK";
+    }
+
+    function action() public pure override returns (string memory) {
+        return "guardOk";
+    }
+
+    function contractName() public pure override returns (string memory) {
+        return "BitSafeEvmAssetBridge";
+    }
+
+    function readTarget() external view returns (address) {
+        return target();
+    }
+}
+
+/// The same shape, with its own deployment name. Only ONE test function uses
+/// it, because it writes a file.
+contract GuardBadAction is ManageBase {
+    function deploymentName() public pure override returns (string memory) {
+        return "GUARDBAD";
+    }
+
+    function action() public pure override returns (string memory) {
+        return "guardBad";
+    }
+
+    function contractName() public pure override returns (string memory) {
+        return "BitSafeEvmAssetBridge";
+    }
+
+    function readTarget() external view returns (address) {
+        return target();
+    }
+}
+
+/// Reaches the deployment-name check without an environment variable.
+contract NameCheckAction is ManageBase {
+    function action() public pure override returns (string memory) {
+        return "nameCheck";
+    }
+
+    function contractName() public pure override returns (string memory) {
+        return "BitSafeEvmAssetBridge";
+    }
+
+    function callRequireName(string memory name) external pure returns (string memory) {
+        return _requireName(name);
     }
 }
 
@@ -269,5 +332,52 @@ contract ManageBaseTest is BridgeTestBase {
                 assertTrue(keccak256(bytes(names[i])) != keccak256(bytes(names[j])), "action names must be unique");
             }
         }
+    }
+
+    function test_target_acceptsARecordThatNamesTheRightContract() public {
+        GuardOkAction guard = new GuardOkAction();
+
+        string memory implPath = "deployments/GUARDOK.implementation.31337.json";
+        string memory implKey = "guardOkImpl";
+        vm.serializeUint(implKey, "chainId", uint256(31337));
+        vm.serializeString(implKey, "contractName", "BitSafeEvmAssetBridge");
+        vm.writeJson(vm.serializeAddress(implKey, "address", address(bridge)), implPath);
+
+        string memory proxyPath = "deployments/GUARDOK.proxy.31337.json";
+        string memory proxyKey = "guardOkProxy";
+        vm.serializeUint(proxyKey, "chainId", uint256(31337));
+        vm.writeJson(vm.serializeAddress(proxyKey, "address", address(bridge)), proxyPath);
+
+        assertEq(guard.readTarget(), address(bridge));
+
+        vm.removeFile(implPath);
+        vm.removeFile(proxyPath);
+    }
+
+    /// The guard must run BEFORE the proxy record read. This test writes no
+    /// proxy record. A guard that ran second would fail on a missing file
+    /// instead of ContractMismatch.
+    function test_target_rejectsARecordThatNamesAnotherContract() public {
+        GuardBadAction guard = new GuardBadAction();
+
+        string memory implPath = "deployments/GUARDBAD.implementation.31337.json";
+        string memory implKey = "guardBadImpl";
+        vm.serializeUint(implKey, "chainId", uint256(31337));
+        vm.serializeString(implKey, "contractName", "SomeOtherContract");
+        vm.writeJson(vm.serializeAddress(implKey, "address", address(bridge)), implPath);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ManageBase.ContractMismatch.selector, "SomeOtherContract", "BitSafeEvmAssetBridge")
+        );
+        guard.readTarget();
+
+        vm.removeFile(implPath);
+    }
+
+    function test_deploymentName_rejectsAnEmptyName() public {
+        NameCheckAction checker = new NameCheckAction();
+        assertEq(checker.callRequireName("BETH"), "BETH");
+        vm.expectRevert(ManageBase.DeploymentNotSet.selector);
+        checker.callRequireName("");
     }
 }

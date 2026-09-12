@@ -16,19 +16,56 @@ abstract contract ManageBase is Script {
 
     error RecordChainMismatch(uint256 recordChainId, uint256 chainId);
     error TargetHasNoCode(address target);
+    error DeploymentNotSet();
+    error ContractMismatch(string recordContractName, string expectedContractName);
 
-    /// The deployment name, such as "BETH". A per-deployment base sets it.
-    function deploymentName() public pure virtual returns (string memory);
+    /// The deployment name, such as "BETH". The operator sets DEPLOYMENT in
+    /// the environment. A test overrides this function instead, because a
+    /// test must not write a process-global environment variable.
+    /// @dev This function is `view`, not `pure`. A `pure` override stays
+    ///      legal, because an override may make the mutability stricter.
+    function deploymentName() public view virtual returns (string memory) {
+        return _requireName(vm.envOr("DEPLOYMENT", string("")));
+    }
+
+    /// Rejects an empty deployment name. The check is `pure`, so a test
+    /// reaches it with no environment variable and no file.
+    function _requireName(string memory name) internal pure returns (string memory) {
+        if (bytes(name).length == 0) {
+            revert DeploymentNotSet();
+        }
+        return name;
+    }
 
     /// A short name for this action, such as "pause". It names the envelope
     /// file, and it fills the Safe UI origin field.
     function action() public pure virtual returns (string memory);
 
+    /// The contract that this script folder drives. The deployment record
+    /// must name the same contract. A per-contract base sets it.
+    function contractName() public pure virtual returns (string memory);
+
     /// The address this action calls. It defaults to the recorded proxy.
     /// A test overrides it, and so does a script that targets another
     /// contract, such as the ProxyAdmin.
     function target() internal view virtual returns (address) {
+        _requireContract();
         return recordAddress("proxy");
+    }
+
+    /// Checks that the deployment is an instance of this script's contract.
+    /// A folder names a contract, and DEPLOYMENT names an instance. An
+    /// operator can pair the two wrongly, and this check stops that run.
+    /// @dev The proxy record names TransparentUpgradeableProxy, so the check
+    ///      reads the implementation record instead.
+    function _requireContract() private view {
+        string memory path =
+            string.concat("deployments/", deploymentName(), ".implementation.", vm.toString(block.chainid), ".json");
+        string memory recorded = vm.parseJsonString(vm.readFile(path), ".contractName");
+        string memory expected = contractName();
+        if (keccak256(bytes(recorded)) != keccak256(bytes(expected))) {
+            revert ContractMismatch(recorded, expected);
+        }
     }
 
     /// The Safe that proposes this action, or the zero address for a direct

@@ -11,6 +11,10 @@ abstract contract BethManage is ManageBase {
         return "BETH";
     }
 
+    function contractName() public pure override returns (string memory) {
+        return "BitSafeEvmAssetBridge";
+    }
+
     /// Maps a role name to its hash. A name is safer than a raw bytes32.
     /// A mistyped hash names a role nobody holds. The grant then succeeds
     /// silently, with no effect.
