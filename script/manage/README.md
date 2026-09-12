@@ -8,9 +8,42 @@ This is the operator runbook for the post-deploy admin actions.
 folder holds the deploy scripts only. Each management file drives one contract
 function. The file name matches that function.
 
-`script/manage/<DEPLOYMENT>/` holds the scripts for one deployment. `BETH` is
-the first deployment. `script/manage/ManageBase.s.sol` holds the shared code.
-`script/manage/BETH/BethManage.s.sol` binds that base to the BETH records.
+A folder names a contract, and `DEPLOYMENT` names one instance of that
+contract. The scripts for `BitSafeEvmAssetBridge` live in
+`script/manage/BitSafeEvmAssetBridge/`. `DEPLOYMENT=BETH` picks the BETH
+bridge, and the deployment records pin its addresses.
+
+**Warning.** The guard checks the contract name only. It cannot tell two
+deployments of the same contract apart. A wrong `DEPLOYMENT` value that
+names another real `BitSafeEvmAssetBridge` deployment still passes every
+check. Run `make manage-status DEPLOYMENT=<name> RPC_URL=<url>` first, and
+confirm the printed bridge address. Fix `DEPLOYMENT` before you send a real
+transaction.
+
+A second deployment of the same contract needs no new script. It needs one
+set of deployment records and one `.env.{network}.{deployment}` file. This
+promise covers the management scripts only. The deploy script still needs
+one new file for each deployment, and issue #42 tracks that gap.
+
+`script/manage/ManageBase.s.sol` holds the shared code.
+`script/manage/BitSafeEvmAssetBridge/BridgeManage.s.sol` binds that base to
+`BitSafeEvmAssetBridge`.
+
+### Errors from a wrong `DEPLOYMENT` or `RPC_URL`
+
+A script reverts with `DeploymentNotSet` when `DEPLOYMENT` is empty. Set
+`DEPLOYMENT`, or load an environment file that sets it.
+
+A script reverts with `ContractMismatch(recordContractName,
+expectedContractName)` when the two names disagree. The `DEPLOYMENT` value
+then names a deployment of another contract. The operator may also have run
+the script from the wrong folder. Check both before you retry.
+
+A script reverts with a `vm.readFile` error when no implementation record
+exists for the current chain. The message names the missing file, such as
+`deployments/NOSUCH.implementation.31337.json`. This happens when `RPC_URL`
+points at a chain that `DEPLOYMENT` never deployed to. Check `RPC_URL`, and
+check `DEPLOYMENT`.
 
 Every script reads the deployment record in `deployments/`. The record names
 the proxy address for the current chain. The record also names its own chain
@@ -43,14 +76,15 @@ therefore signs the exact bytes that a direct broadcast sends.
 Direct broadcast:
 
 ```bash
-make manage SCRIPT=Pause SIG='run()' \
+make manage DEPLOYMENT=BETH SCRIPT=Pause SIG='run()' \
   RPC_URL=https://... SIGNER="--account sentry"
 ```
 
 Safe:
 
 ```bash
-SAFE=0xYourSafe make manage SCRIPT=Pause SIG='run()' RPC_URL=https://...
+SAFE=0xYourSafe make manage DEPLOYMENT=BETH SCRIPT=Pause SIG='run()' \
+  RPC_URL=https://...
 ```
 
 `make manage` refuses a direct broadcast without `SIGNER`. It stops with a
@@ -61,21 +95,25 @@ private key on the command line enters your shell history.
 
 ### Set the variables once
 
-`make` reads every variable from the environment. Export the three variables
+`make` reads every variable from the environment. Export the four variables
 once. Each command below then stays short.
 
 ```bash
+export DEPLOYMENT=BETH
 export RPC_URL=https://...
 export SIGNER="--account bridgeAdmin"    # a direct broadcast needs this
 export SAFE=0xYourSafe                   # Safe mode needs this
 ```
 
-`.env.sepolia` carries `SAFE` for the Sepolia deployment. Load the file for
-one shell:
+Load the environment file once for your shell instead. It sets `DEPLOYMENT`,
+and it sets `SAFE`. Every command below then needs neither:
 
 ```bash
-set -a; source .env.sepolia; set +a
+set -a; source .env.sepolia.BETH; set +a
 ```
+
+Pass `DEPLOYMENT=BETH` on a `make` line instead, when you do not load the
+file. The management targets set no default, and they stop without it.
 
 That file carries no `RPC_URL`. A keyed endpoint URL is a secret. Pass
 `RPC_URL` on the command line instead. You can also export it yourself.
@@ -95,14 +133,16 @@ make manage SCRIPT=<Script> SIG='<sig>' ARGS='<arguments>' \
   RPC_URL=https://... SIGNER="--account <name>"
 ```
 
-`SCRIPT` names the file `script/manage/BETH/<Script>.s.sol`. `SIG` names the
-`run` signature of that file. `ARGS` holds the arguments. Several arguments
-need one pair of quotes. `DEPLOYMENT` defaults to `BETH`. Override it when a
-second deployment exists.
+`SCRIPT` names the file `script/manage/BitSafeEvmAssetBridge/<Script>.s.sol`.
+`MANAGE_CONTRACT` names that folder, and it defaults to
+`BitSafeEvmAssetBridge`. A folder for another contract needs that variable.
+`SIG` names the `run` signature of that file. `ARGS` holds the arguments.
+Several arguments need one pair of quotes.
 
-The table below leaves out `RPC_URL`, `SIGNER` and `SAFE`. Export those three
-first. Read the previous section for that step. The `Role` column names the
-sender that the contract accepts. In Safe mode that sender is the Safe itself.
+The table below leaves out `RPC_URL`, `SIGNER`, `SAFE` and `DEPLOYMENT`.
+Export those four first, or load the environment file. Read the previous
+section for that step. The `Role` column names the sender that the contract
+accepts. In Safe mode that sender is the Safe itself.
 
 | Script | Role | Command |
 | --- | --- | --- |
@@ -283,7 +323,8 @@ The script prints the envelope path. For chain 11155111 the path is
 `deployments/.safe/BETH.11155111.pause.json`.
 
 **Step 2. Propose the envelope.** The proposer signs the Safe transaction
-hash. The proposer then posts it:
+hash. The proposer then posts it. The script deletes the envelope after the
+service accepts the proposal:
 
 ```bash
 make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json \
@@ -308,8 +349,8 @@ the hash. Read the target and the calldata before you sign. An envelope file
 name carries no arguments. A later run of the same action overwrites the file.
 
 Set `DRY_RUN=1` to print the request. A dry run posts nothing. A dry run also
-never reads the signing key. A dry run still reads the queue of the service.
-Both forms accept the variable:
+never reads the signing key. A dry run still reads the queue of the service. A
+dry run keeps the envelope file. Both forms accept the variable:
 
 ```bash
 DRY_RUN=1 make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json \
@@ -440,7 +481,7 @@ export SAFE_API_KEY=...
 two requests to the service. A single run therefore stays inside the anonymous
 limit.
 
-Keep the key out of every tracked file. `.env.sepolia` holds no secret.
+Keep the key out of every tracked file. `.env.sepolia.BETH` holds no secret.
 
 ## 10. Status of this tooling
 
