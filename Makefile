@@ -104,11 +104,12 @@ endif
 
 # ---- Management ------------------------------------------------------------
 #
-# The management scripts live in script/manage/<DEPLOYMENT>/. Each file is one
-# admin action. script/manage/README.md holds the full list. It gives one make
-# line for each action.
+# The management scripts live in script/manage/<MANAGE_CONTRACT>/. A folder
+# names a contract, and DEPLOYMENT names one instance of it.
+# script/manage/README.md holds the full list. It gives one make line for
+# each action.
 #
-# make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3 \
+# make manage DEPLOYMENT=BETH SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3 \
 #   RPC_URL=https://... SIGNER="--account bridgeAdmin"
 #   Runs one admin action. SCRIPT names the file and the contract. SIG names
 #   the `run` signature of that contract. ARGS holds the arguments.
@@ -117,7 +118,8 @@ endif
 # then adds --broadcast and SIGNER. A SAFE address selects Safe mode. The
 # target then sends nothing, and the script writes an envelope instead:
 #
-#   SAFE=0xYourSafe make manage SCRIPT=Pause SIG='run()' RPC_URL=https://...
+#   SAFE=0xYourSafe make manage DEPLOYMENT=BETH SCRIPT=Pause SIG='run()' \
+#     RPC_URL=https://...
 #
 # Several arguments need one pair of quotes. The shell splits them again:
 #
@@ -125,7 +127,7 @@ endif
 #
 # Status is read only. It therefore needs no SIGNER in either mode.
 #
-# make manage-status RPC_URL=https://...
+# make manage-status DEPLOYMENT=BETH RPC_URL=https://...
 #   Prints the live configuration of the recorded bridge. It sends nothing.
 #
 # make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json \
@@ -134,10 +136,10 @@ endif
 #   mode writes the envelope first. SIGNER defaults to --account proposer.
 #   NONCE is optional. It pins the Safe nonce for a batch of proposals.
 
-# BETH is the only deployment, so the management targets default to it. The
-# deploy, record and verify targets keep their own guard. Make reads this
-# assignment after those three targets.
-DEPLOYMENT ?= BETH
+# The management scripts live under the contract they drive. MANAGE_CONTRACT
+# names that folder. DEPLOYMENT names one instance of the contract, and it
+# has no default: a default acts against the wrong bridge with no warning.
+MANAGE_CONTRACT ?= BitSafeEvmAssetBridge
 
 # These scripts send no transaction. They therefore need no signer.
 MANAGE_READ_ONLY := Status
@@ -157,8 +159,11 @@ endif
 .PHONY: manage manage-status propose
 
 manage:
+ifndef DEPLOYMENT
+	$(error DEPLOYMENT is not set. Example: make manage DEPLOYMENT=BETH SCRIPT=Pause SIG='run()' RPC_URL=...)
+endif
 ifndef SCRIPT
-	$(error SCRIPT is not set. Example: make manage SCRIPT=Pause SIG='run()' RPC_URL=...)
+	$(error SCRIPT is not set. Example: make manage DEPLOYMENT=BETH SCRIPT=Pause SIG='run()' RPC_URL=...)
 endif
 ifndef SIG
 	$(error SIG is not set. Example: make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3)
@@ -171,16 +176,19 @@ ifndef SIGNER
 	$(error SIGNER is not set. Set SAFE for Safe mode. Example: SIGNER="--account bridgeAdmin")
 endif
 endif
-	PATH="$(FOUNDRY_BIN):$$PATH" forge script \
-	  script/manage/$(DEPLOYMENT)/$(SCRIPT).s.sol:$(SCRIPT) \
+	DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	  script/manage/$(MANAGE_CONTRACT)/$(SCRIPT).s.sol:$(SCRIPT) \
 	  --sig '$(SIG)' $(ARGS) --rpc-url "$(RPC_URL)" $(MANAGE_FLAGS)
 
 manage-status:
-ifndef RPC_URL
-	$(error RPC_URL is not set. Example: make manage-status RPC_URL=...)
+ifndef DEPLOYMENT
+	$(error DEPLOYMENT is not set. Example: make manage-status DEPLOYMENT=BETH RPC_URL=...)
 endif
-	PATH="$(FOUNDRY_BIN):$$PATH" forge script \
-	  script/manage/$(DEPLOYMENT)/Status.s.sol:Status \
+ifndef RPC_URL
+	$(error RPC_URL is not set. Example: make manage-status DEPLOYMENT=BETH RPC_URL=...)
+endif
+	DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	  script/manage/$(MANAGE_CONTRACT)/Status.s.sol:Status \
 	  --sig 'run()' --rpc-url "$(RPC_URL)"
 
 propose: SIGNER ?= --account proposer
