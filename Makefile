@@ -105,32 +105,91 @@ endif
 # ---- Management ------------------------------------------------------------
 #
 # The management scripts live in script/manage/<DEPLOYMENT>/. Each file is one
-# admin action. script/manage/README.md holds the full list and the raw
-# `forge script` commands.
+# admin action. script/manage/README.md holds the full list. It gives one make
+# line for each action.
 #
-# make manage-status DEPLOYMENT=BETH RPC_URL=https://...
+# make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3 \
+#   RPC_URL=https://... SIGNER="--account bridgeAdmin"
+#   Runs one admin action. SCRIPT names the file and the contract. SIG names
+#   the `run` signature of that contract. ARGS holds the arguments.
+#
+# SAFE picks the mode. An empty SAFE selects a direct broadcast. The target
+# then adds --broadcast and SIGNER. A SAFE address selects Safe mode. The
+# target then sends nothing, and the script writes an envelope instead:
+#
+#   SAFE=0xYourSafe make manage SCRIPT=Pause SIG='run()' RPC_URL=https://...
+#
+# Several arguments need one pair of quotes. The shell splits them again:
+#
+#   ARGS='10000000000000000000 3600'
+#
+# Status is read only. It therefore needs no SIGNER in either mode.
+#
+# make manage-status RPC_URL=https://...
 #   Prints the live configuration of the recorded bridge. It sends nothing.
 #
 # make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json \
-#   RPC_URL=https://... SIGNER="--account proposer"
+#   RPC_URL=https://...
 #   Proposes one written envelope to its Safe. A management script in Safe
-#   mode writes the envelope first.
+#   mode writes the envelope first. SIGNER defaults to --account proposer.
+#   NONCE is optional. It pins the Safe nonce for a batch of proposals.
 
-.PHONY: manage-status propose
+# BETH is the only deployment, so the management targets default to it. The
+# deploy, record and verify targets keep their own guard. Make reads this
+# assignment after those three targets.
+DEPLOYMENT ?= BETH
 
-manage-status:
-ifndef DEPLOYMENT
-	$(error DEPLOYMENT is not set. Example: make manage-status DEPLOYMENT=BETH RPC_URL=...)
+# These scripts send no transaction. They therefore need no signer.
+MANAGE_READ_ONLY := Status
+
+# MANAGE_FLAGS carries the mode. A Safe-mode run and a read-only run send
+# nothing, so both leave the flags empty. A direct broadcast adds the two
+# broadcast flags, and it demands a signer.
+ifneq ($(strip $(SAFE)),)
+MANAGE_FLAGS :=
+else ifneq ($(filter $(MANAGE_READ_ONLY),$(SCRIPT)),)
+MANAGE_FLAGS :=
+else
+MANAGE_FLAGS := --broadcast $(SIGNER)
+MANAGE_NEEDS_SIGNER := yes
+endif
+
+.PHONY: manage manage-status propose
+
+manage:
+ifndef SCRIPT
+	$(error SCRIPT is not set. Example: make manage SCRIPT=Pause SIG='run()' RPC_URL=...)
+endif
+ifndef SIG
+	$(error SIG is not set. Example: make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3)
 endif
 ifndef RPC_URL
-	$(error RPC_URL is not set. Example: make manage-status DEPLOYMENT=BETH RPC_URL=...)
+	$(error RPC_URL is not set. Example: make manage SCRIPT=Pause SIG='run()' RPC_URL=...)
+endif
+ifdef MANAGE_NEEDS_SIGNER
+ifndef SIGNER
+	$(error SIGNER is not set. Set SAFE for Safe mode. Example: SIGNER="--account bridgeAdmin")
+endif
+endif
+	PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	  script/manage/$(DEPLOYMENT)/$(SCRIPT).s.sol:$(SCRIPT) \
+	  --sig '$(SIG)' $(ARGS) --rpc-url "$(RPC_URL)" $(MANAGE_FLAGS)
+
+manage-status:
+ifndef RPC_URL
+	$(error RPC_URL is not set. Example: make manage-status RPC_URL=...)
 endif
 	PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  script/manage/$(DEPLOYMENT)/Status.s.sol:Status \
 	  --sig 'run()' --rpc-url "$(RPC_URL)"
 
+propose: SIGNER ?= --account proposer
 propose:
 ifndef ENVELOPE
 	$(error ENVELOPE is not set. Example: make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json)
 endif
-	PATH="$(FOUNDRY_BIN):$$PATH" ./script/manage/safe/propose.sh "$(ENVELOPE)"
+ifndef RPC_URL
+	$(error RPC_URL is not set. Example: make propose ENVELOPE=... RPC_URL=...)
+endif
+	RPC_URL="$(RPC_URL)" SIGNER="$(SIGNER)" NONCE="$(NONCE)" \
+	  PATH="$(FOUNDRY_BIN):$$PATH" ./script/manage/safe/propose.sh "$(ENVELOPE)"

@@ -16,15 +16,20 @@ Every script reads the deployment record in `deployments/`. The record names
 the proxy address for the current chain. The record also names its own chain
 id. The script stops when the two chain ids disagree.
 
+One `make` target runs every script. The target is `make manage`. It carries
+the Foundry path itself. No `make` command needs a `PATH` export. A direct
+call to `propose.sh` still needs one.
+
 ## 2. The two modes
 
 Every action script runs in one of two modes. The `SAFE` environment variable
-picks the mode.
+picks the mode. `make manage` reads `SAFE`. It then builds the correct
+command.
 
 | Mode | How to select it | What the script does |
 | --- | --- | --- |
-| Direct broadcast | Leave `SAFE` unset. Add `--broadcast`. | It sends the transaction from your wallet. |
-| Safe | Set `SAFE=0xYourSafe`. Omit `--broadcast`. | It writes a transaction envelope to `deployments/.safe/`. |
+| Direct broadcast | Leave `SAFE` empty. Set `SIGNER`. | It sends the transaction from your wallet. |
+| Safe | Set `SAFE=0xYourSafe`. | It writes a transaction envelope to `deployments/.safe/`. |
 
 A Safe-mode run sends nothing. The script first simulates the call from the
 Safe address. The simulation proves that the Safe holds the role. It also
@@ -38,57 +43,97 @@ therefore signs the exact bytes that a direct broadcast sends.
 Direct broadcast:
 
 ```bash
-forge script script/manage/BETH/Pause.s.sol --sig 'run()' \
-  --rpc-url $RPC_URL --broadcast --account sentry
+make manage SCRIPT=Pause SIG='run()' \
+  RPC_URL=https://... SIGNER="--account sentry"
 ```
 
 Safe:
 
 ```bash
-SAFE=0xYourSafe forge script script/manage/BETH/Pause.s.sol --sig 'run()' \
-  --rpc-url $RPC_URL
+SAFE=0xYourSafe make manage SCRIPT=Pause SIG='run()' RPC_URL=https://...
 ```
+
+`make manage` refuses a direct broadcast without `SIGNER`. It stops with a
+guard error. Safe mode needs no `SIGNER`.
 
 Use a keystore account or a hardware wallet for a direct broadcast. A raw
 private key on the command line enters your shell history.
+
+### Set the variables once
+
+`make` reads every variable from the environment. Export the three variables
+once. Each command below then stays short.
+
+```bash
+export RPC_URL=https://...
+export SIGNER="--account bridgeAdmin"    # a direct broadcast needs this
+export SAFE=0xYourSafe                   # Safe mode needs this
+```
+
+`.env.sepolia` carries `SAFE` for the Sepolia deployment. Load the file for
+one shell:
+
+```bash
+set -a; source .env.sepolia; set +a
+```
+
+That file carries no `RPC_URL`. A keyed endpoint URL is a secret. Pass
+`RPC_URL` on the command line instead. You can also export it yourself.
+
+Unset `SAFE` before a direct broadcast:
+
+```bash
+unset SAFE
+```
 
 ## 3. The action table
 
 Every command follows one template:
 
 ```bash
-forge script script/manage/BETH/<Script>.s.sol --sig '<sig>' <arguments> \
-  --rpc-url $RPC_URL <mode flags>
+make manage SCRIPT=<Script> SIG='<sig>' ARGS='<arguments>' \
+  RPC_URL=https://... SIGNER="--account <name>"
 ```
 
-Take `<mode flags>` from section 2. The `Role` column names the sender that
-the contract accepts. In Safe mode that sender is the Safe itself.
+`SCRIPT` names the file `script/manage/BETH/<Script>.s.sol`. `SIG` names the
+`run` signature of that file. `ARGS` holds the arguments. Several arguments
+need one pair of quotes. `DEPLOYMENT` defaults to `BETH`. Override it when a
+second deployment exists.
 
-| Script | Role | `--sig` | Example arguments |
-| --- | --- | --- | --- |
-| `Status.s.sol` | none (read only) | `run()` | none |
-| `Pause.s.sol` | `BRIDGE_ADMIN` or `SENTRY` | `run()` | none |
-| `Unpause.s.sol` | `BRIDGE_ADMIN` | `run()` | none |
-| `SetThreshold.s.sol` | `BRIDGE_ADMIN` | `run(uint256)` | `3` |
-| `SetDepositLimits.s.sol` | `BRIDGE_ADMIN` | `run(uint256,uint256)` | `100000000 900000000` |
-| `SetWithdrawLimits.s.sol` | `BRIDGE_ADMIN` | `run(uint256,uint256)` | `1 700000000` |
-| `SetWithdrawRateLimit.s.sol` | `BRIDGE_ADMIN` | `run(uint256,uint256)` | `100000000000000000000 86400` |
-| `SetWithdrawalHorizon.s.sol` | `BRIDGE_ADMIN` | `run(uint256)` | `172800` |
-| `VoidWithdrawRequest.s.sol` | `BRIDGE_ADMIN` | `run(bytes)` | `0x0011deadbeef22` |
-| `RescueERC20.s.sol` | `BRIDGE_ADMIN` | `run(address,address,uint256)` | `0xToken 0xTo 100` |
-| `RescueETH.s.sol` | `BRIDGE_ADMIN` | `run(address,uint256)` | `0xTo 1000000000000000000` |
-| `RescueSurplus.s.sol` | `BRIDGE_ADMIN` | `run(address,uint256)` | `0xTo 1000000000000000000` |
-| `GrantRole.s.sol` | `DEFAULT_ADMIN` | `run(string,address)` | `SENTRY 0xYourSentry` |
-| `RevokeRole.s.sol` | `DEFAULT_ADMIN` | `run(string,address)` | `SENTRY 0xOldSentry` |
-| `RenounceRole.s.sol` | the role holder itself | `run(string,address)` | `SENTRY 0xYourOwnAddress` |
-| `BeginDefaultAdminTransfer.s.sol` | `DEFAULT_ADMIN` | `run(address)` | `0xNewAdmin` |
-| `AcceptDefaultAdminTransfer.s.sol` | the incoming admin | `run()` | none |
-| `CancelDefaultAdminTransfer.s.sol` | `DEFAULT_ADMIN` | `run()` | none |
-| `ChangeDefaultAdminDelay.s.sol` | `DEFAULT_ADMIN` | `run(uint256)` | `259200` |
-| `RollbackDefaultAdminDelay.s.sol` | `DEFAULT_ADMIN` | `run()` | none |
+The table below leaves out `RPC_URL`, `SIGNER` and `SAFE`. Export those three
+first. Read the previous section for that step. The `Role` column names the
+sender that the contract accepts. In Safe mode that sender is the Safe itself.
 
-Read these four notes with the table:
+| Script | Role | Command |
+| --- | --- | --- |
+| `Status` | none (read only) | `make manage SCRIPT=Status SIG='run()'` |
+| `Pause` | `BRIDGE_ADMIN` or `SENTRY` | `make manage SCRIPT=Pause SIG='run()'` |
+| `Unpause` | `BRIDGE_ADMIN` | `make manage SCRIPT=Unpause SIG='run()'` |
+| `SetThreshold` | `BRIDGE_ADMIN` | `make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3` |
+| `SetDepositLimits` | `BRIDGE_ADMIN` | `make manage SCRIPT=SetDepositLimits SIG='run(uint256,uint256)' ARGS='100000000 900000000'` |
+| `SetWithdrawLimits` | `BRIDGE_ADMIN` | `make manage SCRIPT=SetWithdrawLimits SIG='run(uint256,uint256)' ARGS='1 700000000'` |
+| `SetWithdrawRateLimit` | `BRIDGE_ADMIN` | `make manage SCRIPT=SetWithdrawRateLimit SIG='run(uint256,uint256)' ARGS='100000000000000000000 86400'` |
+| `SetWithdrawalHorizon` | `BRIDGE_ADMIN` | `make manage SCRIPT=SetWithdrawalHorizon SIG='run(uint256)' ARGS=172800` |
+| `VoidWithdrawRequest` | `BRIDGE_ADMIN` | `make manage SCRIPT=VoidWithdrawRequest SIG='run(bytes)' ARGS=0x0011deadbeef22` |
+| `RescueERC20` | `BRIDGE_ADMIN` | `make manage SCRIPT=RescueERC20 SIG='run(address,address,uint256)' ARGS='0xToken 0xTo 100'` |
+| `RescueETH` | `BRIDGE_ADMIN` | `make manage SCRIPT=RescueETH SIG='run(address,uint256)' ARGS='0xTo 1000000000000000000'` |
+| `RescueSurplus` | `BRIDGE_ADMIN` | `make manage SCRIPT=RescueSurplus SIG='run(address,uint256)' ARGS='0xTo 1000000000000000000'` |
+| `GrantRole` | `DEFAULT_ADMIN` | `make manage SCRIPT=GrantRole SIG='run(string,address)' ARGS='SENTRY 0xYourSentry'` |
+| `RevokeRole` | `DEFAULT_ADMIN` | `make manage SCRIPT=RevokeRole SIG='run(string,address)' ARGS='SENTRY 0xOldSentry'` |
+| `RenounceRole` | the role holder itself | `make manage SCRIPT=RenounceRole SIG='run(string,address)' ARGS='SENTRY 0xYourOwnAddress'` |
+| `BeginDefaultAdminTransfer` | `DEFAULT_ADMIN` | `make manage SCRIPT=BeginDefaultAdminTransfer SIG='run(address)' ARGS=0xNewAdmin` |
+| `AcceptDefaultAdminTransfer` | the incoming admin | `make manage SCRIPT=AcceptDefaultAdminTransfer SIG='run()'` |
+| `CancelDefaultAdminTransfer` | `DEFAULT_ADMIN` | `make manage SCRIPT=CancelDefaultAdminTransfer SIG='run()'` |
+| `ChangeDefaultAdminDelay` | `DEFAULT_ADMIN` | `make manage SCRIPT=ChangeDefaultAdminDelay SIG='run(uint256)' ARGS=259200` |
+| `RollbackDefaultAdminDelay` | `DEFAULT_ADMIN` | `make manage SCRIPT=RollbackDefaultAdminDelay SIG='run()'` |
 
+Copy one line. Change the `ARGS` value. Send the command.
+
+Read these five notes with the table:
+
+- `Status` sends nothing. It therefore needs no `SIGNER` and no `SAFE`.
+  `make manage-status RPC_URL=https://...` is the shorter form of the same
+  command.
 - `GrantRole` and `RevokeRole` take a role name. They do not take a role hash.
   The three legal names are `BRIDGE_ADMIN`, `ATTESTOR` and `SENTRY`. The
   scripts reject `DEFAULT_ADMIN`. Use `BeginDefaultAdminTransfer` for that
@@ -103,14 +148,14 @@ Read these four notes with the table:
 This example raises the signature threshold to 3:
 
 ```bash
-forge script script/manage/BETH/SetThreshold.s.sol --sig 'run(uint256)' 3 \
-  --rpc-url $RPC_URL --broadcast --account bridgeAdmin
+make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3 \
+  RPC_URL=https://... SIGNER="--account bridgeAdmin"
 ```
 
-Read the live configuration first. The `make` target needs no wallet:
+Read the live configuration first. This target needs no wallet:
 
 ```bash
-make manage-status DEPLOYMENT=BETH RPC_URL=https://...
+make manage-status RPC_URL=https://...
 ```
 
 ## 4. Rules for the attestor set and the limits
@@ -127,11 +172,11 @@ ratio by governance policy.
 
 ```bash
 # 3 attestors, threshold 2. Add a fourth attestor. Then raise the threshold.
-forge script script/manage/BETH/GrantRole.s.sol \
-  --sig 'run(string,address)' ATTESTOR 0xNewAttestor \
-  --rpc-url $RPC_URL --broadcast --account defaultAdmin
-forge script script/manage/BETH/SetThreshold.s.sol --sig 'run(uint256)' 3 \
-  --rpc-url $RPC_URL --broadcast --account bridgeAdmin
+make manage SCRIPT=GrantRole SIG='run(string,address)' \
+  ARGS='ATTESTOR 0xNewAttestor' \
+  RPC_URL=https://... SIGNER="--account defaultAdmin"
+make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3 \
+  RPC_URL=https://... SIGNER="--account bridgeAdmin"
 ```
 
 ### Shrink the attestor set: lower, then revoke
@@ -151,11 +196,11 @@ fall below 2.
 
 ```bash
 # 4 attestors, threshold 3. Remove one attestor.
-forge script script/manage/BETH/SetThreshold.s.sol --sig 'run(uint256)' 2 \
-  --rpc-url $RPC_URL --broadcast --account bridgeAdmin
-forge script script/manage/BETH/RevokeRole.s.sol \
-  --sig 'run(string,address)' ATTESTOR 0xOldAttestor \
-  --rpc-url $RPC_URL --broadcast --account defaultAdmin
+make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=2 \
+  RPC_URL=https://... SIGNER="--account bridgeAdmin"
+make manage SCRIPT=RevokeRole SIG='run(string,address)' \
+  ARGS='ATTESTOR 0xOldAttestor' \
+  RPC_URL=https://... SIGNER="--account defaultAdmin"
 ```
 
 ### The threshold bounds
@@ -190,9 +235,8 @@ mode. Expect a short delay in withdrawals after this change. Start with a long
 horizon, such as 48 hours.
 
 ```bash
-forge script script/manage/BETH/SetWithdrawalHorizon.s.sol \
-  --sig 'run(uint256)' 172800 \
-  --rpc-url $RPC_URL --broadcast --account bridgeAdmin
+make manage SCRIPT=SetWithdrawalHorizon SIG='run(uint256)' ARGS=172800 \
+  RPC_URL=https://... SIGNER="--account bridgeAdmin"
 ```
 
 ## 6. The default admin transfer
@@ -203,9 +247,9 @@ the delay.
 
 | Step | Script | Sender |
 | --- | --- | --- |
-| 1 | `BeginDefaultAdminTransfer.s.sol` | the current admin |
-| 2 | `AcceptDefaultAdminTransfer.s.sol` | the **incoming** admin |
-| any | `CancelDefaultAdminTransfer.s.sol` | the current admin |
+| 1 | `BeginDefaultAdminTransfer` | the current admin |
+| 2 | `AcceptDefaultAdminTransfer` | the **incoming** admin |
+| any | `CancelDefaultAdminTransfer` | the current admin |
 
 The incoming admin sends step 2. The current admin cannot send it. Step 2
 reverts before the scheduled delay passes. Read `pendingAdminAt` from
@@ -214,14 +258,13 @@ reverts before the scheduled delay passes. Read `pendingAdminAt` from
 An incoming Safe proposes step 2. Set `SAFE` to that incoming Safe:
 
 ```bash
-SAFE=0xYourIncomingSafe forge script \
-  script/manage/BETH/AcceptDefaultAdminTransfer.s.sol --sig 'run()' \
-  --rpc-url $RPC_URL
+SAFE=0xYourIncomingSafe make manage SCRIPT=AcceptDefaultAdminTransfer \
+  SIG='run()' RPC_URL=https://...
 ```
 
-The two delay scripts are `ChangeDefaultAdminDelay.s.sol` and
-`RollbackDefaultAdminDelay.s.sol`. The current admin sends both. A new delay
-takes effect only after its own wait period passes. An increase waits up to
+The two delay scripts are `ChangeDefaultAdminDelay` and
+`RollbackDefaultAdminDelay`. The current admin sends both. A new delay takes
+effect only after its own wait period passes. An increase waits up to
 `defaultAdminDelayIncreaseWait()`. A decrease waits the difference between the
 old delay and the new delay.
 
@@ -230,12 +273,10 @@ old delay and the new delay.
 The flow has three parts. You write the envelope. You propose it. The owners
 then confirm it.
 
-**Step 1. Write the envelope.** Set `SAFE` to your Safe address. Omit
-`--broadcast`:
+**Step 1. Write the envelope.** Set `SAFE` to your Safe address:
 
 ```bash
-SAFE=0xYourSafe forge script script/manage/BETH/Pause.s.sol --sig 'run()' \
-  --rpc-url $RPC_URL
+SAFE=0xYourSafe make manage SCRIPT=Pause SIG='run()' RPC_URL=https://...
 ```
 
 The script prints the envelope path. For chain 11155111 the path is
@@ -246,14 +287,19 @@ hash. The proposer then posts it:
 
 ```bash
 make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json \
-  RPC_URL=https://... SIGNER="--account proposer"
+  RPC_URL=https://...
 ```
 
+`SIGNER` defaults to `--account proposer`. Pass `SIGNER` on the command line to
+override that default. An exported `SIGNER` overrides it too.
+
 The `make` target calls `script/manage/safe/propose.sh`. Call the script
-directly if you prefer:
+directly if you prefer. The direct form needs every variable. It also needs
+the Foundry binaries on your `PATH`. The `make` target adds that path itself:
 
 ```bash
-RPC_URL=https://... SIGNER="--account proposer" \
+PATH="$HOME/.foundry/bin:$PATH" RPC_URL=https://... \
+  SIGNER="--account proposer" \
   ./script/manage/safe/propose.sh deployments/.safe/BETH.11155111.pause.json
 ```
 
@@ -263,6 +309,15 @@ name carries no arguments. A later run of the same action overwrites the file.
 
 Set `DRY_RUN=1` to print the request. A dry run posts nothing. A dry run also
 never reads the signing key. A dry run still reads the queue of the service.
+Both forms accept the variable:
+
+```bash
+DRY_RUN=1 make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json \
+  RPC_URL=https://...
+
+DRY_RUN=1 PATH="$HOME/.foundry/bin:$PATH" RPC_URL=https://... \
+  ./script/manage/safe/propose.sh deployments/.safe/BETH.11155111.pause.json
+```
 
 Give `SIGNER` a keystore account or a hardware wallet. `--private-key` puts the
 key into the argument list of `cast`. A local `ps` then shows that key to every
@@ -281,7 +336,7 @@ must be a registered delegate of the Safe. Section 8 covers that registration.
 real terminal. A non-interactive shell fails with
 `Error: Device not configured (os error 6)`.
 
-An operator therefore runs `propose.sh` in a real terminal. Automation passes
+An operator therefore runs `make propose` in a real terminal. Automation passes
 the `--password-file` option of `cast` instead:
 
 ```bash
@@ -297,11 +352,12 @@ therefore take two different nonces. The script prints the chosen nonce and its
 source in one line.
 
 Set `NONCE` to pin the value. An operator needs this variable for a batch of
-proposals. The value must be a non-negative integer:
+proposals. The value must be a non-negative integer. `make propose` forwards
+the value:
 
 ```bash
-NONCE=12 RPC_URL=https://... SIGNER="--account proposer" \
-  ./script/manage/safe/propose.sh deployments/.safe/BETH.11155111.pause.json
+make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json \
+  RPC_URL=https://... NONCE=12
 ```
 
 The script prints a loud warning when the service gives no queue answer. The
@@ -383,6 +439,8 @@ export SAFE_API_KEY=...
 `ps` therefore cannot show it. The variable stays optional. One proposal sends
 two requests to the service. A single run therefore stays inside the anonymous
 limit.
+
+Keep the key out of every tracked file. `.env.sepolia` holds no secret.
 
 ## 10. Status of this tooling
 
