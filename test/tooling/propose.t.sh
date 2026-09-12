@@ -38,8 +38,13 @@ queue_reply empty
 # This is a valid envelope. Each test copies the envelope. Each test then
 # edits one field. The "safe" and "to" addresses are lowercase on purpose.
 # The script must run its own checksum call to pass the checks below.
+#
+# propose.sh deletes the envelope after a successful propose. The fixture is
+# therefore a template, and each test block copies it before the run.
 ENVELOPE="$WORK/envelope.json"
-cat >"$ENVELOPE" <<'JSON'
+TEMPLATE="$WORK/envelope.template.json"
+fresh_envelope() { cp "$TEMPLATE" "$ENVELOPE"; }
+cat >"$TEMPLATE" <<'JSON'
 {
   "deployment": "BETH",
   "chainId": 11155111,
@@ -53,6 +58,7 @@ cat >"$ENVELOPE" <<'JSON'
 JSON
 
 echo "== a good envelope reaches the service =="
+fresh_envelope
 printf '\n201' >"$WORK/post.txt"
 # A lowercase FAKE_SIGNER_ADDRESS forces the sender checksum call to run.
 # The lowercase "safe" and "to" fields force the same call for SAFE and TO.
@@ -60,6 +66,8 @@ OUT=$(FAKE_SIGNER_ADDRESS="0x7038f8a64ce8f879705a48e962b55d56aecd60d8" \
   ./script/manage/safe/propose.sh "$ENVELOPE" 2>&1)
 check "exit status" "$?" "0"
 contains "reports the hash" "$OUT" "0x1111111111111111111111111111111111111111111111111111111111111111"
+contains "reports the delete" "$OUT" "propose.sh: removed"
+check "removes the envelope" "$([ -e "$ENVELOPE" ] && echo yes || echo no)" "no"
 REQ=$(cat "$FAKE_CURL_LOG")
 contains "posts to the v2 endpoint" "$REQ" "/api/v2/safes/"
 contains "uses the sepolia short name" "$REQ" "/tx-service/sep/"
@@ -74,12 +82,14 @@ contains "queries the queue first" "$REQ" "ordering=-nonce"
 contains "queries the v1 endpoint" "$REQ" "/api/v1/safes/"
 
 echo "== the run prints the target and the calldata before it signs =="
+fresh_envelope
 contains "prints the target" "$OUT" "propose.sh: to 0xc2DBb9AF52DA4BA877c13Fdf55d128dA76AEE950"
 contains "prints the calldata" "$OUT" \
   "propose.sh: data 0x960bfe0400000000000000000000000000000000000000000000000000000000000003"
 contains "prints the nonce and its source" "$OUT" "nonce 7 from the on-chain nonce"
 
 echo "== an empty queue keeps the on-chain nonce =="
+fresh_envelope
 queue_reply empty
 printf '\n201' >"$WORK/post.txt"
 : >"$FAKE_CURL_LOG"
@@ -92,6 +102,7 @@ contains "hashes the same nonce" "$(cat "$FAKE_CAST_LOG")" "getTransactionHash"
 contains "hashes with nonce 5" "$(grep getTransactionHash "$FAKE_CAST_LOG")" " 5 --rpc-url"
 
 echo "== a queued nonce above the chain wins =="
+fresh_envelope
 queue_reply 11
 : >"$FAKE_CURL_LOG"
 : >"$FAKE_CAST_LOG"
@@ -102,6 +113,7 @@ contains "names the queue" "$OUT" "nonce 12 from the highest queued nonce at the
 contains "hashes with nonce 12" "$(grep getTransactionHash "$FAKE_CAST_LOG")" " 12 --rpc-url"
 
 echo "== an executed entry below the chain loses =="
+fresh_envelope
 queue_reply 3
 : >"$FAKE_CURL_LOG"
 OUT=$(FAKE_SAFE_NONCE=9 ./script/manage/safe/propose.sh "$ENVELOPE" 2>&1)
@@ -110,6 +122,7 @@ contains "posts the on-chain nonce" "$(cat "$FAKE_CURL_LOG")" '"nonce": "9"'
 contains "names the on-chain nonce" "$OUT" "nonce 9 from the on-chain nonce"
 
 echo "== a failed queue query warns and falls back =="
+fresh_envelope
 printf 'upstream error\n503' >"$WORK/queue.txt"
 : >"$FAKE_CURL_LOG"
 OUT=$(FAKE_SAFE_NONCE=4 ./script/manage/safe/propose.sh "$ENVELOPE" 2>&1)
@@ -120,6 +133,7 @@ contains "posts the on-chain nonce" "$(cat "$FAKE_CURL_LOG")" '"nonce": "4"'
 contains "names the failure" "$OUT" "nonce 4 from the on-chain nonce, after a failed queue request"
 
 echo "== a queue body that does not parse warns and falls back =="
+fresh_envelope
 printf 'not json at all\n200' >"$WORK/queue.txt"
 : >"$FAKE_CURL_LOG"
 OUT=$(FAKE_SAFE_NONCE=4 ./script/manage/safe/propose.sh "$ENVELOPE" 2>&1)
@@ -128,6 +142,7 @@ contains "warns loudly" "$OUT" "WARNING. The Safe service gave no queue answer."
 contains "posts the on-chain nonce" "$(cat "$FAKE_CURL_LOG")" '"nonce": "4"'
 
 echo "== the NONCE override wins over both sources =="
+fresh_envelope
 queue_reply 11
 : >"$FAKE_CURL_LOG"
 : >"$FAKE_CAST_LOG"
@@ -142,6 +157,7 @@ case "$(cat "$FAKE_CURL_LOG")" in
 esac
 
 echo "== a NONCE with leading zeros loses them =="
+fresh_envelope
 : >"$FAKE_CURL_LOG"
 : >"$FAKE_CAST_LOG"
 OUT=$(NONCE=007 FAKE_SAFE_NONCE=7 ./script/manage/safe/propose.sh "$ENVELOPE" 2>&1)
@@ -151,12 +167,14 @@ contains "names the override" "$OUT" "nonce 7 from the NONCE override"
 contains "hashes with nonce 7" "$(grep getTransactionHash "$FAKE_CAST_LOG")" " 7 --rpc-url"
 
 echo "== a NONCE of 000 becomes 0 =="
+fresh_envelope
 : >"$FAKE_CURL_LOG"
 OUT=$(NONCE=000 FAKE_SAFE_NONCE=7 ./script/manage/safe/propose.sh "$ENVELOPE" 2>&1)
 check "exit status" "$?" "0"
 contains "posts zero" "$(cat "$FAKE_CURL_LOG")" '"nonce": "0"'
 
 echo "== the API key reaches both requests =="
+fresh_envelope
 queue_reply empty
 : >"$FAKE_CURL_LOG"
 SAFE_API_KEY=s3cret-key ./script/manage/safe/propose.sh "$ENVELOPE" >"$WORK/out.txt" 2>&1
@@ -169,6 +187,7 @@ contains "the proposal carries the bearer token" "$POST_REQ" \
   'header = "Authorization: Bearer s3cret-key"'
 
 echo "== a bad NONCE stops the run =="
+fresh_envelope
 : >"$FAKE_CURL_LOG"
 NONCE=-1 ./script/manage/safe/propose.sh "$ENVELOPE" >"$WORK/out.txt" 2>&1
 check "exit status" "$?" "2"
@@ -176,6 +195,7 @@ contains "names the rule" "$(cat "$WORK/out.txt")" "NONCE must be a non-negative
 check "sends no request" "$(wc -c <"$FAKE_CURL_LOG" | tr -d ' ')" "0"
 
 echo "== an action name with a quote stays valid JSON =="
+fresh_envelope
 queue_reply empty
 printf '\n201' >"$WORK/post.txt"
 : >"$FAKE_CURL_LOG"
@@ -187,12 +207,15 @@ check "the body parses" "$(printf '%s' "$BODY_JSON" | jq -e -r '.origin | fromjs
   'set"Threshold'
 
 echo "== a non-201 answer fails loudly =="
+fresh_envelope
 printf 'Sender=0x0 is not an owner or delegate\n422' >"$WORK/post.txt"
 OUT=$(./script/manage/safe/propose.sh "$ENVELOPE" 2>&1)
 check "exit status" "$?" "1"
 contains "prints the service answer" "$OUT" "not an owner or delegate"
+check "keeps the envelope after a failure" "$([ -e "$ENVELOPE" ] && echo yes || echo no)" "yes"
 
 echo "== a chain id mismatch stops before any request =="
+fresh_envelope
 printf '\n201' >"$WORK/post.txt"
 : >"$FAKE_CURL_LOG"
 FAKE_CHAIN_ID=1 ./script/manage/safe/propose.sh "$ENVELOPE" >"$WORK/out.txt" 2>&1
@@ -202,18 +225,21 @@ contains "names the RPC chain" "$(cat "$WORK/out.txt")" "the RPC serves chain 1"
 check "sends no request" "$(wc -c <"$FAKE_CURL_LOG" | tr -d ' ')" "0"
 
 echo "== an unmapped chain id stops the run =="
+fresh_envelope
 jq '.chainId = 31337' "$ENVELOPE" >"$WORK/local.json"
 FAKE_CHAIN_ID=31337 ./script/manage/safe/propose.sh "$WORK/local.json" >"$WORK/out.txt" 2>&1
 check "exit status" "$?" "2"
 contains "says which chain" "$(cat "$WORK/out.txt")" "31337"
 
 echo "== a missing field stops the run =="
+fresh_envelope
 jq 'del(.to)' "$ENVELOPE" >"$WORK/noto.json"
 ./script/manage/safe/propose.sh "$WORK/noto.json" >"$WORK/out.txt" 2>&1
 check "exit status" "$?" "2"
 contains "names the field" "$(cat "$WORK/out.txt")" "no 'to' field"
 
 echo "== the dry run posts nothing =="
+fresh_envelope
 queue_reply 11
 : >"$FAKE_CURL_LOG"
 OUT=$(DRY_RUN=1 FAKE_SAFE_NONCE=7 ./script/manage/safe/propose.sh "$ENVELOPE" 2>&1)
@@ -225,6 +251,7 @@ case "$(cat "$FAKE_CURL_LOG")" in
   *'request = "POST"'*) echo "  FAIL posts nothing"; FAILURES=$((FAILURES + 1)) ;;
   *) echo "  ok   posts nothing" ;;
 esac
+check "keeps the envelope on a dry run" "$([ -e "$ENVELOPE" ] && echo yes || echo no)" "yes"
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
