@@ -70,6 +70,18 @@ contract RolesTest is BridgeTestBase {
         assertEq(bridge.threshold(), THRESHOLD);
     }
 
+    function test_grantAttestor_withoutRaise_passes() public {
+        // The set grows by two grants and nobody raises the threshold.
+        // The threshold therefore ends strictly below half, at 2 of 5.
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.startPrank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor4"));
+        bridge.grantRole(role, makeAddr("attestor5"));
+        vm.stopPrank();
+        assertEq(bridge.getAttestors().length, 5);
+        assertEq(bridge.threshold(), THRESHOLD);
+    }
+
     function test_revokeAttestor_belowThreshold_allowed() public {
         // Emergency offboarding wins; withdrawals halt naturally.
         vm.startPrank(defaultAdmin);
