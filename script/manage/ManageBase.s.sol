@@ -22,8 +22,8 @@ abstract contract ManageBase is Script {
     /// The deployment name, such as "BETH". The operator sets DEPLOYMENT in
     /// the environment. A test overrides this function instead, because a
     /// test must not write a process-global environment variable.
-    /// @dev This function is `view`, not `pure`. A `pure` override stays
-    ///      legal, because an override may make the mutability stricter.
+    /// @dev A `pure` override stays legal here. Solidity accepts an override
+    ///      that makes the state mutability stricter.
     function deploymentName() public view virtual returns (string memory) {
         return _requireName(vm.envOr("DEPLOYMENT", string("")));
     }

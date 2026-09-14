@@ -303,8 +303,8 @@ echo "propose.sh: proposed. safeTxHash $SAFE_TX_HASH"
 echo "propose.sh: owners confirm at https://app.safe.global/transactions/queue?safe=$SHORT:$SAFE"
 
 # The envelope file name carries no arguments, so a second run of the same
-# action replaces the first file. The proposed transaction now lives in the
-# Safe queue, so the file has no further use. The delete stops a later run
-# from replacing an envelope that nobody proposed yet.
+# action replaces the first file. The proposed transaction lives in the Safe
+# queue at this point, so the file has no further use. The delete stops a
+# later run from replacing an envelope that nobody proposed yet.
 rm -f "$ENVELOPE"
 echo "propose.sh: removed $ENVELOPE"

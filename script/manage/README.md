@@ -506,9 +506,9 @@ The run proves three points. A delegate proposes a transaction. A delegate
 never confirms a transaction. The hash that the script computes before the
 signature matches the hash that the service stores.
 
-One item stays unproven. The propose path itself has no untested step now. The
-script maps each chain to a Safe short name. Only the Sepolia short name `sep`
-ran live. Treat the first run on another chain as a test.
+One item stays unproven. The script maps each chain to a Safe short name. Only
+the Sepolia short name `sep` ran live. Treat the first run on another chain as
+a test.
 
 ## 11. Open question: how many Safes govern a deployment
 
