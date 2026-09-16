@@ -39,6 +39,7 @@ The default admin can:
 
 - Grant the bridge admin, attestor, or sentry role to an account.
 - Revoke the bridge admin, attestor, or sentry role from an account.
+- Set the signature threshold to any value from two up to the attestor count.
 - Start a handover of the default admin role to a new holder.
 - Cancel a handover before the new holder accepts it.
 - Change the handover delay, which takes effect after a wait.
@@ -58,7 +59,6 @@ The bridge admin can:
 
 - Pause the bridge, which stops all deposits and withdrawals.
 - Unpause the bridge.
-- Set the signature threshold to any value from two up to the attestor count.
 - Set the minimum and maximum amount for one deposit.
 - Set the minimum and maximum amount for one withdrawal.
 - Set the withdrawal rate limit, which caps the total released in a time window.
@@ -77,7 +77,7 @@ The operator nodes hold this role.
 
 A withdrawal needs a set number of distinct attestor signatures.
 The signature threshold defines that number.
-Only the default admin adds or removes an attestor.
+Only the default admin adds or removes an attestor, and only the default admin sets the threshold.
 
 ## Sentry
 
@@ -114,12 +114,8 @@ The mainnet deployment uses this design.
 The `deployments/` folder holds one record per contract per network.
 The proxy record lists the admin addresses and the attestor addresses of that network.
 
-## Open questions
-
-### Should the signature threshold move under the default admin?
-
-Recommendation: yes.
+## Why the default admin sets the threshold
 
 The threshold and the attestor set together define how many operators must agree on a withdrawal.
-Today BitSafe alone can lower the threshold to two.
-That weakens the shared control that the default admin provides over the attestor set.
+One role therefore owns both values.
+Pull request #48 moves the threshold under the default admin.
