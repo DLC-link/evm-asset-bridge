@@ -3,6 +3,8 @@ pragma solidity 0.8.34;
 
 import {Test} from "forge-std/Test.sol";
 import {Deploy_BETH} from "../script/Deploy_BETH.s.sol";
+import {Deploy_BETH_DEVNET} from "../script/Deploy_BETH_DEVNET.s.sol";
+import {Deploy_BETH_TESTNET} from "../script/Deploy_BETH_TESTNET.s.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 
 contract DeployTest is Test {
@@ -63,6 +65,28 @@ contract DeployTest is Test {
         Deploy_BETH wideDelay = new Deploy_BETH();
         vm.expectRevert(bytes("ADMIN_DELAY out of range"));
         wideDelay.run();
+
+        // Each Sepolia instance carries its own name. Two instances with one
+        // name would write the same record files.
+        assertEq(new Deploy_BETH_DEVNET().deploymentName(), "BETH_DEVNET");
+        assertEq(new Deploy_BETH_TESTNET().deploymentName(), "BETH_TESTNET");
+
+        // The name reaches the pending file, so `make record` writes the
+        // records under it.
+        _setValidEnv();
+        new Deploy_BETH_TESTNET().run();
+        string memory testnetPath =
+            string.concat("deployments/.pending/BETH_TESTNET.", vm.toString(block.chainid), ".json");
+        assertTrue(vm.exists(testnetPath));
+        assertEq(vm.parseJsonString(vm.readFile(testnetPath), ".deploymentName"), "BETH_TESTNET");
+        vm.removeFile(testnetPath);
+
+        // A bridge with no attestor can release nothing. The deploy must stop.
+        _setValidEnv();
+        vm.setEnv("ATTESTORS", "");
+        Deploy_BETH_TESTNET noAttestors = new Deploy_BETH_TESTNET();
+        vm.expectRevert();
+        noAttestors.run();
     }
 
     function _setValidEnv() internal {

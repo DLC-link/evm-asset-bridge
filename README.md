@@ -19,6 +19,18 @@ the deployment name. A second bridged asset gets its own `Deploy_<NAME>.s.sol`.
 make deploy DEPLOYMENT=BETH RPC_URL=<url> SIGNER="--account deployer --sender 0xYourDeployer"
 ```
 
+BETH has three deployment names. Sepolia hosts two instances, and each one
+serves the attestors of one Canton network. The name keeps their records
+apart. `Deploy_BETH_DEVNET.s.sol` and `Deploy_BETH_TESTNET.s.sol` subclass
+`Deploy_BETH` and change the name only. Every name reads the same
+environment variables, and `.env.sepolia.<NAME>` holds the Sepolia values.
+
+| Name | Purpose | Network |
+| --- | --- | --- |
+| `BETH` | The production bridge | Ethereum mainnet |
+| `BETH_DEVNET` | The instance whose attestors run against Canton devnet | Sepolia |
+| `BETH_TESTNET` | The instance whose attestors run against Canton testnet | Sepolia |
+
 That runs two steps. `forge script` broadcasts the deploy. `script/record.sh`
 then writes the deployment records. The `make record` target repeats the
 second step on its own:
@@ -187,7 +199,7 @@ explorer then reaches an exact match with no local build.
 
 ```
 export ETHERSCAN_API_KEY_11155111=<key>
-make verify DEPLOYMENT=BETH CHAIN_ID=11155111
+make verify DEPLOYMENT=BETH_DEVNET CHAIN_ID=11155111
 ```
 
 The command reads every record for that deployment and chain, and it submits

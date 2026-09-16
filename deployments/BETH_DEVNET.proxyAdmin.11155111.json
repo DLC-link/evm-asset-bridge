@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "deploymentName": "BETH",
+  "deploymentName": "BETH_DEVNET",
   "role": "proxyAdmin",
   "chainId": 11155111,
   "address": "0x9B0493a269A6591095A2e0be847f50A73De83A74",
