@@ -507,11 +507,125 @@ limit.
 Keep the key out of every tracked file. `.env.sepolia.BETH_DEVNET` holds no
 secret.
 
-## 10. Status of this tooling
+## 10. Upgrade through the timelock
+
+A `TimelockController` owns the `ProxyAdmin`. The proxy owner Safe is the
+proposer, the canceller and the executor of that timelock. An upgrade
+therefore takes two Safe transactions with one public delay between them.
+The deployment record `<name>.timelock.<chainId>.json` names the timelock and
+its `minDelay`.
+
+Four scripts drive the upgrade. `DeployImplementation` extends the deploy
+base, because it creates a contract and writes a pending file. The other three
+extend `BridgeManage`, and they call the timelock. They never call the
+`ProxyAdmin` directly.
+
+| Script | Sender | Command |
+| --- | --- | --- |
+| `DeployImplementation` | any funded key | `make manage SCRIPT=DeployImplementation SIG='run()'` |
+| `ScheduleUpgrade` | the proxy owner Safe | `make manage SCRIPT=ScheduleUpgrade SIG='run(bytes)' ARGS=0x` |
+| `ExecuteUpgrade` | the proxy owner Safe | `make manage SCRIPT=ExecuteUpgrade SIG='run(bytes)' ARGS=0x` |
+| `CancelUpgrade` | the proxy owner Safe | `make manage SCRIPT=CancelUpgrade SIG='run(bytes)' ARGS=0x` |
+
+The `bytes` argument is the optional payload for `upgradeAndCall`. Pass `0x`
+for none. The three timelock scripts derive one operation id from the
+recorded next implementation and from that payload. Pass the same payload to
+all three.
+
+### The sequence
+
+Export `DEPLOYMENT` and `RPC_URL` first. Unset `SAFE` for step 1. Steps 4 and
+6 take the Safe of the proxy owner.
+
+**Step 1. Deploy the next implementation.** The proxy stays on the old
+implementation. The script writes a pending file under the role
+`nextImplementation`:
+
+```bash
+unset SAFE
+make manage SCRIPT=DeployImplementation SIG='run()' SIGNER="--account deployer"
+```
+
+**Step 2. Record it.** The record lands at
+`deployments/<name>.nextImplementation.<chainId>.json`:
+
+```bash
+make record
+```
+
+**Step 3. Verify it.** The explorer then shows the source before anybody
+schedules the upgrade:
+
+```bash
+make verify CHAIN_ID=<chainId>
+```
+
+**Step 4. Schedule the upgrade.** The Safe proposes `schedule` on the
+timelock. The script prints the operation id and the earliest execute time:
+
+```bash
+SAFE=0xProxyOwnerSafe make manage SCRIPT=ScheduleUpgrade SIG='run(bytes)' ARGS=0x
+make propose ENVELOPE=deployments/.safe/<name>.<chainId>.scheduleUpgrade.json \
+  SIGNER="--account proposer"
+```
+
+**Step 5. Wait.** The timelock rejects `execute` before `minDelay` passes. The
+Safe-mode simulation of `ExecuteUpgrade` reverts with
+`TimelockUnexpectedOperationState(id, 0x...04)` during that time. That revert
+is the signal to wait. Read the earliest execute time from step 4.
+
+**Step 6. Execute the upgrade.** The Safe proposes `execute` on the timelock.
+The timelock then calls `upgradeAndCall` on the `ProxyAdmin`:
+
+```bash
+SAFE=0xProxyOwnerSafe make manage SCRIPT=ExecuteUpgrade SIG='run(bytes)' ARGS=0x
+make propose ENVELOPE=deployments/.safe/<name>.<chainId>.executeUpgrade.json \
+  SIGNER="--account proposer"
+```
+
+**Step 7. Promote the record.** The script reads the proxy on chain. It
+refuses while the proxy still points at the old implementation. On success it
+moves the old implementation into `proxy.history`, and it rewrites the next
+implementation as the current one:
+
+```bash
+make record-upgrade CHAIN_ID=<chainId>
+```
+
+Commit the two records that the script prints.
+
+### Cancel a scheduled upgrade
+
+The Safe cancels a pending operation at any time before the execute:
+
+```bash
+SAFE=0xProxyOwnerSafe make manage SCRIPT=CancelUpgrade SIG='run(bytes)' ARGS=0x
+make propose ENVELOPE=deployments/.safe/<name>.<chainId>.cancelUpgrade.json \
+  SIGNER="--account proposer"
+```
+
+A cancel leaves the `nextImplementation` record in place. Delete the file by
+hand when the team drops that implementation. A later `DeployImplementation`
+run overwrites it.
+
+### A direct broadcast
+
+A test network can run the four scripts with a key instead of a Safe. Leave
+`SAFE` empty, and pass `SIGNER` with the key that holds the timelock roles:
+
+```bash
+make manage SCRIPT=ScheduleUpgrade SIG='run(bytes)' ARGS=0x SIGNER="--account proxyOwner"
+```
+
+## 11. Status of this tooling
 
 `script/manage/safe/propose.sh` has offline tests in
 `test/tooling/propose.t.sh`. A fake `curl` answers the service. A fake `cast`
 answers the chain. CI runs the suite on every push.
+
+The upgrade scripts have tests in `test/manage/UpgradeActions.t.sol`. The
+whole upgrade sequence runs against a local anvil in
+`test/tooling/record-upgrade.t.sh`. CI runs both.
 
 The whole flow also ran against the live Safe Transaction Service. This repo
 becomes public. The record therefore names no address and no transaction hash.
@@ -534,7 +648,7 @@ One item stays unproven. The script maps each chain to a Safe short name. Only
 the Sepolia short name `sep` ran live. Treat the first run on another chain as
 a test.
 
-## 11. Open question: how many Safes govern a deployment
+## 12. Open question: how many Safes govern a deployment
 
 The team has not decided this. The team discusses three shapes:
 

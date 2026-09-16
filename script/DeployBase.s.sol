@@ -19,12 +19,13 @@ abstract contract DeployBase is Script {
     string[] private _sourcePaths;
 
     /// The name of this deployment, such as "BETH". A concrete script sets it.
-    function deploymentName() public pure virtual returns (string memory);
+    /// @dev The base declares it `view`, because DeployImplementation reads
+    ///      the name from the environment. A `pure` override stays legal.
+    function deploymentName() public view virtual returns (string memory);
 
-    /// The file name of the script whose broadcast holds the transactions, such
-    /// as "DeployImplementation.s.sol". `record.sh` reads the broadcast under
-    /// `Deploy_<name>.s.sol` when this is empty. A script at another path
-    /// overrides it.
+    /// The file name of the script that broadcasts, such as
+    /// "DeployImplementation.s.sol". `record.sh` reads the broadcast folder
+    /// under that name. An empty string means `Deploy_<name>.s.sol`.
     function broadcastScript() public pure virtual returns (string memory) {
         return "";
     }

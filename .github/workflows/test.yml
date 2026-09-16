@@ -61,3 +61,6 @@ jobs:
 
       - name: Run the propose tooling test
         run: ./test/tooling/propose.t.sh
+
+      - name: Run the record-upgrade tooling test
+        run: ./test/tooling/record-upgrade.t.sh

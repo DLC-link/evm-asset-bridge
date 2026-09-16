@@ -58,10 +58,16 @@ it-verify: it-build
 #   Writes the records again from the last broadcast. Use it when the deploy
 #   succeeded but the record step did not. CHAIN_ID is optional. Pass it when
 #   more than one pending file waits.
+#
+# make record-upgrade DEPLOYMENT=BETH CHAIN_ID=8453 RPC_URL=https://...
+#   Promotes the next-implementation record after ExecuteUpgrade lands. The
+#   target reads the proxy on chain first. It refuses while the proxy still
+#   points at the old implementation. script/manage/README.md holds the
+#   whole upgrade sequence.
 
 FOUNDRY_BIN := $(HOME)/.foundry/bin
 
-.PHONY: deploy record
+.PHONY: deploy record record-upgrade
 
 deploy:
 ifndef DEPLOYMENT
@@ -81,6 +87,18 @@ ifndef DEPLOYMENT
 	$(error DEPLOYMENT is not set. Example: make record DEPLOYMENT=BETH)
 endif
 	CHAIN_ID="$(CHAIN_ID)" ./script/record.sh $(DEPLOYMENT)
+
+record-upgrade:
+ifndef DEPLOYMENT
+	$(error DEPLOYMENT is not set. Example: make record-upgrade DEPLOYMENT=BETH CHAIN_ID=8453 RPC_URL=...)
+endif
+ifndef CHAIN_ID
+	$(error CHAIN_ID is not set. Example: make record-upgrade DEPLOYMENT=BETH CHAIN_ID=8453 RPC_URL=...)
+endif
+ifndef RPC_URL
+	$(error RPC_URL is not set. Example: make record-upgrade DEPLOYMENT=BETH CHAIN_ID=8453 RPC_URL=...)
+endif
+	CHAIN_ID="$(CHAIN_ID)" RPC_URL="$(RPC_URL)" ./script/record-upgrade.sh $(DEPLOYMENT)
 
 # ---- Verification ----------------------------------------------------------
 #
