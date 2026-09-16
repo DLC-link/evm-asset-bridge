@@ -168,7 +168,7 @@ accepts. In Safe mode that sender is the Safe itself.
 | `Status` | none (read only) | `make manage SCRIPT=Status SIG='run()'` |
 | `Pause` | `BRIDGE_ADMIN` or `SENTRY` | `make manage SCRIPT=Pause SIG='run()'` |
 | `Unpause` | `BRIDGE_ADMIN` | `make manage SCRIPT=Unpause SIG='run()'` |
-| `SetThreshold` | `BRIDGE_ADMIN` | `make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3` |
+| `SetThreshold` | `DEFAULT_ADMIN` | `make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3` |
 | `SetDepositLimits` | `BRIDGE_ADMIN` | `make manage SCRIPT=SetDepositLimits SIG='run(uint256,uint256)' ARGS='100000000 900000000'` |
 | `SetWithdrawLimits` | `BRIDGE_ADMIN` | `make manage SCRIPT=SetWithdrawLimits SIG='run(uint256,uint256)' ARGS='1 700000000'` |
 | `SetWithdrawRateLimit` | `BRIDGE_ADMIN` | `make manage SCRIPT=SetWithdrawRateLimit SIG='run(uint256,uint256)' ARGS='100000000000000000000 86400'` |
@@ -208,7 +208,7 @@ This example raises the signature threshold to 3:
 
 ```bash
 make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3 \
-  RPC_URL=https://... SIGNER="--account bridgeAdmin"
+  RPC_URL=https://... SIGNER="--account defaultAdmin"
 ```
 
 Read the live configuration first. This target needs no wallet:
@@ -235,7 +235,7 @@ make manage SCRIPT=GrantRole SIG='run(string,address)' \
   ARGS='ATTESTOR 0xNewAttestor' \
   RPC_URL=https://... SIGNER="--account defaultAdmin"
 make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3 \
-  RPC_URL=https://... SIGNER="--account bridgeAdmin"
+  RPC_URL=https://... SIGNER="--account defaultAdmin"
 ```
 
 ### Shrink the attestor set: lower, then revoke
@@ -256,7 +256,7 @@ fall below 2.
 ```bash
 # 4 attestors, threshold 3. Remove one attestor.
 make manage SCRIPT=SetThreshold SIG='run(uint256)' ARGS=2 \
-  RPC_URL=https://... SIGNER="--account bridgeAdmin"
+  RPC_URL=https://... SIGNER="--account defaultAdmin"
 make manage SCRIPT=RevokeRole SIG='run(string,address)' \
   ARGS='ATTESTOR 0xOldAttestor' \
   RPC_URL=https://... SIGNER="--account defaultAdmin"

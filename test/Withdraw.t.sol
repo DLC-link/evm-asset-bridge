@@ -292,7 +292,7 @@ contract WithdrawTest is BridgeTestBase {
         // granting the role only changes who may *call* withdraw.
         bytes32 attestorRole = bridge.ATTESTOR_ROLE();
         // The grant grows the set to 4, so the threshold must rise to 3 first.
-        vm.prank(bridgeAdmin);
+        vm.prank(defaultAdmin);
         bridge.setThreshold(3);
         vm.prank(defaultAdmin);
         bridge.grantRole(attestorRole, address(attacker));
@@ -319,7 +319,7 @@ contract WithdrawTest is BridgeTestBase {
         ReentrantReceiver attacker = new ReentrantReceiver();
         bytes32 attestorRole = bridge.ATTESTOR_ROLE();
         // The grant grows the set to 4, so the threshold must rise to 3 first.
-        vm.prank(bridgeAdmin);
+        vm.prank(defaultAdmin);
         bridge.setThreshold(3);
         vm.prank(defaultAdmin);
         bridge.grantRole(attestorRole, address(attacker));
