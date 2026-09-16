@@ -29,17 +29,12 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 /// A stand-in action. It overrides the two getters that read external state.
 /// A test therefore controls the target and the Safe. The test needs no
 /// deployment record and no `SAFE` environment variable.
-/// `action()` stays abstract here: `ManageBase.action()` is `pure`, and
-/// Solidity refuses an override that widens `pure` to `view`. A leaf
-/// contract below fixes each name, so forge runs test functions in
-/// parallel without two of them writing the same envelope path.
+/// Each leaf fixes its own action name and its own deployment name, so no
+/// two test functions read or write one file. forge runs test functions in
+/// parallel, and a shared path would corrupt them.
 abstract contract DummyAction is ManageBase {
     address private _target;
     address private _safe;
-
-    function deploymentName() public pure override returns (string memory) {
-        return "MANAGETEST";
-    }
 
     function contractName() public pure override returns (string memory) {
         return "BitSafeEvmAssetBridge";
@@ -74,12 +69,31 @@ contract DummyWriteAction is DummyAction {
     function action() public pure override returns (string memory) {
         return "dummyWrite";
     }
+
+    function deploymentName() public pure override returns (string memory) {
+        return "MANAGEWRITE";
+    }
 }
 
 /// Used by the test that expects the target's own revert to bubble up.
 contract DummyRevertAction is DummyAction {
     function action() public pure override returns (string memory) {
         return "dummyRevert";
+    }
+
+    function deploymentName() public pure override returns (string memory) {
+        return "MANAGEREVERT";
+    }
+}
+
+/// Used by the test that expects TargetHasNoCode.
+contract DummyNoCodeAction is DummyAction {
+    function action() public pure override returns (string memory) {
+        return "dummyNoCode";
+    }
+
+    function deploymentName() public pure override returns (string memory) {
+        return "MANAGENOCODE";
     }
 }
 
@@ -88,6 +102,10 @@ contract DummyNoFileAction is DummyAction {
     function action() public pure override returns (string memory) {
         return "dummyNoFile";
     }
+
+    function deploymentName() public pure override returns (string memory) {
+        return "MANAGENOFILE";
+    }
 }
 
 /// Used by the direct-broadcast test. It never reaches the envelope writer.
@@ -95,12 +113,20 @@ contract DummyDirectAction is DummyAction {
     function action() public pure override returns (string memory) {
         return "dummyDirect";
     }
+
+    function deploymentName() public pure override returns (string memory) {
+        return "MANAGEDIRECT";
+    }
 }
 
 /// Used by the test that pins the two-argument `_send` overload's `to`.
 contract DummyToOverrideAction is DummyAction {
     function action() public pure override returns (string memory) {
         return "dummyToOverride";
+    }
+
+    function deploymentName() public pure override returns (string memory) {
+        return "MANAGETO";
     }
 }
 
@@ -155,8 +181,8 @@ contract GuardBadAction is ManageBase {
         return "BitSafeEvmAssetBridge";
     }
 
-    function readTarget() external view returns (address) {
-        return target();
+    function send(bytes calldata data) external {
+        _send(data);
     }
 }
 
@@ -175,8 +201,46 @@ contract NameCheckAction is ManageBase {
     }
 }
 
+/// Reaches the two-argument `_send` through a mismatched record. Only ONE
+/// test function uses it, because it writes a file.
+contract GuardBadExplicitAction is ManageBase {
+    function deploymentName() public pure override returns (string memory) {
+        return "GUARDBADAT";
+    }
+
+    function action() public pure override returns (string memory) {
+        return "guardBadAt";
+    }
+
+    function contractName() public pure override returns (string memory) {
+        return "BitSafeEvmAssetBridge";
+    }
+
+    function sendAt(address to, bytes calldata data) external {
+        _send(to, data);
+    }
+}
+
 contract ManageBaseTest is BridgeTestBase {
+    /// Writes the implementation record that the deployment guard reads.
+    /// Each caller names its own deployment, so no two test functions touch
+    /// one file.
+    function _writeImplRecord(string memory name, string memory recorded) private {
+        string memory key = string.concat(name, "impl");
+        vm.serializeUint(key, "chainId", uint256(31337));
+        vm.serializeString(key, "contractName", recorded);
+        vm.writeJson(
+            vm.serializeAddress(key, "address", address(bridge)),
+            string.concat("deployments/", name, ".implementation.31337.json")
+        );
+    }
+
+    function _removeImplRecord(string memory name) private {
+        vm.removeFile(string.concat("deployments/", name, ".implementation.31337.json"));
+    }
+
     function test_safeMode_writesAnEnvelopeAfterProvingTheCallSucceeds() public {
+        _writeImplRecord("MANAGEWRITE", "BitSafeEvmAssetBridge");
         DummyWriteAction dummy = new DummyWriteAction();
         dummy.configure(address(bridge), bridgeAdmin);
         dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
@@ -187,9 +251,9 @@ contract ManageBaseTest is BridgeTestBase {
         // reaches the chain, because Safe mode never passes --broadcast.
         assertEq(bridge.threshold(), 3);
 
-        string memory path = "deployments/.safe/MANAGETEST.31337.dummyWrite.json";
+        string memory path = "deployments/.safe/MANAGEWRITE.31337.dummyWrite.json";
         string memory json = vm.readFile(path);
-        assertEq(vm.parseJsonString(json, ".deployment"), "MANAGETEST");
+        assertEq(vm.parseJsonString(json, ".deployment"), "MANAGEWRITE");
         assertEq(vm.parseJsonAddress(json, ".safe"), bridgeAdmin);
         assertEq(vm.parseJsonAddress(json, ".to"), address(bridge));
         assertEq(vm.parseJsonUint(json, ".chainId"), 31337);
@@ -198,32 +262,38 @@ contract ManageBaseTest is BridgeTestBase {
         assertEq(vm.parseJsonString(json, ".action"), "dummyWrite");
         assertEq(vm.parseJsonBytes(json, ".data"), abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
         vm.removeFile(path);
+        _removeImplRecord("MANAGEWRITE");
     }
 
     function test_safeMode_sendsToTheExplicitTargetNotTheDefaultOne() public {
         // A second, separate bridge stands in for a future ProxyAdmin call:
         // the two-argument overload must record THIS address, not target().
+        _writeImplRecord("MANAGETO", "BitSafeEvmAssetBridge");
         BitSafeEvmAssetBridge otherBridge = _deployBridge(address(0));
         DummyToOverrideAction dummy = new DummyToOverrideAction();
         dummy.configure(address(bridge), bridgeAdmin);
         dummy.runAt(address(otherBridge), abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
 
-        string memory path = "deployments/.safe/MANAGETEST.31337.dummyToOverride.json";
+        string memory path = "deployments/.safe/MANAGETO.31337.dummyToOverride.json";
         string memory json = vm.readFile(path);
         assertEq(vm.parseJsonAddress(json, ".to"), address(otherBridge));
         assertTrue(address(otherBridge) != address(bridge));
         vm.removeFile(path);
+        _removeImplRecord("MANAGETO");
     }
 
     function test_call_revertsWhenTheTargetHasNoCode() public {
+        _writeImplRecord("MANAGENOCODE", "BitSafeEvmAssetBridge");
         address noCode = makeAddr("noCode");
-        DummyRevertAction dummy = new DummyRevertAction();
+        DummyNoCodeAction dummy = new DummyNoCodeAction();
         dummy.configure(noCode, address(0));
         vm.expectRevert(abi.encodeWithSelector(ManageBase.TargetHasNoCode.selector, noCode));
         dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
+        _removeImplRecord("MANAGENOCODE");
     }
 
     function test_safeMode_bubblesTheContractRevertWhenTheSafeLacksTheRole() public {
+        _writeImplRecord("MANAGEREVERT", "BitSafeEvmAssetBridge");
         DummyRevertAction dummy = new DummyRevertAction();
         dummy.configure(address(bridge), user);
         vm.expectRevert(
@@ -232,15 +302,18 @@ contract ManageBaseTest is BridgeTestBase {
             )
         );
         dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
+        _removeImplRecord("MANAGEREVERT");
     }
 
     function test_safeMode_writesNoEnvelopeWhenTheCallReverts() public {
+        _writeImplRecord("MANAGENOFILE", "BitSafeEvmAssetBridge");
         DummyNoFileAction dummy = new DummyNoFileAction();
         dummy.configure(address(bridge), user);
         try dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3))) {
             revert("the call must revert");
         } catch {}
-        assertFalse(vm.exists("deployments/.safe/MANAGETEST.31337.dummyNoFile.json"));
+        assertFalse(vm.exists("deployments/.safe/MANAGENOFILE.31337.dummyNoFile.json"));
+        _removeImplRecord("MANAGENOFILE");
     }
 
     function test_directMode_sendsTheCallFromTheBroadcaster() public {
@@ -257,11 +330,13 @@ contract ManageBaseTest is BridgeTestBase {
         vm.prank(defaultAdmin);
         bridge.grantRole(role, DEFAULT_SENDER);
 
+        _writeImplRecord("MANAGEDIRECT", "BitSafeEvmAssetBridge");
         DummyDirectAction dummy = new DummyDirectAction();
         dummy.configure(address(bridge), address(0));
         dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
 
         assertEq(bridge.threshold(), 3);
+        _removeImplRecord("MANAGEDIRECT");
     }
 
     function test_recordAddress_readsThePinnedAddressAndChecksTheChain() public {
@@ -334,7 +409,7 @@ contract ManageBaseTest is BridgeTestBase {
         }
     }
 
-    function test_target_acceptsARecordThatNamesTheRightContract() public {
+    function test_target_readsTheRecordedProxy() public {
         GuardOkAction guard = new GuardOkAction();
 
         string memory implPath = "deployments/GUARDOK.implementation.31337.json";
@@ -357,7 +432,7 @@ contract ManageBaseTest is BridgeTestBase {
     /// The guard must run BEFORE the proxy record read. This test writes no
     /// proxy record. A guard that ran second would fail on a missing file
     /// instead of ContractMismatch.
-    function test_target_rejectsARecordThatNamesAnotherContract() public {
+    function test_send_rejectsARecordThatNamesAnotherContract() public {
         GuardBadAction guard = new GuardBadAction();
 
         string memory implPath = "deployments/GUARDBAD.implementation.31337.json";
@@ -369,7 +444,27 @@ contract ManageBaseTest is BridgeTestBase {
         vm.expectRevert(
             abi.encodeWithSelector(ManageBase.ContractMismatch.selector, "SomeOtherContract", "BitSafeEvmAssetBridge")
         );
-        guard.readTarget();
+        guard.send(abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
+
+        vm.removeFile(implPath);
+    }
+
+    /// The explicit-target form drives a future ProxyAdmin script. It must
+    /// check the deployment too, so a wrong DEPLOYMENT cannot reach a live
+    /// contract by naming its address.
+    function test_sendAt_rejectsARecordThatNamesAnotherContract() public {
+        GuardBadExplicitAction guard = new GuardBadExplicitAction();
+
+        string memory implPath = "deployments/GUARDBADAT.implementation.31337.json";
+        string memory implKey = "guardBadAtImpl";
+        vm.serializeUint(implKey, "chainId", uint256(31337));
+        vm.serializeString(implKey, "contractName", "SomeOtherContract");
+        vm.writeJson(vm.serializeAddress(implKey, "address", address(bridge)), implPath);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ManageBase.ContractMismatch.selector, "SomeOtherContract", "BitSafeEvmAssetBridge")
+        );
+        guard.sendAt(address(bridge), abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
 
         vm.removeFile(implPath);
     }

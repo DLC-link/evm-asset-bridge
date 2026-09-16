@@ -49,7 +49,6 @@ abstract contract ManageBase is Script {
     /// A test overrides it, and so does a script that targets another
     /// contract, such as the ProxyAdmin.
     function target() internal view virtual returns (address) {
-        _requireContract();
         return recordAddress("proxy");
     }
 
@@ -89,11 +88,21 @@ abstract contract ManageBase is Script {
         return vm.parseJsonAddress(json, ".address");
     }
 
+    /// @dev Both entry points check the deployment first. The check therefore
+    ///      reports a wrong pairing before a missing proxy record hides it.
     function _send(bytes memory data) internal {
-        _send(target(), data);
+        _requireContract();
+        _dispatch(target(), data);
     }
 
+    /// Sends to an explicit address. A script that drives another contract of
+    /// the same deployment, such as the ProxyAdmin, uses this form.
     function _send(address to, bytes memory data) internal {
+        _requireContract();
+        _dispatch(to, data);
+    }
+
+    function _dispatch(address to, bytes memory data) private {
         address safe = safeAddress();
         if (safe == address(0)) {
             vm.startBroadcast();
