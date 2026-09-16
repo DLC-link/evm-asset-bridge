@@ -5,23 +5,35 @@
 The bridge locks ETH on Ethereum and releases it when enough attestors approve a withdrawal.
 This document lists the powers over that bridge, what each power does, and who holds it.
 
+## The two Safes
+
+Two Safe multisig wallets hold the administrative powers over the bridge.
+This document refers to them by these two names.
+
+- **Multi-org Safe.** BitSafe and the operator partners control this Safe together. It holds the default admin role and drives the upgrade timelock. Every change that it makes needs the agreement of more than one organisation.
+- **BitSafe Safe.** BitSafe alone controls this Safe. It holds the bridge admin role.
+
+The Multi-org Safe decides who takes part in the bridge and which code the bridge runs.
+The BitSafe Safe runs the bridge from day to day within those bounds.
+
 ## Who holds which power
 
 | Power | Holder | Purpose |
 | --- | --- | --- |
-| Default admin | A multi-organisation Safe that BitSafe and the operator partners control together | Decides who is an attestor and who holds every other role |
-| Bridge admin | A Safe that BitSafe alone controls | Sets the operational parameters and can stop the bridge |
+| Default admin | The Multi-org Safe | Decides who is an attestor and who holds every other role |
+| Bridge admin | The BitSafe Safe | Sets the operational parameters and can stop the bridge |
 | Attestor | The operator nodes | Approve withdrawals by signature |
 | Sentry | A hot key that BitSafe runs | Can stop the bridge, nothing else |
-| Upgrade authority | A timelock contract that the BitSafe Safe drives | Replaces the bridge code after a public waiting period |
+| Upgrade authority | A timelock contract that the Multi-org Safe drives | Replaces the bridge code after a public waiting period |
 
 BitSafe can set the operational parameters on its own.
 BitSafe cannot add or remove an attestor on its own.
+BitSafe cannot upgrade the bridge code on its own.
 
 ## Default admin
 
 The default admin controls membership of every role on the bridge.
-A multi-organisation Safe holds this power, so BitSafe and the operator partners must agree on each change.
+The Multi-org Safe holds this power, so BitSafe and the operator partners must agree on each change.
 
 The default admin can:
 
@@ -40,7 +52,7 @@ An attestor cannot give up the role on its own.
 ## Bridge admin
 
 The bridge admin runs the bridge from day to day.
-A Safe that BitSafe alone controls holds this power.
+The BitSafe Safe holds this power.
 
 The bridge admin can:
 
@@ -82,17 +94,18 @@ The bridge runs behind a proxy.
 The proxy admin contract decides which code the proxy runs.
 The timelock owns the proxy admin contract.
 Nobody administers the timelock except the timelock itself.
-The BitSafe Safe is the proposer, the canceller, and the executor of the timelock.
+The Multi-org Safe is the proposer, the canceller, and the executor of the timelock.
+BitSafe and the operator partners must therefore agree on every upgrade.
 
 An upgrade follows four steps:
 
-- The BitSafe Safe schedules the upgrade in the timelock.
+- The Multi-org Safe schedules the upgrade in the timelock.
 - The timelock holds the upgrade for the configured delay.
 - Anyone can see the pending upgrade on-chain during the delay.
-- After the delay, the BitSafe Safe executes the upgrade.
+- After the delay, the Multi-org Safe executes the upgrade.
 
-The BitSafe Safe can cancel a pending upgrade at any time before execution.
-The BitSafe Safe cannot shorten the delay of a pending upgrade.
+The Multi-org Safe can cancel a pending upgrade at any time before execution.
+The Multi-org Safe cannot shorten the delay of a pending upgrade.
 A change of the delay itself must pass through the same scheduled process.
 The mainnet deployment uses this design.
 
