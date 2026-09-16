@@ -33,7 +33,7 @@ jobs:
         run: forge build --sizes
 
       - name: Run Forge tests
-        run: forge test -vvv
+        run: forge test -j 1 -vvv
 
   tooling:
     name: Deployment record tooling
@@ -58,3 +58,6 @@ jobs:
 
       - name: Run the verify tooling test
         run: ./test/tooling/verify.t.sh
+
+      - name: Run the propose tooling test
+        run: ./test/tooling/propose.t.sh

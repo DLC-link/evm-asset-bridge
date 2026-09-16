@@ -12,10 +12,28 @@ REQUEST=$(cat)
 
 if [ -n "${FAKE_CURL_LOG:-}" ]; then
   printf '%s\n--\n' "$REQUEST" >>"$FAKE_CURL_LOG"
+
+  # propose.sh sends its JSON body by file reference. The body never travels
+  # inline. A local `ps` therefore cannot show it. This stub resolves that one
+  # reference. A test can then assert the real wire bytes curl reads from disk.
+  DATA_LINE=$(printf '%s\n' "$REQUEST" | grep '^data-binary = "@' || true)
+  if [ -n "$DATA_LINE" ]; then
+    REF="${DATA_LINE#data-binary = \"@}"
+    REF="${REF%\"}"
+    if [ -f "$REF" ]; then
+      # The separator keeps two consecutive entries apart in the log.
+      cat "$REF" >>"$FAKE_CURL_LOG"
+      printf '\n--\n' >>"$FAKE_CURL_LOG"
+    fi
+  fi
 fi
 
 DIR="${FAKE_CURL_DIR:-.}"
+# The nonce query and the proposal share the multisig-transactions path. Only
+# the query carries `ordering=-nonce`. This case therefore comes first.
 case "$REQUEST" in
+  *ordering=-nonce*) BODY="$DIR/queue.txt" ;;
+  *multisig-transactions*) BODY="$DIR/post.txt" ;;
   *checkverifystatus*) BODY="$DIR/poll.txt" ;;
   *verifysourcecode*) BODY="$DIR/submit.txt" ;;
   *) BODY="$DIR/getabi.txt" ;;

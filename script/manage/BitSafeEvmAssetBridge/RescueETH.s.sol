@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.34;
+
+import {BridgeManage} from "./BridgeManage.s.sol";
+import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
+
+/// @notice Rescues stray ETH, such as ETH forced in via selfdestruct.
+/// @dev The bridge rejects this call when the bridged asset is ETH. Use
+///      RescueSurplus for a stray ETH balance on an ETH bridge.
+///
+/// Direct:
+///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/RescueETH.s.sol \
+///     --sig 'run(address,uint256)' 0xTo 1000000000000000000 \
+///     --rpc-url $RPC_URL --broadcast --account bridgeAdmin
+///
+/// Safe:
+///   DEPLOYMENT=BETH SAFE=0xYourSafe forge script script/manage/BitSafeEvmAssetBridge/RescueETH.s.sol \
+///     --sig 'run(address,uint256)' 0xTo 1000000000000000000 --rpc-url $RPC_URL
+contract RescueETH is BridgeManage {
+    function action() public pure override returns (string memory) {
+        return "rescueETH";
+    }
+
+    function encode(address to, uint256 amount) public pure returns (bytes memory) {
+        return abi.encodeCall(BitSafeEvmAssetBridge.rescueETH, (to, amount));
+    }
+
+    function run(address to, uint256 amount) external {
+        _send(encode(to, amount));
+    }
+}
