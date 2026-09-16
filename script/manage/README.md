@@ -95,15 +95,19 @@ private key on the command line enters your shell history.
 
 ### Set the variables once
 
-`make` reads every variable from the environment. Export the four variables
-once. Each command below then stays short.
+`make` reads `DEPLOYMENT`, `RPC_URL` and `SAFE` from the environment. Export
+those three once. Each command below then stays short.
 
 ```bash
 export DEPLOYMENT=BETH
 export RPC_URL=https://...
-export SIGNER="--account bridgeAdmin"    # a direct broadcast needs this
 export SAFE=0xYourSafe                   # Safe mode needs this
 ```
+
+Do not export `SIGNER`. It names a signing key, and every command takes it on
+the make line. One exported key would sign a deploy, an admin action and a Safe
+proposal alike. `make` stops when `SIGNER` comes from your environment, and it
+names the fix.
 
 Load the environment file once for your shell instead. It sets `DEPLOYMENT`,
 and it sets `SAFE`. Every command below then needs neither:
@@ -139,8 +143,9 @@ make manage SCRIPT=<Script> SIG='<sig>' ARGS='<arguments>' \
 `SIG` names the `run` signature of that file. `ARGS` holds the arguments.
 Several arguments need one pair of quotes.
 
-The table below leaves out `RPC_URL`, `SIGNER`, `SAFE` and `DEPLOYMENT`.
-Export those four first, or load the environment file. Read the previous
+The table below leaves out `RPC_URL`, `SAFE` and `DEPLOYMENT`. Export those
+three first, or load the environment file. Add `SIGNER` to every line
+yourself, and read the `Role` column for the role that key must hold. Read the previous
 section for that step. The `Role` column names the sender that the contract
 accepts. In Safe mode that sender is the Safe itself.
 
@@ -328,11 +333,12 @@ service accepts the proposal:
 
 ```bash
 make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json \
-  RPC_URL=https://...
+  RPC_URL=https://... SIGNER="--account proposer"
 ```
 
-`SIGNER` defaults to `--account proposer`. Pass `SIGNER` on the command line to
-override that default. An exported `SIGNER` overrides it too.
+`SIGNER` names the proposer key here. Pass it on the make line. `make` stops
+when `SIGNER` comes from your environment, so an admin key cannot sign a
+proposal by accident.
 
 The `make` target calls `script/manage/safe/propose.sh`. Call the script
 directly if you prefer. The direct form needs every variable. It also needs

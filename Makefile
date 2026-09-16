@@ -45,7 +45,10 @@ it-verify: it-build
 #   SIGNER="--ledger --sender 0xYourDeployer"
 #
 # Prefer a keystore account or a hardware wallet. A raw key on the command line
-# lands in your shell history.
+# enters your shell history.
+#
+# Every command takes SIGNER on the make line. Do not export it. One exported
+# key would sign a deploy, an admin action and a Safe proposal alike.
 #
 # make record DEPLOYMENT=BETH CHAIN_ID=8453
 #   Writes the records again from the last broadcast. Use it when the deploy
@@ -62,9 +65,6 @@ ifndef DEPLOYMENT
 endif
 ifndef RPC_URL
 	$(error RPC_URL is not set. Example: make deploy DEPLOYMENT=BETH RPC_URL=...)
-endif
-ifndef SIGNER
-	$(error SIGNER is not set. Example: SIGNER="--account deployer --sender 0x...")
 endif
 	PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  script/Deploy_$(DEPLOYMENT).s.sol:Deploy_$(DEPLOYMENT) \
@@ -131,9 +131,9 @@ endif
 #   Prints the live configuration of the recorded bridge. It sends nothing.
 #
 # make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json \
-#   RPC_URL=https://...
+#   RPC_URL=https://... SIGNER="--account proposer"
 #   Proposes one written envelope to its Safe. A management script in Safe
-#   mode writes the envelope first. SIGNER defaults to --account proposer.
+#   mode writes the envelope first. SIGNER names the proposer key.
 #   NONCE is optional. It pins the Safe nonce for a batch of proposals.
 
 # The management scripts live under the contract they drive. MANAGE_CONTRACT
@@ -156,6 +156,27 @@ MANAGE_FLAGS := --broadcast $(SIGNER)
 MANAGE_NEEDS_SIGNER := yes
 endif
 
+# ---- the signing key --------------------------------------------------------
+#
+# SIGNER must come from the make line. An operator who exports it sets one key
+# for every command, and `make propose` then signs the proposal with that admin
+# key instead of the proposer key. $(origin ...) names the source of a value,
+# so it tells an export apart from a make-line argument. A plain ifndef cannot:
+# an exported value satisfies it.
+SIGNER_GOALS := $(filter deploy propose,$(MAKECMDGOALS))
+ifdef MANAGE_NEEDS_SIGNER
+SIGNER_GOALS += $(filter manage,$(MAKECMDGOALS))
+endif
+
+ifneq ($(strip $(SIGNER_GOALS)),)
+ifeq ($(origin SIGNER),environment)
+$(error SIGNER comes from your environment. Pass it on the make line instead: make $(firstword $(SIGNER_GOALS)) SIGNER="--account <name>" ...)
+endif
+ifeq ($(origin SIGNER),undefined)
+$(error SIGNER is not set. Example: make $(firstword $(SIGNER_GOALS)) SIGNER="--account <name>" ...)
+endif
+endif
+
 .PHONY: manage manage-status propose
 
 manage:
@@ -170,11 +191,6 @@ ifndef SIG
 endif
 ifndef RPC_URL
 	$(error RPC_URL is not set. Example: make manage SCRIPT=Pause SIG='run()' RPC_URL=...)
-endif
-ifdef MANAGE_NEEDS_SIGNER
-ifndef SIGNER
-	$(error SIGNER is not set. Set SAFE for Safe mode. Example: SIGNER="--account bridgeAdmin")
-endif
 endif
 	DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  script/manage/$(MANAGE_CONTRACT)/$(SCRIPT).s.sol:$(SCRIPT) \
@@ -191,7 +207,6 @@ endif
 	  script/manage/$(MANAGE_CONTRACT)/Status.s.sol:Status \
 	  --sig 'run()' --rpc-url "$(RPC_URL)"
 
-propose: SIGNER ?= --account proposer
 propose:
 ifndef ENVELOPE
 	$(error ENVELOPE is not set. Example: make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json)
