@@ -37,7 +37,7 @@ The deploy reads its configuration from the environment:
 | --- | --- |
 | `ASSET` | Bridged asset address; `address(0)` for ETH, else the ERC20 address |
 | `TARGET_DECIMALS` | Decimal places the target chain expresses; `10` for Canton, 1 to 10 |
-| `DEFAULT_ADMIN` | Address granted the default admin role (governs role management) |
+| `DEFAULT_ADMIN` | Address granted the default admin role (governs role management and the signature threshold) |
 | `ADMIN_DELAY` | Default-admin transfer delay, in seconds |
 | `BRIDGE_ADMIN` | Address granted `BRIDGE_ADMIN_ROLE` (pause, limits, rescue) |
 | `PROXY_OWNER` | Owner of the `ProxyAdmin` created for the transparent proxy |
