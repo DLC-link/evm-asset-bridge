@@ -70,6 +70,18 @@ contract RolesTest is BridgeTestBase {
         assertEq(bridge.threshold(), THRESHOLD);
     }
 
+    function test_grantAttestor_withoutRaise_passes() public {
+        // The set grows by two grants and nobody raises the threshold.
+        // The threshold therefore ends strictly below half, at 2 of 5.
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.startPrank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor4"));
+        bridge.grantRole(role, makeAddr("attestor5"));
+        vm.stopPrank();
+        assertEq(bridge.getAttestors().length, 5);
+        assertEq(bridge.threshold(), THRESHOLD);
+    }
+
     function test_revokeAttestor_belowThreshold_allowed() public {
         // Emergency offboarding wins; withdrawals halt naturally.
         vm.startPrank(defaultAdmin);
@@ -96,6 +108,21 @@ contract RolesTest is BridgeTestBase {
         bytes32 role = bridge.ATTESTOR_ROLE();
         vm.prank(defaultAdmin);
         bridge.grantRole(role, makeAddr("attestor4"));
+        vm.prank(bridgeAdmin);
+        bridge.setThreshold(2);
+        assertEq(bridge.threshold(), 2);
+    }
+
+    function test_setThreshold_belowHalf_passes() public {
+        // Grow the set to 5, then set the threshold strictly below half.
+        // Both the grants and the setter must accept the ratio.
+        bytes32 role = bridge.ATTESTOR_ROLE();
+        vm.startPrank(defaultAdmin);
+        bridge.grantRole(role, makeAddr("attestor4"));
+        bridge.grantRole(role, makeAddr("attestor5"));
+        vm.stopPrank();
+        assertEq(bridge.getAttestors().length, 5);
+
         vm.prank(bridgeAdmin);
         bridge.setThreshold(2);
         assertEq(bridge.threshold(), 2);
