@@ -85,6 +85,39 @@ DATA=$(field data)
 OPERATION=$(field operation)
 ACTION=$(field action)
 
+# ---- check the envelope describes a plain call ------------------------------
+# ManageBase writes value "0" and operation 0 for every action. Any other
+# value means the envelope no longer describes the call that the simulation
+# proved. Operation 1 is DELEGATECALL, which runs code in the Safe's own
+# storage. The proposer refuses both, so a changed file cannot reach a
+# signature.
+if [ "$VALUE" != "0" ]; then
+  echo "propose.sh: the envelope sends value $VALUE. A management action sends none" >&2
+  exit 2
+fi
+if [ "$OPERATION" != "0" ]; then
+  echo "propose.sh: the envelope asks for operation $OPERATION. Only 0 (CALL) is allowed" >&2
+  exit 2
+fi
+
+# The calldata reaches the hash call and the service as a hex string. A
+# malformed value would produce a hash over something else.
+case "$DATA" in
+  0x*[!0-9a-fA-F]*)
+    echo "propose.sh: the envelope's data is not hexadecimal: $DATA" >&2
+    exit 2
+    ;;
+  0x?*) ;;
+  *)
+    echo "propose.sh: the envelope's data is not a hexadecimal string: $DATA" >&2
+    exit 2
+    ;;
+esac
+if [ $(( (${#DATA} - 2) % 2 )) -ne 0 ]; then
+  echo "propose.sh: the envelope's data has an odd number of digits" >&2
+  exit 2
+fi
+
 # ---- the chain --------------------------------------------------------------
 # The envelope names its target chain. A mismatch means the RPC points
 # somewhere else. The resulting hash would then be meaningless.

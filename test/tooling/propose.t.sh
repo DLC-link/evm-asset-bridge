@@ -238,6 +238,43 @@ jq 'del(.to)' "$ENVELOPE" >"$WORK/noto.json"
 check "exit status" "$?" "2"
 contains "names the field" "$(cat "$WORK/out.txt")" "no 'to' field"
 
+echo "== a delegatecall envelope stops the run =="
+# ManageBase writes operation 0 for every action. Operation 1 is DELEGATECALL,
+# which runs code in the Safe's own storage. A changed file must not reach a
+# signature.
+fresh_envelope
+jq '.operation = 1' "$ENVELOPE" >"$WORK/delegate.json"
+: >"$FAKE_CURL_LOG"
+./script/manage/safe/propose.sh "$WORK/delegate.json" >"$WORK/out.txt" 2>&1
+check "exit status" "$?" "2"
+contains "names the operation" "$(cat "$WORK/out.txt")" "operation 1"
+check "sends no request" "$(wc -c <"$FAKE_CURL_LOG" | tr -d ' ')" "0"
+
+echo "== an envelope that sends value stops the run =="
+fresh_envelope
+jq '.value = "1000000000000000000"' "$ENVELOPE" >"$WORK/value.json"
+: >"$FAKE_CURL_LOG"
+./script/manage/safe/propose.sh "$WORK/value.json" >"$WORK/out.txt" 2>&1
+check "exit status" "$?" "2"
+contains "names the value" "$(cat "$WORK/out.txt")" "sends value 1000000000000000000"
+check "sends no request" "$(wc -c <"$FAKE_CURL_LOG" | tr -d ' ')" "0"
+
+echo "== calldata that is not hexadecimal stops the run =="
+fresh_envelope
+jq '.data = "0x960bfe04zz"' "$ENVELOPE" >"$WORK/baddata.json"
+: >"$FAKE_CURL_LOG"
+./script/manage/safe/propose.sh "$WORK/baddata.json" >"$WORK/out.txt" 2>&1
+check "exit status" "$?" "2"
+contains "says the data is not hexadecimal" "$(cat "$WORK/out.txt")" "is not hexadecimal"
+check "sends no request" "$(wc -c <"$FAKE_CURL_LOG" | tr -d ' ')" "0"
+
+echo "== calldata with an odd digit count stops the run =="
+fresh_envelope
+jq '.data = "0x960bfe0"' "$ENVELOPE" >"$WORK/odddata.json"
+./script/manage/safe/propose.sh "$WORK/odddata.json" >"$WORK/out.txt" 2>&1
+check "exit status" "$?" "2"
+contains "says the digit count is odd" "$(cat "$WORK/out.txt")" "odd number of digits"
+
 echo "== the dry run posts nothing =="
 fresh_envelope
 queue_reply 11
