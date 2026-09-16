@@ -88,6 +88,37 @@ contains "prints the calldata" "$OUT" \
   "propose.sh: data 0x960bfe0400000000000000000000000000000000000000000000000000000000000003"
 contains "prints the nonce and its source" "$OUT" "nonce 7 from the on-chain nonce"
 
+echo "== the hashed transaction matches the posted transaction =="
+# The owners sign the hash that getTransactionHash returns. The service shows
+# the fields that the body carries. A difference between the two lets an owner
+# sign one transaction while the queue displays another. Every field therefore
+# appears on both sides below.
+fresh_envelope
+queue_reply empty
+printf '\n201' >"$WORK/post.txt"
+: >"$FAKE_CURL_LOG"
+: >"$FAKE_CAST_LOG"
+OUT=$(FAKE_SAFE_NONCE=7 ./script/manage/safe/propose.sh "$ENVELOPE" 2>&1)
+check "exit status" "$?" "0"
+
+HASH_ARGS=$(grep getTransactionHash "$FAKE_CAST_LOG")
+HASH_ARGS=${HASH_ARGS#*"(bytes32) "}
+HASH_ARGS=${HASH_ARGS%% --rpc-url*}
+BODY_JSON=$(awk '/^\{$/,/^\}$/' "$FAKE_CURL_LOG")
+hashed() { printf '%s' "$HASH_ARGS" | cut -d' ' -f"$1"; }
+posted() { printf '%s' "$BODY_JSON" | jq -r --arg k "$1" '.[$k] | tostring'; }
+
+check "hashes the posted to" "$(hashed 1)" "$(posted to)"
+check "hashes the posted value" "$(hashed 2)" "$(posted value)"
+check "hashes the posted data" "$(hashed 3)" "$(posted data)"
+check "hashes the posted operation" "$(hashed 4)" "$(posted operation)"
+check "hashes the posted safeTxGas" "$(hashed 5)" "$(posted safeTxGas)"
+check "hashes the posted baseGas" "$(hashed 6)" "$(posted baseGas)"
+check "hashes the posted gasPrice" "$(hashed 7)" "$(posted gasPrice)"
+check "hashes the posted gasToken" "$(hashed 8)" "$(posted gasToken)"
+check "hashes the posted refundReceiver" "$(hashed 9)" "$(posted refundReceiver)"
+check "hashes the posted nonce" "$(hashed 10)" "$(posted nonce)"
+
 echo "== an empty queue keeps the on-chain nonce =="
 fresh_envelope
 queue_reply empty
