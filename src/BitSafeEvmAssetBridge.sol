@@ -223,8 +223,10 @@ contract BitSafeEvmAssetBridge is
     }
 
     /// @notice Base units the deposit paths locked and `withdraw` has not
-    ///         released. Bounds `rescueSurplus` and feeds monitoring only;
-    ///         `withdraw` never reads it.
+    ///         released. `withdraw` subtracts each payout from it with a
+    ///         checked subtraction, so a payout above the recorded total
+    ///         reverts with a `Panic(0x11)` rather than paying unbacked
+    ///         funds. Bounds `rescueSurplus` and feeds monitoring.
     function totalLocked() external view returns (uint256) {
         return _getBridgeStorage().totalLocked;
     }
