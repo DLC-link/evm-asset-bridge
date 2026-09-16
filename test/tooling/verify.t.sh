@@ -26,7 +26,7 @@ trap cleanup EXIT
 # The records and their compiler inputs must both be present. A clean checkout
 # holds neither, so this test builds them once.
 NEED_RECORDS=0
-for role in implementation proxy proxyAdmin; do
+for role in implementation timelock proxy proxyAdmin; do
   r="deployments/BETH.$role.$CHAIN_ID.json"
   [ -f "$r" ] || { NEED_RECORDS=1; break; }
   h="$(jq -r '.solcInputHash // empty' "$r")"
@@ -55,13 +55,17 @@ set -e
 check "exits non-zero without records" "$RC" "1"
 contains "names the files it wanted" "$OUT" "deployments/NOPE.<role>.$CHAIN_ID.json"
 
-echo "== dry run, all three contracts =="
+echo "== dry run, all four contracts =="
 OUT=$(DRY_RUN=1 ETHERSCAN_API_KEY_31337=testkey DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
 
 contains "reports the key variable"  "$OUT" "key from ETHERSCAN_API_KEY_$CHAIN_ID"
 contains "handles implementation"    "$OUT" "src/BitSafeEvmAssetBridge.sol:BitSafeEvmAssetBridge"
 contains "handles the proxy"         "$OUT" ":TransparentUpgradeableProxy"
 contains "handles the ProxyAdmin"    "$OUT" ":ProxyAdmin"
+# The timelock record carries encodedConstructorArgs like the others, so the
+# same request shape verifies it.
+contains "handles the timelock"      "$OUT" "lib/openzeppelin-contracts/contracts/governance/TimelockController.sol:TimelockController"
+contains "sends the timelock ctor args" "$OUT" "$(jq -r .encodedConstructorArgs "deployments/BETH.timelock.$CHAIN_ID.json" | cut -c3-66)"
 contains "sends the right codeformat" "$OUT" "solidity-standard-json-input"
 contains "sends the compiler version" "$OUT" "v0.8.34+commit.80d5c536"
 contains "sends the MIT license code" "$OUT" "licenseType=3"
@@ -72,12 +76,13 @@ echo "== dry run, one contract only =="
 OUT=$(DRY_RUN=1 ETHERSCAN_API_KEY=testkey CONTRACT=implementation DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
 contains "reports the fallback variable" "$OUT" "key from ETHERSCAN_API_KEY"
 contains "does the implementation"       "$OUT" "BitSafeEvmAssetBridge"
-check "skips the other two" "$(printf '%s' "$OUT" | grep -c "TransparentUpgradeableProxy" || true)" "0"
+check "skips the proxy"    "$(printf '%s' "$OUT" | grep -c "TransparentUpgradeableProxy" || true)" "0"
+check "skips the timelock" "$(printf '%s' "$OUT" | grep -c "TimelockController" || true)" "0"
 
-echo "== a role outside the three fixed ones =="
-# The role is a free label. A standalone timelock records one role only, and
+echo "== a role outside the four the deploy writes =="
+# The role is a free label. A standalone contract records one role only, and
 # the script must find it without a code change.
-EXTRA="deployments/BETH.timelock.$CHAIN_ID.json"
+EXTRA="deployments/BETH.extra.$CHAIN_ID.json"
 cp "deployments/BETH.proxyAdmin.$CHAIN_ID.json" "$EXTRA"
 set +e
 OUT=$(DRY_RUN=1 ETHERSCAN_API_KEY=x DEPLOYMENT=BETH CHAIN_ID=$CHAIN_ID ./script/verify.sh 2>&1)
@@ -85,7 +90,7 @@ RC=$?
 set -e
 rm -f "$EXTRA"
 check "exits zero with an extra role" "$RC" "0"
-contains "discovers the extra role" "$OUT" "DRY  timelock"
+contains "discovers the extra role" "$OUT" "DRY  extra"
 
 echo "== bad CONTRACT value =="
 set +e
@@ -96,6 +101,7 @@ check "exits non-zero on a bad CONTRACT value" "$RC" "2"
 contains "names implementation as a recorded role" "$OUT" "implementation"
 contains "names proxy as a recorded role"          "$OUT" "proxy"
 contains "names proxyAdmin as a recorded role"     "$OUT" "proxyAdmin"
+contains "names timelock as a recorded role"       "$OUT" "timelock"
 
 echo "== missing per-role record =="
 # A requested role with no record fails. It never passes silently.
@@ -108,7 +114,7 @@ set -e
 mv "$IMPL_RECORD.bak" "$IMPL_RECORD"
 check "exits non-zero when a requested role has no record" "$RC" "2"
 contains "names the role it could not find" "$OUT" "Got 'implementation'"
-contains "names the roles it did find"      "$OUT" "records: proxy proxyAdmin"
+contains "names the roles it did find"      "$OUT" "records: proxy proxyAdmin timelock"
 
 
 # ---- the explorer replies ----------------------------------------------------
@@ -215,6 +221,7 @@ check    "exits non-zero on a truncated record" "$STUB_RC" "1"
 contains "names the unreadable record" "$STUB_OUT" "holds no valid JSON"
 contains "still verifies the proxy"    "$STUB_OUT" "OK   proxy"
 contains "still verifies the admin"    "$STUB_OUT" "OK   proxyAdmin"
+contains "still verifies the timelock" "$STUB_OUT" "OK   timelock"
 
 echo "== a record from a newer schema =="
 cp "$BAD" "$BAD.bak"

@@ -21,6 +21,14 @@ abstract contract DeployBase is Script {
     /// The name of this deployment, such as "BETH". A concrete script sets it.
     function deploymentName() public pure virtual returns (string memory);
 
+    /// The file name of the script whose broadcast holds the transactions, such
+    /// as "DeployImplementation.s.sol". `record.sh` reads the broadcast under
+    /// `Deploy_<name>.s.sol` when this is empty. A script at another path
+    /// overrides it.
+    function broadcastScript() public pure virtual returns (string memory) {
+        return "";
+    }
+
     /// Records one deployed contract under a role label.
     function _register(string memory role, address addr, string memory contractName, string memory sourcePath)
         internal
@@ -40,6 +48,10 @@ abstract contract DeployBase is Script {
         string memory jsonKey = "pending";
         vm.serializeString(jsonKey, "deploymentName", deploymentName());
         vm.serializeUint(jsonKey, "chainId", block.chainid);
+        // The field is optional. An absent field keeps the default path.
+        if (bytes(broadcastScript()).length > 0) {
+            vm.serializeString(jsonKey, "broadcastScript", broadcastScript());
+        }
 
         string[] memory roles = _roles;
         address[] memory addresses = _addresses;
