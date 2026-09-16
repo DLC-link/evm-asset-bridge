@@ -33,7 +33,7 @@ jobs:
         run: forge build --sizes
 
       - name: Run Forge tests
-        run: forge test -vvv
+        run: forge test -j 1 -vvv
 
   tooling:
     name: Deployment record tooling
