@@ -327,6 +327,25 @@ check "keeps the envelope on a dry run" "$([ -e "$ENVELOPE" ] && echo yes || ech
 # run can check either. FOUNDRY_BIN points at the fakes, because the target
 # prepends that directory to PATH and the real cast would otherwise win.
 
+echo "== a dry run through make needs no signer =="
+# The runbook documents `DRY_RUN=1 make propose ...` with no SIGNER. propose.sh
+# exempts a dry run, and the Makefile must make the same exemption.
+fresh_envelope
+queue_reply 11
+: >"$FAKE_CURL_LOG"
+OUT=$(env -u SIGNER DRY_RUN=1 FAKE_SAFE_NONCE=7 make propose \
+  ENVELOPE="$ENVELOPE" RPC_URL="$RPC_URL" FOUNDRY_BIN="$ROOT/test/tooling/fake" 2>&1)
+check "exit status" "$?" "0"
+contains "reaches the dry-run branch" "$OUT" "DRY_RUN, sending nothing"
+contains "prints the body" "$OUT" "contractTransactionHash"
+check "keeps the envelope" "$([ -e "$ENVELOPE" ] && echo yes || echo no)" "yes"
+
+echo "== a real propose through make still demands a signer =="
+fresh_envelope
+OUT=$(env -u SIGNER make propose \
+  ENVELOPE="$ENVELOPE" RPC_URL="$RPC_URL" FOUNDRY_BIN="$ROOT/test/tooling/fake" 2>&1 || true)
+contains "names the missing signer" "$OUT" "SIGNER is not set"
+
 echo "== the manage mode line carries no wallet secret =="
 # SIGNER can hold --private-key or --password. The mode line runs through echo,
 # so `make -s` cannot suppress it. Its text must therefore carry no part of

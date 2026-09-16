@@ -369,8 +369,9 @@ the hash. Read the target and the calldata before you sign. An envelope file
 name carries no arguments. A later run of the same action overwrites the file.
 
 Set `DRY_RUN=1` to print the request. A dry run posts nothing. A dry run also
-never reads the signing key. A dry run still reads the queue of the service. A
-dry run keeps the envelope file. Both forms accept the variable:
+never reads the signing key, so it needs no `SIGNER`. A dry run still reads the
+queue of the service. A dry run keeps the envelope file. Both forms accept the
+variable:
 
 ```bash
 DRY_RUN=1 make propose ENVELOPE=deployments/.safe/BETH.11155111.pause.json \

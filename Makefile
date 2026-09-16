@@ -173,7 +173,13 @@ endif
 # key instead of the proposer key. $(origin ...) names the source of a value,
 # so it tells an export apart from a make-line argument. A plain ifndef cannot:
 # an exported value satisfies it.
-SIGNER_GOALS := $(filter deploy propose,$(MAKECMDGOALS))
+#
+# A proposal dry run signs nothing, so it needs no signer. propose.sh makes the
+# same exemption, and it tests DRY_RUN the same way.
+SIGNER_GOALS := $(filter deploy,$(MAKECMDGOALS))
+ifeq ($(strip $(DRY_RUN)),)
+SIGNER_GOALS += $(filter propose,$(MAKECMDGOALS))
+endif
 ifdef MANAGE_NEEDS_SIGNER
 SIGNER_GOALS += $(filter manage,$(MAKECMDGOALS))
 endif
