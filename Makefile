@@ -66,10 +66,10 @@ endif
 ifndef RPC_URL
 	$(error RPC_URL is not set. Example: make deploy DEPLOYMENT=BETH RPC_URL=...)
 endif
-	PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	@PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  script/Deploy_$(DEPLOYMENT).s.sol:Deploy_$(DEPLOYMENT) \
 	  --rpc-url "$(RPC_URL)" --broadcast $(SIGNER)
-	CHAIN_ID="$$(PATH="$(FOUNDRY_BIN):$$PATH" cast chain-id --rpc-url "$(RPC_URL)")" \
+	@CHAIN_ID="$$(PATH="$(FOUNDRY_BIN):$$PATH" cast chain-id --rpc-url "$(RPC_URL)")" \
 	  ./script/record.sh $(DEPLOYMENT)
 
 record:
@@ -149,6 +149,11 @@ MANAGE_READ_ONLY := Status
 # broadcast flags, and it demands a signer. MANAGE_MODE names the mode on
 # screen, because an exported SAFE decides it and the operator cannot see it
 # on the command line.
+#
+# No part of SIGNER reaches the output. It can carry --private-key or
+# --password, and a terminal log keeps whatever a command prints. The operator
+# passes SIGNER on the make line, so the line would only repeat what the
+# command already shows.
 ifneq ($(strip $(SAFE)),)
 MANAGE_FLAGS :=
 MANAGE_MODE := Safe mode. It writes an envelope for $(SAFE) and broadcasts nothing.
@@ -158,7 +163,7 @@ MANAGE_MODE := read only. It sends no transaction.
 else
 MANAGE_FLAGS := --broadcast $(SIGNER)
 MANAGE_NEEDS_SIGNER := yes
-MANAGE_MODE := direct broadcast. It sends a transaction signed by $(SIGNER).
+MANAGE_MODE := direct broadcast. It signs and sends a transaction now.
 endif
 
 # ---- the signing key --------------------------------------------------------
@@ -198,7 +203,7 @@ ifndef RPC_URL
 	$(error RPC_URL is not set. Example: make manage SCRIPT=Pause SIG='run()' RPC_URL=...)
 endif
 	@echo "manage: $(MANAGE_MODE)"
-	DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	@DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  script/manage/$(MANAGE_CONTRACT)/$(SCRIPT).s.sol:$(SCRIPT) \
 	  --sig '$(SIG)' $(ARGS) --rpc-url "$(RPC_URL)" $(MANAGE_FLAGS)
 
@@ -209,7 +214,7 @@ endif
 ifndef RPC_URL
 	$(error RPC_URL is not set. Example: make manage-status DEPLOYMENT=BETH RPC_URL=...)
 endif
-	DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	@DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  script/manage/$(MANAGE_CONTRACT)/Status.s.sol:Status \
 	  --sig 'run()' --rpc-url "$(RPC_URL)"
 
@@ -220,5 +225,5 @@ endif
 ifndef RPC_URL
 	$(error RPC_URL is not set. Example: make propose ENVELOPE=... RPC_URL=...)
 endif
-	RPC_URL="$(RPC_URL)" SIGNER="$(SIGNER)" NONCE="$(NONCE)" \
+	@RPC_URL="$(RPC_URL)" SIGNER="$(SIGNER)" NONCE="$(NONCE)" \
 	  PATH="$(FOUNDRY_BIN):$$PATH" ./script/manage/safe/propose.sh "$(ENVELOPE)"

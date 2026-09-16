@@ -321,6 +321,39 @@ case "$(cat "$FAKE_CURL_LOG")" in
 esac
 check "keeps the envelope on a dry run" "$([ -e "$ENVELOPE" ] && echo yes || echo no)" "yes"
 
+# ---- the make entry point ---------------------------------------------------
+# The two blocks below drive `make`, not the script. The Makefile decides who
+# needs a signer, and it decides what the mode line prints, so only a make-level
+# run can check either. FOUNDRY_BIN points at the fakes, because the target
+# prepends that directory to PATH and the real cast would otherwise win.
+
+echo "== the manage mode line carries no wallet secret =="
+# SIGNER can hold --private-key or --password. The mode line runs through echo,
+# so `make -s` cannot suppress it. Its text must therefore carry no part of
+# SIGNER, whatever wallet flags the operator passes and in whatever order.
+mode_line() { # mode_line <signer>
+  make -n manage DEPLOYMENT=BETH SCRIPT=Pause SIG='run()' \
+    RPC_URL="https://rpc.example/KEYED123" SIGNER="$1" \
+    FOUNDRY_BIN="$ROOT/test/tooling/fake" 2>&1 | grep '^echo "manage:' || true
+}
+for SIG_SHAPE in \
+  "--private-key 0xSECRETKEY" \
+  "--account sentry --password hunter2" \
+  "--sender 0xAbc --account sentry" \
+  "--password-file /run/secrets/s.pass --account sentry"; do
+  MODE_OUT=$(mode_line "$SIG_SHAPE")
+  case "$MODE_OUT" in
+    *SECRETKEY* | *hunter2* | *KEYED123* | *sentry* | *s.pass* | *--*)
+      echo "  FAIL the mode line carries part of SIGNER: $SIG_SHAPE"
+      FAILURES=$((FAILURES + 1)) ;;
+    *"direct broadcast"*)
+      echo "  ok   no part of SIGNER reaches the line: $SIG_SHAPE" ;;
+    *)
+      echo "  FAIL the mode line names no mode: $SIG_SHAPE"
+      FAILURES=$((FAILURES + 1)) ;;
+  esac
+done
+
 echo
 if [ "$FAILURES" -eq 0 ]; then
   echo "propose.t.sh: all checks passed"

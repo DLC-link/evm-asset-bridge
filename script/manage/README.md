@@ -96,8 +96,13 @@ wait for a transaction:
 
 ```
 manage: Safe mode. It writes an envelope for 0xYourSafe and broadcasts nothing.
-manage: direct broadcast. It sends a transaction signed by --account sentry.
+manage: direct broadcast. It signs and sends a transaction now.
 ```
+
+The line names no part of `SIGNER`. That value can hold `--private-key` or
+`--password`, and a terminal log keeps whatever a command prints. You pass
+`SIGNER` on the make line, so the line would only repeat what your command
+already shows. `make` hides the command it runs, for the same reason.
 
 Use a keystore account or a hardware wallet for a direct broadcast. A raw
 private key on the command line enters your shell history.
