@@ -146,14 +146,19 @@ MANAGE_READ_ONLY := Status
 
 # MANAGE_FLAGS carries the mode. A Safe-mode run and a read-only run send
 # nothing, so both leave the flags empty. A direct broadcast adds the two
-# broadcast flags, and it demands a signer.
+# broadcast flags, and it demands a signer. MANAGE_MODE names the mode on
+# screen, because an exported SAFE decides it and the operator cannot see it
+# on the command line.
 ifneq ($(strip $(SAFE)),)
 MANAGE_FLAGS :=
+MANAGE_MODE := Safe mode. It writes an envelope for $(SAFE) and broadcasts nothing.
 else ifneq ($(filter $(MANAGE_READ_ONLY),$(SCRIPT)),)
 MANAGE_FLAGS :=
+MANAGE_MODE := read only. It sends no transaction.
 else
 MANAGE_FLAGS := --broadcast $(SIGNER)
 MANAGE_NEEDS_SIGNER := yes
+MANAGE_MODE := direct broadcast. It sends a transaction signed by $(SIGNER).
 endif
 
 # ---- the signing key --------------------------------------------------------
@@ -192,6 +197,7 @@ endif
 ifndef RPC_URL
 	$(error RPC_URL is not set. Example: make manage SCRIPT=Pause SIG='run()' RPC_URL=...)
 endif
+	@echo "manage: $(MANAGE_MODE)"
 	DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  script/manage/$(MANAGE_CONTRACT)/$(SCRIPT).s.sol:$(SCRIPT) \
 	  --sig '$(SIG)' $(ARGS) --rpc-url "$(RPC_URL)" $(MANAGE_FLAGS)

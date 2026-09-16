@@ -90,6 +90,15 @@ SAFE=0xYourSafe make manage DEPLOYMENT=BETH SCRIPT=Pause SIG='run()' \
 `make manage` refuses a direct broadcast without `SIGNER`. It stops with a
 guard error. Safe mode needs no `SIGNER`.
 
+`make manage` names its mode on its first line of output. An exported `SAFE`
+picks Safe mode, and that export is easy to forget. Read the line before you
+wait for a transaction:
+
+```
+manage: Safe mode. It writes an envelope for 0xYourSafe and broadcasts nothing.
+manage: direct broadcast. It sends a transaction signed by --account sentry.
+```
+
 Use a keystore account or a hardware wallet for a direct broadcast. A raw
 private key on the command line enters your shell history.
 
