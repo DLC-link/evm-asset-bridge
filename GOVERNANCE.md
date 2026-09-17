@@ -106,6 +106,9 @@ An upgrade follows four steps:
 
 The Multi-org Safe can cancel a pending upgrade at any time before execution.
 The Multi-org Safe cannot shorten the delay of a pending upgrade.
+The Multi-org Safe is the only account that can execute an upgrade.
+If that Safe cannot act, no upgrade path remains.
+The team accepts that tradeoff. It is the standard one for a timelock with a single executor.
 A change of the delay itself must pass through the same scheduled process.
 The mainnet deployment uses this design.
 
