@@ -10,8 +10,10 @@ function. The file name matches that function.
 
 A folder names a contract, and `DEPLOYMENT` names one instance of that
 contract. The scripts for `BitSafeEvmAssetBridge` live in
-`script/manage/BitSafeEvmAssetBridge/`. `DEPLOYMENT=BETH` picks the BETH
-bridge, and the deployment records pin its addresses.
+`script/manage/BitSafeEvmAssetBridge/`. `DEPLOYMENT=BETH` picks the
+production BETH bridge, and the deployment records pin its addresses. The
+two Sepolia instances are `BETH_DEVNET` and `BETH_TESTNET`. The root README
+lists all three names.
 
 **Warning.** The guard checks the contract name only. It cannot tell two
 deployments of the same contract apart. A wrong `DEPLOYMENT` value that
@@ -127,11 +129,11 @@ Load the environment file once for your shell instead. It sets `DEPLOYMENT`,
 and it sets `SAFE`. Every command below then needs neither:
 
 ```bash
-set -a; source .env.sepolia.BETH; set +a
+set -a; source .env.sepolia.BETH_DEVNET; set +a
 ```
 
-Pass `DEPLOYMENT=BETH` on a `make` line instead, when you do not load the
-file. The management targets set no default, and they stop without it.
+Pass `DEPLOYMENT=BETH_DEVNET` on a `make` line instead, when you do not load
+the file. The management targets set no default, and they stop without it.
 
 That file carries no `RPC_URL`. A keyed endpoint URL is a secret. Pass
 `RPC_URL` on the command line instead. You can also export it yourself.
@@ -502,7 +504,8 @@ export SAFE_API_KEY=...
 two requests to the service. A single run therefore stays inside the anonymous
 limit.
 
-Keep the key out of every tracked file. `.env.sepolia.BETH` holds no secret.
+Keep the key out of every tracked file. `.env.sepolia.BETH_DEVNET` holds no
+secret.
 
 ## 10. Status of this tooling
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "deploymentName": "BETH",
+  "deploymentName": "BETH_DEVNET",
   "role": "implementation",
   "chainId": 11155111,
   "address": "0xc2DBb9AF52DA4BA877c13Fdf55d128dA76AEE950",

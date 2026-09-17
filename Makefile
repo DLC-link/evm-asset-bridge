@@ -36,6 +36,10 @@ it-verify: it-build
 #
 # make deploy DEPLOYMENT=BETH RPC_URL=https://... SIGNER="--account deployer"
 #   The target runs the deploy script. It then writes the deployment records.
+#   DEPLOYMENT names the script and the records. BETH is the production
+#   bridge. BETH_DEVNET and BETH_TESTNET are the two Sepolia instances:
+#
+#   make deploy DEPLOYMENT=BETH_TESTNET RPC_URL=https://... SIGNER="--account deployer"
 #
 # SIGNER carries the signer flags straight to `forge script`. Foundry reads no
 # private key from the environment, so a broadcast needs one of its wallet
@@ -80,7 +84,7 @@ endif
 
 # ---- Verification ----------------------------------------------------------
 #
-# make verify DEPLOYMENT=BETH CHAIN_ID=11155111
+# make verify DEPLOYMENT=BETH_DEVNET CHAIN_ID=11155111
 #   Submits the source of all three contracts to the explorer.
 #
 # Set the API key first. The per-chain variable wins:
@@ -94,10 +98,10 @@ endif
 
 verify:
 ifndef DEPLOYMENT
-	$(error DEPLOYMENT is not set. Example: make verify DEPLOYMENT=BETH CHAIN_ID=11155111)
+	$(error DEPLOYMENT is not set. Example: make verify DEPLOYMENT=BETH_DEVNET CHAIN_ID=11155111)
 endif
 ifndef CHAIN_ID
-	$(error CHAIN_ID is not set. Example: make verify DEPLOYMENT=BETH CHAIN_ID=11155111)
+	$(error CHAIN_ID is not set. Example: make verify DEPLOYMENT=BETH_DEVNET CHAIN_ID=11155111)
 endif
 	DEPLOYMENT="$(DEPLOYMENT)" CHAIN_ID="$(CHAIN_ID)" \
 	  CONTRACT="$(CONTRACT)" DRY_RUN="$(DRY_RUN)" ./script/verify.sh
