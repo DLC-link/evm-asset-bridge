@@ -93,7 +93,7 @@ contract RolesTest is BridgeTestBase {
     }
 
     function test_setThreshold_boundsEnforced() public {
-        vm.startPrank(bridgeAdmin);
+        vm.startPrank(defaultAdmin);
         bridge.setThreshold(3); // == attestor count: allowed
         assertEq(bridge.threshold(), 3);
         vm.expectRevert(BitSafeEvmAssetBridge.ThresholdOutOfBounds.selector);
@@ -108,7 +108,7 @@ contract RolesTest is BridgeTestBase {
         bytes32 role = bridge.ATTESTOR_ROLE();
         vm.prank(defaultAdmin);
         bridge.grantRole(role, makeAddr("attestor4"));
-        vm.prank(bridgeAdmin);
+        vm.prank(defaultAdmin);
         bridge.setThreshold(2);
         assertEq(bridge.threshold(), 2);
     }
@@ -123,24 +123,36 @@ contract RolesTest is BridgeTestBase {
         vm.stopPrank();
         assertEq(bridge.getAttestors().length, 5);
 
-        vm.prank(bridgeAdmin);
+        vm.prank(defaultAdmin);
         bridge.setThreshold(2);
         assertEq(bridge.threshold(), 2);
     }
 
     function test_setThreshold_twoOfThree_passes() public {
-        vm.prank(bridgeAdmin);
+        vm.prank(defaultAdmin);
         bridge.setThreshold(2);
         assertEq(bridge.threshold(), 2);
     }
 
-    function test_setThreshold_requiresBridgeAdmin() public {
+    function test_setThreshold_requiresDefaultAdmin() public {
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector, user, bridge.BRIDGE_ADMIN_ROLE()
+                IAccessControl.AccessControlUnauthorizedAccount.selector, user, bridge.DEFAULT_ADMIN_ROLE()
             )
         );
         vm.prank(user);
+        bridge.setThreshold(2);
+    }
+
+    /// The bridge admin sets every other parameter. The threshold belongs to
+    /// the role that also decides the attestor set.
+    function test_setThreshold_rejectsBridgeAdmin() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, bridgeAdmin, bridge.DEFAULT_ADMIN_ROLE()
+            )
+        );
+        vm.prank(bridgeAdmin);
         bridge.setThreshold(2);
     }
 

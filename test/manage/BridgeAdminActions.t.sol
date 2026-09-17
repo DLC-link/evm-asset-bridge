@@ -6,7 +6,6 @@ import {BitSafeEvmAssetBridge} from "../../src/BitSafeEvmAssetBridge.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {Pause} from "../../script/manage/BitSafeEvmAssetBridge/Pause.s.sol";
 import {Unpause} from "../../script/manage/BitSafeEvmAssetBridge/Unpause.s.sol";
-import {SetThreshold} from "../../script/manage/BitSafeEvmAssetBridge/SetThreshold.s.sol";
 import {SetDepositLimits} from "../../script/manage/BitSafeEvmAssetBridge/SetDepositLimits.s.sol";
 import {SetWithdrawLimits} from "../../script/manage/BitSafeEvmAssetBridge/SetWithdrawLimits.s.sol";
 import {SetWithdrawRateLimit} from "../../script/manage/BitSafeEvmAssetBridge/SetWithdrawRateLimit.s.sol";
@@ -37,11 +36,6 @@ contract BridgeAdminActionsTest is BridgeTestBase {
         _run(new Pause().encode());
         _run(new Unpause().encode());
         assertFalse(bridge.paused());
-    }
-
-    function test_setThreshold() public {
-        _run(new SetThreshold().encode(3));
-        assertEq(bridge.threshold(), 3);
     }
 
     function test_setDepositLimits() public {

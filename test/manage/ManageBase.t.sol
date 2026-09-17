@@ -242,7 +242,7 @@ contract ManageBaseTest is BridgeTestBase {
     function test_safeMode_writesAnEnvelopeAfterProvingTheCallSucceeds() public {
         _writeImplRecord("MANAGEWRITE", "BitSafeEvmAssetBridge");
         DummyWriteAction dummy = new DummyWriteAction();
-        dummy.configure(address(bridge), bridgeAdmin);
+        dummy.configure(address(bridge), defaultAdmin);
         dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
 
         // vm.prank spoofs msg.sender only. It does not roll back state, so
@@ -254,7 +254,7 @@ contract ManageBaseTest is BridgeTestBase {
         string memory path = "deployments/.safe/MANAGEWRITE.31337.dummyWrite.json";
         string memory json = vm.readFile(path);
         assertEq(vm.parseJsonString(json, ".deployment"), "MANAGEWRITE");
-        assertEq(vm.parseJsonAddress(json, ".safe"), bridgeAdmin);
+        assertEq(vm.parseJsonAddress(json, ".safe"), defaultAdmin);
         assertEq(vm.parseJsonAddress(json, ".to"), address(bridge));
         assertEq(vm.parseJsonUint(json, ".chainId"), 31337);
         assertEq(vm.parseJsonUint(json, ".operation"), 0);
@@ -271,7 +271,7 @@ contract ManageBaseTest is BridgeTestBase {
         _writeImplRecord("MANAGETO", "BitSafeEvmAssetBridge");
         BitSafeEvmAssetBridge otherBridge = _deployBridge(address(0));
         DummyToOverrideAction dummy = new DummyToOverrideAction();
-        dummy.configure(address(bridge), bridgeAdmin);
+        dummy.configure(address(bridge), defaultAdmin);
         dummy.runAt(address(otherBridge), abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
 
         string memory path = "deployments/.safe/MANAGETO.31337.dummyToOverride.json";
@@ -298,7 +298,7 @@ contract ManageBaseTest is BridgeTestBase {
         dummy.configure(address(bridge), user);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector, user, bridge.BRIDGE_ADMIN_ROLE()
+                IAccessControl.AccessControlUnauthorizedAccount.selector, user, bridge.DEFAULT_ADMIN_ROLE()
             )
         );
         dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
@@ -333,9 +333,9 @@ contract ManageBaseTest is BridgeTestBase {
         _writeImplRecord("MANAGEDIRECT", "BitSafeEvmAssetBridge");
         DummyDirectAction dummy = new DummyDirectAction();
         dummy.configure(address(bridge), address(0));
-        dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
+        dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.pause, ()));
 
-        assertEq(bridge.threshold(), 3);
+        assertTrue(bridge.paused());
         _removeImplRecord("MANAGEDIRECT");
     }
 

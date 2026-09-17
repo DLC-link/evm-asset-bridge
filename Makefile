@@ -110,7 +110,7 @@ endif
 # each action.
 #
 # make manage DEPLOYMENT=BETH SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3 \
-#   RPC_URL=https://... SIGNER="--account bridgeAdmin"
+#   RPC_URL=https://... SIGNER="--account defaultAdmin"
 #   Runs one admin action. SCRIPT names the file and the contract. SIG names
 #   the `run` signature of that contract. ARGS holds the arguments.
 #

@@ -3,6 +3,7 @@ pragma solidity 0.8.34;
 
 import {BridgeTestBase} from "../BridgeTestBase.t.sol";
 import {GrantRole} from "../../script/manage/BitSafeEvmAssetBridge/GrantRole.s.sol";
+import {SetThreshold} from "../../script/manage/BitSafeEvmAssetBridge/SetThreshold.s.sol";
 import {RevokeRole} from "../../script/manage/BitSafeEvmAssetBridge/RevokeRole.s.sol";
 import {RenounceRole} from "../../script/manage/BitSafeEvmAssetBridge/RenounceRole.s.sol";
 import {BeginDefaultAdminTransfer} from "../../script/manage/BitSafeEvmAssetBridge/BeginDefaultAdminTransfer.s.sol";
@@ -39,6 +40,11 @@ contract DefaultAdminActionsTest is BridgeTestBase {
         GrantRole script = new GrantRole();
         vm.expectRevert(bytes("unknown role name"));
         script.roleByName("OPERATOR");
+    }
+
+    function test_setThreshold_fromTheDefaultAdmin() public {
+        _runAs(defaultAdmin, new SetThreshold().encode(3));
+        assertEq(bridge.threshold(), 3);
     }
 
     function test_grantRole_grantsSentry() public {

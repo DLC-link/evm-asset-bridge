@@ -281,7 +281,10 @@ contract BitSafeEvmAssetBridge is
         _unpause();
     }
 
-    function setThreshold(uint256 newThreshold) external onlyRole(BRIDGE_ADMIN_ROLE) {
+    /// @notice The default admin sets the threshold. The threshold and the
+    ///         attestor set together define how many operators must agree, so
+    ///         one role owns both.
+    function setThreshold(uint256 newThreshold) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _setThreshold(newThreshold, _getBridgeStorage().attestors.length());
     }
 
