@@ -90,6 +90,8 @@ abstract contract BridgeDeploy is DeployBase {
     /// role to every proposer. The zero admin makes the timelock its own admin,
     /// so a role or delay change also waits the delay.
     function _deployTimelock(uint256 delay, address proxyOwner) internal returns (TimelockController) {
+        require(delay > 0, "TIMELOCK_DELAY is zero");
+        require(proxyOwner != address(0), "PROXY_OWNER is zero");
         address[] memory proposers = new address[](1);
         proposers[0] = proxyOwner;
         address[] memory executors = new address[](1);
