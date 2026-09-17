@@ -21,6 +21,10 @@ abstract contract BridgeDeploy is DeployBase {
     string internal constant OZ_TIMELOCK_PATH =
         "lib/openzeppelin-contracts/contracts/governance/TimelockController.sol";
 
+    /// A delay below one minute gives no real review window. A zero delay
+    /// lets the proxy owner schedule and execute an upgrade in one block.
+    uint256 internal constant MIN_TIMELOCK_DELAY = 60;
+
     /// One struct keeps `run` inside the EVM stack limit. The ninth
     /// initialize parameter already pushed the old script past it.
     struct Params {
@@ -87,10 +91,11 @@ abstract contract BridgeDeploy is DeployBase {
     }
 
     /// The proxy owner proposes, cancels, and executes. OZ grants the canceller
-    /// role to every proposer. The zero admin makes the timelock its own admin,
-    /// so a role or delay change also waits the delay.
+    /// role to every proposer. OZ always grants the admin role to the timelock
+    /// itself. The zero admin argument adds no second admin, so a role or delay
+    /// change has to pass through the timelock and waits the delay.
     function _deployTimelock(uint256 delay, address proxyOwner) internal returns (TimelockController) {
-        require(delay > 0, "TIMELOCK_DELAY is zero");
+        require(delay >= MIN_TIMELOCK_DELAY, "TIMELOCK_DELAY too low");
         require(proxyOwner != address(0), "PROXY_OWNER is zero");
         address[] memory proposers = new address[](1);
         proposers[0] = proxyOwner;

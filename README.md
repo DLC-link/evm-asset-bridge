@@ -52,7 +52,7 @@ The deploy reads its configuration from the environment:
 | --- | --- |
 | `ASSET` | Bridged asset address; `address(0)` for ETH, else the ERC20 address |
 | `TARGET_DECIMALS` | Decimal places the target chain expresses; `10` for Canton, 1 to 10 |
-| `DEFAULT_ADMIN` | Address granted the default admin role (governs role management and the signature threshold) |
+| `DEFAULT_ADMIN` | Address granted the default admin role (governs role management and the signature threshold); on mainnet the multi-organisation Safe, which also drives the upgrade timelock |
 | `ADMIN_DELAY` | Default-admin transfer delay, in seconds |
 | `BRIDGE_ADMIN` | Address granted `BRIDGE_ADMIN_ROLE` (pause, limits, rescue) |
 | `PROXY_OWNER` | Proposer, canceller, and executor of the timelock that owns the `ProxyAdmin`; on mainnet the multi-organisation Safe, same as `DEFAULT_ADMIN` |
