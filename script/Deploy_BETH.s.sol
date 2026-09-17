@@ -29,6 +29,8 @@ contract Deploy_BETH is BridgeDeploy {
         p.adminDelay = uint48(adminDelayRaw);
         p.bridgeAdmin = vm.envAddress("BRIDGE_ADMIN");
         p.proxyOwner = vm.envAddress("PROXY_OWNER");
+        p.timelockDelay = vm.envUint("TIMELOCK_DELAY");
+        require(p.timelockDelay >= MIN_TIMELOCK_DELAY, "TIMELOCK_DELAY too low");
         p.attestors = vm.envAddress("ATTESTORS", ",");
         // A bridge with no attestor can release nothing. Foundry stops on an
         // empty ATTESTORS before this line today. The require states the intent

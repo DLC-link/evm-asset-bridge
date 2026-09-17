@@ -12,8 +12,11 @@ BitSafeEvmAssetBridge: an upgradeable EVM contract that locks one asset
 ## Production deploy
 
 `script/Deploy_BETH.s.sol` deploys the implementation behind a
-`TransparentUpgradeableProxy`. The part of the file name after the underscore is
-the deployment name. A second bridged asset gets its own `Deploy_<NAME>.s.sol`.
+`TransparentUpgradeableProxy`. It also deploys an OpenZeppelin
+`TimelockController` that owns the `ProxyAdmin`. An upgrade therefore waits
+`TIMELOCK_DELAY` seconds in public before it can execute. The part of the file
+name after the underscore is the deployment name. A second bridged asset gets
+its own `Deploy_<NAME>.s.sol`.
 
 ```
 make deploy DEPLOYMENT=BETH RPC_URL=<url> SIGNER="--account deployer --sender 0xYourDeployer"
@@ -49,10 +52,11 @@ The deploy reads its configuration from the environment:
 | --- | --- |
 | `ASSET` | Bridged asset address; `address(0)` for ETH, else the ERC20 address |
 | `TARGET_DECIMALS` | Decimal places the target chain expresses; `10` for Canton, 1 to 10 |
-| `DEFAULT_ADMIN` | Address granted the default admin role (governs role management and the signature threshold) |
+| `DEFAULT_ADMIN` | Address granted the default admin role (governs role management and the signature threshold); on mainnet the multi-organisation Safe, which also drives the upgrade timelock |
 | `ADMIN_DELAY` | Default-admin transfer delay, in seconds |
 | `BRIDGE_ADMIN` | Address granted `BRIDGE_ADMIN_ROLE` (pause, limits, rescue) |
-| `PROXY_OWNER` | Owner of the `ProxyAdmin` created for the transparent proxy |
+| `PROXY_OWNER` | Proposer, canceller, and executor of the timelock that owns the `ProxyAdmin`; on mainnet the multi-organisation Safe, same as `DEFAULT_ADMIN` |
+| `TIMELOCK_DELAY` | Upgrade timelock delay, in seconds; an upgrade waits this long after its proposal |
 | `ATTESTORS` | Comma-separated attestor addresses granted `ATTESTOR_ROLE` |
 | `THRESHOLD` | Number of attestor signatures required per withdrawal |
 | `DEPOSIT_MIN` | Minimum deposit amount (0 = no minimum) |
@@ -144,13 +148,14 @@ Safe flow, and the ordering rules.
 
 ## Deployment records
 
-One deploy creates three contracts. It therefore writes three records:
+One deploy creates four contracts. It therefore writes four records:
 
 ```
 deployments/
   BETH.proxy.<chainId>.json           <- the address every consumer calls
   BETH.implementation.<chainId>.json  <- the bridge ABI
   BETH.proxyAdmin.<chainId>.json      <- the contract that can upgrade the proxy
+  BETH.timelock.<chainId>.json        <- the contract that owns the ProxyAdmin
   solcInputs/<hash>.json              <- the exact compiler input
 ```
 
@@ -161,7 +166,10 @@ Every record holds the address, the ABI-encoded constructor arguments, the
 transaction receipt, the contract ABI, the compiler settings, and the git
 commit. It holds nothing that names the machine that ran the deploy. The proxy
 record holds five more fields: `implementation`,
-`proxyAdmin`, `bridgeConfig`, `numDeployments`, and `history`.
+`proxyAdmin`, `bridgeConfig`, `numDeployments`, and `history`. The ProxyAdmin
+record holds `owner`, which names the timelock, and `createdBy`, which names
+the proxy. The timelock record holds `minDelay`, `proposers`, `executors`, and
+`admin`. The admin is the zero address, so the timelock administers itself.
 
 Every record also opens with `schemaVersion`, which is `1` today. A consumer
 outside this repo reads it to detect a migration.
@@ -171,7 +179,8 @@ decimals fields:
 
 ```
 asset, assetDecimals, targetDecimals, depositUnit, defaultAdmin, adminDelay,
-bridgeAdmin, proxyOwner, attestors, threshold, depositLimits, withdrawLimits
+bridgeAdmin, proxyOwner, timelock, timelockDelay, attestors, threshold,
+depositLimits, withdrawLimits
 ```
 
 The record holds the deploy-time configuration only. The post-deploy setters
@@ -239,7 +248,7 @@ The command does not run in CI. It runs on an operator's machine.
 
 ### Link the proxy on Etherscan
 
-The command verifies the source of all three contracts. It does not send
+The command verifies the source of all four contracts. It does not send
 Etherscan's separate proxy-link call, so the proxy page can miss the
 "Read as Proxy" and "Write as Proxy" tabs. When the tabs are missing, open
 the proxy address on Etherscan and use "More Options" > "Is this a proxy?".

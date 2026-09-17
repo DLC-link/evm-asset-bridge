@@ -6,6 +6,10 @@ import {Deploy_BETH} from "../script/Deploy_BETH.s.sol";
 import {Deploy_BETH_DEVNET} from "../script/Deploy_BETH_DEVNET.s.sol";
 import {Deploy_BETH_TESTNET} from "../script/Deploy_BETH_TESTNET.s.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
+import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
+import {ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 contract DeployTest is Test {
     /// Forge runs test functions in parallel, and `vm.setEnv` writes process
@@ -19,28 +23,47 @@ contract DeployTest is Test {
         string memory path = string.concat("deployments/.pending/BETH.", vm.toString(block.chainid), ".json");
         string memory json = vm.readFile(path);
 
-        // The three roles appear in a fixed order. script/record.sh relies on it.
+        // The four roles appear in a fixed order. script/record.sh relies on it.
         string[] memory roles = vm.parseJsonStringArray(json, ".roles");
-        assertEq(roles.length, 3);
+        assertEq(roles.length, 4);
         assertEq(roles[0], "implementation");
-        assertEq(roles[1], "proxy");
-        assertEq(roles[2], "proxyAdmin");
+        assertEq(roles[1], "timelock");
+        assertEq(roles[2], "proxy");
+        assertEq(roles[3], "proxyAdmin");
 
         address[] memory addresses = vm.parseJsonAddressArray(json, ".addresses");
-        assertEq(addresses.length, 3);
+        assertEq(addresses.length, 4);
 
         // The proxy is live and initialized.
-        BitSafeEvmAssetBridge bridge = BitSafeEvmAssetBridge(payable(addresses[1]));
+        BitSafeEvmAssetBridge bridge = BitSafeEvmAssetBridge(payable(addresses[2]));
         assertEq(bridge.threshold(), 2);
         assertEq(bridge.getAttestors().length, 3);
 
         // The ProxyAdmin address comes from the EIP-1967 admin slot.
         bytes32 adminSlot = 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
-        assertEq(addresses[2], address(uint160(uint256(vm.load(addresses[1], adminSlot)))));
+        assertEq(addresses[3], address(uint160(uint256(vm.load(addresses[2], adminSlot)))));
+
+        // The timelock owns the ProxyAdmin. An upgrade therefore waits the delay.
+        assertEq(Ownable(addresses[3]).owner(), addresses[1]);
+
+        // The proxy owner drives the timelock. The timelock administers itself,
+        // so a role or delay change also waits the delay.
+        TimelockController timelock = TimelockController(payable(addresses[1]));
+        address proxyOwner = makeAddr("po");
+        assertTrue(timelock.hasRole(timelock.PROPOSER_ROLE(), proxyOwner));
+        assertTrue(timelock.hasRole(timelock.EXECUTOR_ROLE(), proxyOwner));
+        assertTrue(timelock.hasRole(timelock.CANCELLER_ROLE(), proxyOwner));
+        assertTrue(timelock.hasRole(timelock.DEFAULT_ADMIN_ROLE(), addresses[1]));
+        assertFalse(timelock.hasRole(timelock.DEFAULT_ADMIN_ROLE(), proxyOwner));
+        assertEq(timelock.getMinDelay(), 3600);
+
+        _upgradeOnlyThroughTheTimelock(timelock, addresses[3], addresses[2], proxyOwner);
 
         // The record carries what the old thin file never held.
         assertEq(vm.parseJsonString(json, ".deploymentName"), "BETH");
-        assertEq(vm.parseJsonAddress(json, ".proxyOwner"), makeAddr("po"));
+        assertEq(vm.parseJsonAddress(json, ".proxyOwner"), proxyOwner);
+        assertEq(vm.parseJsonAddress(json, ".timelock"), addresses[1]);
+        assertEq(vm.parseJsonUint(json, ".timelockDelay"), 3600);
         assertEq(vm.parseJsonUint(json, ".threshold"), 2);
 
         // The three decimals values come back from the deployed contract.
@@ -66,6 +89,14 @@ contract DeployTest is Test {
         vm.expectRevert(bytes("ADMIN_DELAY out of range"));
         wideDelay.run();
 
+        // A short timelock delay removes the review window this deploy promises.
+        // A zero delay would let one Safe schedule and execute in one block.
+        _setValidEnv();
+        vm.setEnv("TIMELOCK_DELAY", "59");
+        Deploy_BETH shortTimelock = new Deploy_BETH();
+        vm.expectRevert(bytes("TIMELOCK_DELAY too low"));
+        shortTimelock.run();
+
         // Each Sepolia instance carries its own name. Two instances with one
         // name would write the same record files.
         assertEq(new Deploy_BETH_DEVNET().deploymentName(), "BETH_DEVNET");
@@ -89,6 +120,45 @@ contract DeployTest is Test {
         noAttestors.run();
     }
 
+    /// Proves the property the timelock adds. The proxy owner cannot upgrade
+    /// through the ProxyAdmin directly. A scheduled upgrade cannot execute
+    /// before the delay, and it does execute after it.
+    function _upgradeOnlyThroughTheTimelock(
+        TimelockController timelock,
+        address proxyAdmin,
+        address proxy,
+        address proxyOwner
+    ) internal {
+        bytes32 implSlot = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+        address before = address(uint160(uint256(vm.load(proxy, implSlot))));
+        BitSafeEvmAssetBridge next = new BitSafeEvmAssetBridge();
+        bytes memory upgrade = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall, (ITransparentUpgradeableProxy(payable(proxy)), address(next), "")
+        );
+
+        // The direct path is closed: only the timelock owns the ProxyAdmin.
+        vm.prank(proxyOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, proxyOwner));
+        ProxyAdmin(proxyAdmin).upgradeAndCall(ITransparentUpgradeableProxy(payable(proxy)), address(next), "");
+
+        bytes32 salt = keccak256("upgrade");
+        uint256 delay = timelock.getMinDelay();
+        vm.prank(proxyOwner);
+        timelock.schedule(proxyAdmin, 0, upgrade, bytes32(0), salt, delay);
+
+        // One second before the delay ends, the operation is not ready.
+        vm.warp(block.timestamp + delay - 1);
+        vm.prank(proxyOwner);
+        vm.expectRevert();
+        timelock.execute(proxyAdmin, 0, upgrade, bytes32(0), salt);
+        assertEq(address(uint160(uint256(vm.load(proxy, implSlot)))), before);
+
+        vm.warp(block.timestamp + 1);
+        vm.prank(proxyOwner);
+        timelock.execute(proxyAdmin, 0, upgrade, bytes32(0), salt);
+        assertEq(address(uint160(uint256(vm.load(proxy, implSlot)))), address(next));
+    }
+
     function _setValidEnv() internal {
         vm.setEnv("ASSET", "0x0000000000000000000000000000000000000000");
         vm.setEnv("TARGET_DECIMALS", "10");
@@ -96,6 +166,7 @@ contract DeployTest is Test {
         vm.setEnv("ADMIN_DELAY", "172800");
         vm.setEnv("BRIDGE_ADMIN", vm.toString(makeAddr("ba")));
         vm.setEnv("PROXY_OWNER", vm.toString(makeAddr("po")));
+        vm.setEnv("TIMELOCK_DELAY", "3600");
         vm.setEnv(
             "ATTESTORS",
             string.concat(

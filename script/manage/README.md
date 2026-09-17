@@ -534,16 +534,20 @@ One item stays unproven. The script maps each chain to a Safe short name. Only
 the Sepolia short name `sep` ran live. Treat the first run on another chain as
 a test.
 
-## 11. Open question: how many Safes govern a deployment
+## 11. Which Safes govern a deployment
 
-The team has not decided this. The team discusses three shapes:
+Two Safes govern a production deployment. `GOVERNANCE.md` at the repo root
+describes them for a non-technical reader.
 
-1. **Three Safes.** The deployment uses one Safe for each authority. The three
-   authorities are `DEFAULT_ADMIN`, `BRIDGE_ADMIN` and the `ProxyAdmin` owner.
-2. **Two Safes.** A slow Safe holds `DEFAULT_ADMIN`. The same slow Safe owns
-   the `ProxyAdmin`. A fast Safe holds `BRIDGE_ADMIN`.
-3. **One Safe.** One Safe holds all three authorities.
+1. **The multi-organisation Safe.** BitSafe and the operator partners control
+   it together. It holds `DEFAULT_ADMIN`, and it is the proposer, canceller,
+   and executor of the timelock that owns the `ProxyAdmin`. `DEFAULT_ADMIN`
+   and `PROXY_OWNER` therefore name the same address on mainnet.
+2. **The BitSafe Safe.** BitSafe alone controls it. It holds `BRIDGE_ADMIN`.
 
-The tooling does not depend on the answer. `SAFE` names the Safe on every
+No Safe owns the `ProxyAdmin` directly. The timelock owns it, and an upgrade
+waits `TIMELOCK_DELAY` seconds between its proposal and its execution. The
+Sepolia instances use one Safe for every authority.
+
+The tooling does not depend on the shape. `SAFE` names the Safe on every
 invocation. An operator points each action at the Safe that holds its role.
-A later change of shape needs no change to these scripts.

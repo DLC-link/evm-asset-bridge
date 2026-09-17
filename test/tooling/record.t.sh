@@ -15,6 +15,8 @@ FAILURES=0
 # sources the same file, so both tests clean up the same way.
 . "$ROOT/test/tooling/lib.sh"
 
+lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
+
 echo "== the deploy target quotes the RPC URL =="
 # An RPC URL often carries a query string. An unquoted `&` makes the shell run
 # `forge script` in the background, so `make deploy` reports success while the
@@ -64,6 +66,7 @@ export DEFAULT_ADMIN=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
 export ADMIN_DELAY=0
 export BRIDGE_ADMIN=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
 export PROXY_OWNER=0x90F79bf6EB2c4f870365E785982E1f101E93b906
+export TIMELOCK_DELAY=60
 export ATTESTORS=0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65,0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc,0x976EA74026E726554dB657fA54763abd0C3a0aa9
 export THRESHOLD=2
 export DEPOSIT_MIN=0
@@ -81,8 +84,9 @@ echo "== checks =="
 P="deployments/BETH.proxy.$CHAIN_ID.json"
 I="deployments/BETH.implementation.$CHAIN_ID.json"
 A="deployments/BETH.proxyAdmin.$CHAIN_ID.json"
+T="deployments/BETH.timelock.$CHAIN_ID.json"
 
-for f in "$P" "$I" "$A"; do
+for f in "$P" "$I" "$A" "$T"; do
   if [ -f "$f" ]; then echo "  ok   $f exists"; else echo "  FAIL $f missing"; FAILURES=$((FAILURES + 1)); fi
 done
 
@@ -93,6 +97,7 @@ check "proxy role"          "$(jq -r .role "$P")"          "proxy"
 check "proxy contractName"  "$(jq -r .contractName "$P")"  "TransparentUpgradeableProxy"
 check "impl contractName"   "$(jq -r .contractName "$I")"  "BitSafeEvmAssetBridge"
 check "admin contractName"  "$(jq -r .contractName "$A")"  "ProxyAdmin"
+check "timelock contractName" "$(jq -r .contractName "$T")" "TimelockController"
 check "deploymentName"      "$(jq -r .deploymentName "$P")" "BETH"
 check "chainId"             "$(jq -r .chainId "$P")"       "$CHAIN_ID"
 
@@ -100,6 +105,7 @@ check "chainId"             "$(jq -r .chainId "$P")"       "$CHAIN_ID"
 check "proxy schemaVersion" "$(jq -r .schemaVersion "$P")" "1"
 check "impl schemaVersion"  "$(jq -r .schemaVersion "$I")" "1"
 check "admin schemaVersion" "$(jq -r .schemaVersion "$A")" "1"
+check "timelock schemaVersion" "$(jq -r .schemaVersion "$T")" "1"
 
 # The proxy's third constructor argument is the initialize calldata.
 check "impl has no ctor args" "$(jq -r .encodedConstructorArgs "$I")" "0x"
@@ -107,21 +113,50 @@ check "impl has no ctor args" "$(jq -r .encodedConstructorArgs "$I")" "0x"
 PROXY_ADDR=$(jq -r .address "$P")
 IMPL_ADDR=$(jq -r .address "$I")
 ADMIN_ADDR=$(jq -r .address "$A")
+TIMELOCK_ADDR=$(jq -r .address "$T")
+ZERO=0x0000000000000000000000000000000000000000
 
 # Argument 1 of the proxy constructor is the implementation address.
 DECODED_ALL=$(cast abi-decode --input "c(address,address,bytes)" "$(jq -r .encodedConstructorArgs "$P")")
 DECODED_IMPL=${DECODED_ALL%%$'\n'*}
 check "proxy arg0 == implementation" "$(cast to-check-sum-address "$DECODED_IMPL")" "$(cast to-check-sum-address "$IMPL_ADDR")"
 
-# The ProxyAdmin's only constructor argument is its owner.
+# The timelock owns the ProxyAdmin, so the ProxyAdmin's only constructor
+# argument and its owner field both name the timelock.
 DECODED_OWNER=$(cast abi-decode --input "c(address)" "$(jq -r .encodedConstructorArgs "$A")")
-check "proxyAdmin arg0 == PROXY_OWNER" "$(cast to-check-sum-address "$DECODED_OWNER")" "$(cast to-check-sum-address "$PROXY_OWNER")"
-check "proxyAdmin owner field"         "$(cast to-check-sum-address "$(jq -r .owner "$A")")" "$(cast to-check-sum-address "$PROXY_OWNER")"
-check "proxyAdmin createdBy"           "$(cast to-check-sum-address "$(jq -r .createdBy "$A")")" "$(cast to-check-sum-address "$PROXY_ADDR")"
+check "proxyAdmin arg0 == timelock" "$(cast to-check-sum-address "$DECODED_OWNER")" "$(cast to-check-sum-address "$TIMELOCK_ADDR")"
+check "proxyAdmin owner field"      "$(cast to-check-sum-address "$(jq -r .owner "$A")")" "$(cast to-check-sum-address "$TIMELOCK_ADDR")"
+check "proxyAdmin createdBy"        "$(cast to-check-sum-address "$(jq -r .createdBy "$A")")" "$(cast to-check-sum-address "$PROXY_ADDR")"
+
+# The timelock record names its own configuration. An operator reads the
+# delay and the roles from the record without a chain call.
+check "timelock role"     "$(jq -r .role "$T")"     "timelock"
+check "timelock minDelay" "$(jq -r .minDelay "$T")" "$TIMELOCK_DELAY"
+check "timelock proposers" "$(jq -r '.proposers | length' "$T")" "1"
+check "timelock proposer is PROXY_OWNER" \
+  "$(cast to-check-sum-address "$(jq -r '.proposers[0]' "$T")")" "$(cast to-check-sum-address "$PROXY_OWNER")"
+check "timelock executors" "$(jq -r '.executors | length' "$T")" "1"
+check "timelock executor is PROXY_OWNER" \
+  "$(cast to-check-sum-address "$(jq -r '.executors[0]' "$T")")" "$(cast to-check-sum-address "$PROXY_OWNER")"
+# The zero admin makes the timelock its own admin.
+check "timelock admin is zero" "$(jq -r .admin "$T")" "$ZERO"
+
+# The constructor arguments agree with the four fields above.
+TL_ARGS=$(cast abi-decode --input "c(uint256,address[],address[],address)" "$(jq -r .encodedConstructorArgs "$T")")
+check "timelock arg0 == TIMELOCK_DELAY" "$(printf '%s' "$TL_ARGS" | sed -n 1p)" "$TIMELOCK_DELAY"
+check "timelock arg1 == [PROXY_OWNER]" \
+  "$(printf '%s' "$TL_ARGS" | sed -n 2p | tr -d '[] ' | tr 'A-F' 'a-f')" "$(lower "$PROXY_OWNER")"
+check "timelock arg2 == [PROXY_OWNER]" \
+  "$(printf '%s' "$TL_ARGS" | sed -n 3p | tr -d '[] ' | tr 'A-F' 'a-f')" "$(lower "$PROXY_OWNER")"
+check "timelock arg3 == zero" "$(printf '%s' "$TL_ARGS" | sed -n 4p | tr 'A-F' 'a-f')" "$ZERO"
+check "no bridgeConfig on timelock" "$(jq -r 'has("bridgeConfig")' "$T")" "false"
 
 # The proxy record links the other two.
 check "proxy.implementation" "$(cast to-check-sum-address "$(jq -r .implementation "$P")")" "$(cast to-check-sum-address "$IMPL_ADDR")"
 check "proxy.proxyAdmin"     "$(cast to-check-sum-address "$(jq -r .proxyAdmin "$P")")"     "$(cast to-check-sum-address "$ADMIN_ADDR")"
+check "bridgeConfig.timelock" "$(cast to-check-sum-address "$(jq -r .bridgeConfig.timelock "$P")")" "$(cast to-check-sum-address "$TIMELOCK_ADDR")"
+check "bridgeConfig.timelockDelay" "$(jq -r .bridgeConfig.timelockDelay "$P")" "$TIMELOCK_DELAY"
+check "bridgeConfig.proxyOwner"    "$(cast to-check-sum-address "$(jq -r .bridgeConfig.proxyOwner "$P")")" "$(cast to-check-sum-address "$PROXY_OWNER")"
 
 # The bridge configuration is nested on the proxy record only.
 check "bridgeConfig.threshold" "$(jq -r .bridgeConfig.threshold "$P")" "2"
@@ -147,12 +182,16 @@ check "the proxy receipt names the proxy" \
   "$(cast to-check-sum-address "$(jq -r .receipt.contractAddress "$P")")" \
   "$(cast to-check-sum-address "$PROXY_ADDR")"
 
+check "the timelock receipt names the timelock" \
+  "$(cast to-check-sum-address "$(jq -r .receipt.contractAddress "$T")")" \
+  "$(cast to-check-sum-address "$TIMELOCK_ADDR")"
+
 # The ProxyAdmin has no transaction of its own. Its creator's receipt records it.
 check "the admin receipt names its creator" \
   "$(cast to-check-sum-address "$(jq -r .receipt.contractAddress "$A")")" \
   "$(cast to-check-sum-address "$(jq -r .createdBy "$A")")"
 
-for f in "$P" "$I" "$A"; do
+for f in "$P" "$I" "$A" "$T"; do
   check "$(basename "$f") agrees with its receipt" \
     "$(jq -r '.transactionHash == .receipt.transactionHash' "$f")" "true"
 done
@@ -169,9 +208,9 @@ check "compiler version" "$(jq -r .compiler.version "$I")" "0.8.34+commit.80d5c5
 # An operator commits these files, so they must name no local path. foundry
 # writes seven of its remappings as absolute paths. Those reach the build
 # artifact under `metadata.settings.remappings` and `rawMetadata`, so the record
-# keeps the ABI alone. Dropping the artifact also cuts the three records for one
+# keeps the ABI alone. Dropping the artifact also cuts the records for one
 # chain from 290 KB to about 20 KB.
-for f in "$P" "$I" "$A"; do
+for f in "$P" "$I" "$A" "$T"; do
   b=$(basename "$f")
   check "no build artifact in $b" "$(jq -r 'has("artifact")' "$f")" "false"
   check "no absolute path in $b"  "$(grep -c -E '/(Users|home|root)/' "$f" || true)" "0"

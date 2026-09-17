@@ -11,6 +11,11 @@
 # deployments/solcInputs/<hash>.json for each distinct compiler input. Then it
 # removes the pending file.
 #
+# Three roles carry extra fields. `timelock` gets minDelay, proposers,
+# executors, and admin. `proxyAdmin` gets owner and createdBy, where owner is
+# the timelock. `proxy` gets implementation, proxyAdmin, bridgeConfig,
+# numDeployments, and history.
+#
 # Usage: ./script/record.sh <deploymentName> [chainId]
 #
 # The chain id also comes from CHAIN_ID in the environment. It picks the exact
@@ -264,8 +269,22 @@ for ((i = 0; i < COUNT; i++)); do
     }' >"$OUT.tmp"
 
   # ---- role-specific fields -------------------------------------------------
+  if [ "$ROLE" = "timelock" ]; then
+    # The proxy owner proposes, cancels, and executes. The zero admin makes the
+    # timelock its own admin. The record repeats the constructor arguments as
+    # named fields, so an operator reads them without a decode.
+    jq --slurpfile pending "$PENDING" \
+      '. + {
+        minDelay: $pending[0].timelockDelay,
+        proposers: [$pending[0].proxyOwner],
+        executors: [$pending[0].proxyOwner],
+        admin: "0x0000000000000000000000000000000000000000"
+      }' "$OUT.tmp" >"$OUT.tmp2" && mv "$OUT.tmp2" "$OUT.tmp"
+  fi
+
   if [ "$ROLE" = "proxyAdmin" ]; then
-    OWNER=$(jq -r .proxyOwner "$PENDING")
+    # The timelock owns the ProxyAdmin. The Safe drives the timelock.
+    OWNER=$(jq -r .timelock "$PENDING")
     jq --arg owner "$OWNER" --arg createdBy "$CREATED_BY" \
       '. + {owner: $owner, createdBy: $createdBy}' "$OUT.tmp" >"$OUT.tmp2" && mv "$OUT.tmp2" "$OUT.tmp"
   fi
@@ -323,6 +342,8 @@ for ((i = 0; i < COUNT; i++)); do
           adminDelay: $pending[0].adminDelay,
           bridgeAdmin: $pending[0].bridgeAdmin,
           proxyOwner: $pending[0].proxyOwner,
+          timelock: $pending[0].timelock,
+          timelockDelay: $pending[0].timelockDelay,
           attestors: $pending[0].attestors,
           threshold: $pending[0].threshold,
           depositLimits: {min: $pending[0].depositMin, max: $pending[0].depositMax},
