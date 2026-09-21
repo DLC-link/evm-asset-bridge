@@ -170,6 +170,96 @@ MANAGE_NEEDS_SIGNER := yes
 MANAGE_MODE := direct broadcast. It signs and sends a transaction now.
 endif
 
+# ---- Upgrades ----------------------------------------------------------------
+#
+# The upgrade targets drive a proxy whose ProxyAdmin belongs to a timelock.
+# script/manage/README.md section 12 holds the operator sequence. Every target
+# needs DEPLOYMENT and RPC_URL. The chain id comes from the RPC. Each target
+# runs the sync before it acts, and again after a direct broadcast, so the
+# records always match the chain when the command returns.
+#
+# make upgrade-deploy DEPLOYMENT=BETH RPC_URL=... SIGNER="--account deployer --slow"
+#   Deploys the next implementation, records it, and syncs. CONTRACT=<path>:<Name>
+#   picks another contract. The default is the recorded implementation's.
+#
+# make upgrade-schedule DEPLOYMENT=BETH RPC_URL=... SIGNER="--account proxyOwner"
+# make upgrade-execute  DEPLOYMENT=BETH RPC_URL=... SIGNER="--account proxyOwner"
+# make upgrade-cancel   DEPLOYMENT=BETH RPC_URL=... SIGNER="--account proxyOwner"
+#   Direct mode needs SIGNER. SAFE=0x... selects Safe mode. The target then
+#   writes an envelope for `make propose` and syncs nothing afterwards.
+#   DATA=0x... adds an upgradeAndCall payload to the schedule.
+#
+# make upgrade-sync DEPLOYMENT=BETH RPC_URL=...
+# make upgrade-status DEPLOYMENT=BETH RPC_URL=...
+#   Reconciles the records with the chain and prints the state. Both names
+#   run one command.
+
+UPGRADE_DIR := script/manage/upgrade
+
+define UPGRADE_SYNC
+@CHAIN_ID="$$(PATH="$(FOUNDRY_BIN):$$PATH" cast chain-id --rpc-url "$(RPC_URL)")" \
+  RPC_URL="$(RPC_URL)" ./script/upgrade-sync.sh $(DEPLOYMENT)
+endef
+
+ifneq ($(strip $(SAFE)),)
+UPGRADE_FLAGS :=
+UPGRADE_MODE := Safe mode. It writes an envelope for $(SAFE) and broadcasts nothing.
+define UPGRADE_POST_SYNC
+@echo "Safe mode: propose the envelope with make propose. Then run make upgrade-sync after the Safe executes, or run the next upgrade command, which syncs first."
+endef
+else
+UPGRADE_FLAGS := --broadcast $(SIGNER)
+UPGRADE_NEEDS_SIGNER := yes
+UPGRADE_MODE := direct broadcast. It signs and sends a transaction now.
+UPGRADE_POST_SYNC = $(UPGRADE_SYNC)
+endif
+
+# $(error) inside a recipe stops make when the recipe expands, before any
+# command runs. One function serves the six targets.
+upgrade_require = $(if $(DEPLOYMENT),,$(error DEPLOYMENT is not set. Example: make $(1) DEPLOYMENT=BETH RPC_URL=...))$(if $(RPC_URL),,$(error RPC_URL is not set. Example: make $(1) DEPLOYMENT=BETH RPC_URL=...))
+
+.PHONY: upgrade-deploy upgrade-schedule upgrade-execute upgrade-cancel upgrade-sync upgrade-status
+
+upgrade-deploy:
+	$(call upgrade_require,upgrade-deploy)
+	@DEPLOYMENT="$(DEPLOYMENT)" CONTRACT="$(CONTRACT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	  $(UPGRADE_DIR)/DeployNextImplementation.s.sol:DeployNextImplementation \
+	  --sig 'run()' --rpc-url "$(RPC_URL)" --broadcast $(SIGNER)
+	@CHAIN_ID="$$(PATH="$(FOUNDRY_BIN):$$PATH" cast chain-id --rpc-url "$(RPC_URL)")" \
+	  ./script/record.sh $(DEPLOYMENT)
+	$(UPGRADE_SYNC)
+
+upgrade-schedule:
+	$(call upgrade_require,upgrade-schedule)
+	$(UPGRADE_SYNC)
+	@echo "upgrade-schedule: $(UPGRADE_MODE)"
+	@DEPLOYMENT="$(DEPLOYMENT)" DATA="$(DATA)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	  $(UPGRADE_DIR)/ScheduleUpgrade.s.sol:ScheduleUpgrade \
+	  --sig 'run()' --rpc-url "$(RPC_URL)" $(UPGRADE_FLAGS)
+	$(UPGRADE_POST_SYNC)
+
+upgrade-execute:
+	$(call upgrade_require,upgrade-execute)
+	$(UPGRADE_SYNC)
+	@echo "upgrade-execute: $(UPGRADE_MODE)"
+	@DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	  $(UPGRADE_DIR)/ExecuteUpgrade.s.sol:ExecuteUpgrade \
+	  --sig 'run()' --rpc-url "$(RPC_URL)" $(UPGRADE_FLAGS)
+	$(UPGRADE_POST_SYNC)
+
+upgrade-cancel:
+	$(call upgrade_require,upgrade-cancel)
+	$(UPGRADE_SYNC)
+	@echo "upgrade-cancel: $(UPGRADE_MODE)"
+	@DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	  $(UPGRADE_DIR)/CancelUpgrade.s.sol:CancelUpgrade \
+	  --sig 'run()' --rpc-url "$(RPC_URL)" $(UPGRADE_FLAGS)
+	$(UPGRADE_POST_SYNC)
+
+upgrade-sync upgrade-status:
+	$(call upgrade_require,$@)
+	$(UPGRADE_SYNC)
+
 # ---- the signing key --------------------------------------------------------
 #
 # SIGNER must come from the make line. An operator who exports it sets one key
@@ -180,12 +270,15 @@ endif
 #
 # A proposal dry run signs nothing, so it needs no signer. propose.sh makes the
 # same exemption, and it tests DRY_RUN the same way.
-SIGNER_GOALS := $(filter deploy,$(MAKECMDGOALS))
+SIGNER_GOALS := $(filter deploy upgrade-deploy,$(MAKECMDGOALS))
 ifeq ($(strip $(DRY_RUN)),)
 SIGNER_GOALS += $(filter propose,$(MAKECMDGOALS))
 endif
 ifdef MANAGE_NEEDS_SIGNER
 SIGNER_GOALS += $(filter manage,$(MAKECMDGOALS))
+endif
+ifdef UPGRADE_NEEDS_SIGNER
+SIGNER_GOALS += $(filter upgrade-schedule upgrade-execute upgrade-cancel,$(MAKECMDGOALS))
 endif
 
 ifneq ($(strip $(SIGNER_GOALS)),)
