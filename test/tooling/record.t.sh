@@ -307,5 +307,53 @@ contains "reaches the chain it was given" "$OUT" "broadcast/Deploy_$FAKE_NAME.s.
 rm -f "$FAKE_LOCAL" "$FAKE_OTHER"
 rmdir deployments/.pending 2>/dev/null || true
 
+echo "== a pending file that names another broadcast script =="
+# DeployNextImplementation writes under its own broadcast folder. The pending
+# file names it, and record.sh reads that folder. The throwaway name keeps a
+# real record safe.
+OTHER_SCRIPT="Other_$FAKE_NAME.s.sol"
+mkdir -p deployments/.pending "broadcast/$OTHER_SCRIPT/$CHAIN_ID"
+cp "broadcast/Deploy_BETH.s.sol/$CHAIN_ID/run-latest.json" "broadcast/$OTHER_SCRIPT/$CHAIN_ID/run-latest.json"
+CURRENT_IMPL=$(jq -r .address "$I")
+jq -n --arg name "$FAKE_NAME" --argjson chainId "$CHAIN_ID" --arg script "$OTHER_SCRIPT" --arg addr "$CURRENT_IMPL" \
+  '{deploymentName: $name, chainId: $chainId, broadcastScript: $script,
+    roles: ["nextImplementation"], addresses: [$addr],
+    contractNames: ["BitSafeEvmAssetBridge"], sourcePaths: ["src/BitSafeEvmAssetBridge.sol"]}' \
+  >"$FAKE_LOCAL"
+set +e
+OUT=$(./script/record.sh "$FAKE_NAME" "$CHAIN_ID" 2>&1)
+RC=$?
+set -e
+check    "reads the named broadcast folder" "$RC" "0"
+NEXT_RECORD="deployments/$FAKE_NAME.nextImplementation.$CHAIN_ID.json"
+check    "writes the nextImplementation record" "$([ -f "$NEXT_RECORD" ] && echo present || echo missing)" "present"
+check    "record address" "$(cast to-check-sum-address "$(jq -r .address "$NEXT_RECORD")")" "$(cast to-check-sum-address "$CURRENT_IMPL")"
+check    "record role" "$(jq -r .role "$NEXT_RECORD")" "nextImplementation"
+contains "records the role" "$OUT" "recorded nextImplementation"
+contains "prints done"                       "$OUT" "done."
+case "$OUT" in
+  *"The proxy record is"*) PROXY_LINE=present ;;
+  *) PROXY_LINE=absent ;;
+esac
+check    "prints no proxy record line"       "$PROXY_LINE" "absent"
+rm -f "$NEXT_RECORD"
+rm -rf "broadcast/$OTHER_SCRIPT"
+
+echo "== a broadcast script with a slash is refused =="
+mkdir -p deployments/.pending
+jq -n --arg name "$FAKE_NAME" --argjson chainId "$CHAIN_ID" --arg addr "$CURRENT_IMPL" \
+  '{deploymentName: $name, chainId: $chainId, broadcastScript: "../Deploy_BETH.s.sol",
+    roles: ["nextImplementation"], addresses: [$addr],
+    contractNames: ["BitSafeEvmAssetBridge"], sourcePaths: ["src/BitSafeEvmAssetBridge.sol"]}' \
+  >"$FAKE_LOCAL"
+set +e
+OUT=$(./script/record.sh "$FAKE_NAME" "$CHAIN_ID" 2>&1)
+RC=$?
+set -e
+check    "refuses a path" "$RC" "1"
+contains "names the rule" "$OUT" "must be one file name"
+rm -f "$FAKE_LOCAL"
+rmdir deployments/.pending 2>/dev/null || true
+
 echo
 if [ "$FAILURES" -eq 0 ]; then echo "record.t.sh: all checks passed"; else echo "record.t.sh: $FAILURES check(s) failed"; exit 1; fi

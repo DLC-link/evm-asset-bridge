@@ -23,6 +23,9 @@ contract DeployTest is Test {
         string memory path = string.concat("deployments/.pending/BETH.", vm.toString(block.chainid), ".json");
         string memory json = vm.readFile(path);
 
+        // A deploy at the default path names no broadcast script.
+        assertFalse(vm.keyExistsJson(json, ".broadcastScript"));
+
         // The four roles appear in a fixed order. script/record.sh relies on it.
         string[] memory roles = vm.parseJsonStringArray(json, ".roles");
         assertEq(roles.length, 4);

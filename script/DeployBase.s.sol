@@ -18,8 +18,18 @@ abstract contract DeployBase is Script {
     string[] private _contractNames;
     string[] private _sourcePaths;
 
-    /// The name of this deployment, such as "BETH". A concrete script sets it.
-    function deploymentName() public pure virtual returns (string memory);
+    /// The name of this deployment, such as "BETH". A concrete deploy script
+    /// fixes it with a `pure` override. A script that reads DEPLOYMENT from
+    /// the environment overrides it with `view`.
+    function deploymentName() public view virtual returns (string memory);
+
+    /// The file name of the script that broadcasts, when it is not
+    /// `Deploy_<name>.s.sol`. forge names the broadcast folder after the
+    /// script file, and `record.sh` reads that folder. Empty means the
+    /// default.
+    function broadcastScript() public pure virtual returns (string memory) {
+        return "";
+    }
 
     /// Records one deployed contract under a role label.
     function _register(string memory role, address addr, string memory contractName, string memory sourcePath)
@@ -40,6 +50,11 @@ abstract contract DeployBase is Script {
         string memory jsonKey = "pending";
         vm.serializeString(jsonKey, "deploymentName", deploymentName());
         vm.serializeUint(jsonKey, "chainId", block.chainid);
+
+        string memory script = broadcastScript();
+        if (bytes(script).length > 0) {
+            vm.serializeString(jsonKey, "broadcastScript", script);
+        }
 
         string[] memory roles = _roles;
         address[] memory addresses = _addresses;
