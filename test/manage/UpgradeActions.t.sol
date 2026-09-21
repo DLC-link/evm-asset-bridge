@@ -4,6 +4,8 @@ pragma solidity 0.8.34;
 import {Test} from "forge-std/Test.sol";
 import {UpgradeManage} from "../../script/manage/upgrade/UpgradeManage.s.sol";
 import {ScheduleUpgrade} from "../../script/manage/upgrade/ScheduleUpgrade.s.sol";
+import {ExecuteUpgrade} from "../../script/manage/upgrade/ExecuteUpgrade.s.sol";
+import {CancelUpgrade} from "../../script/manage/upgrade/CancelUpgrade.s.sol";
 import {CounterV1, CounterV2} from "../mocks/CounterUpgradeable.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
@@ -33,6 +35,42 @@ contract DummySchedule is ScheduleUpgrade {
 
     function data() public view override returns (bytes memory) {
         return _payload;
+    }
+}
+
+contract DummyExecute is ExecuteUpgrade {
+    string private _name;
+    address private _safe;
+
+    function configure(string memory name, address safe_) external {
+        _name = name;
+        _safe = safe_;
+    }
+
+    function deploymentName() public view override returns (string memory) {
+        return _name;
+    }
+
+    function safeAddress() internal view override returns (address) {
+        return _safe;
+    }
+}
+
+contract DummyCancel is CancelUpgrade {
+    string private _name;
+    address private _safe;
+
+    function configure(string memory name, address safe_) external {
+        _name = name;
+        _safe = safe_;
+    }
+
+    function deploymentName() public view override returns (string memory) {
+        return _name;
+    }
+
+    function safeAddress() internal view override returns (address) {
+        return _safe;
     }
 }
 
@@ -277,5 +315,162 @@ contract UpgradeActionsTest is UpgradeFixture {
         // No record at all reads the same way.
         (, exists) = s.readSchedule();
         assertFalse(exists);
+    }
+
+    function test_execute_revertsBeforeTheDelayPasses() public {
+        string memory name = "UPGEARLY";
+        _writeRecords(name);
+        DummySchedule s = _schedule(name, "");
+        bytes32 id = s.operationId(nextImpl, "");
+        uint256 readyAt = timelock.getTimestamp(id);
+        DummyExecute e = new DummyExecute();
+        e.configure(name, safe);
+
+        vm.warp(readyAt - 100);
+        vm.expectRevert(abi.encodeWithSelector(UpgradeManage.OperationNotReady.selector, id, readyAt, 100));
+        e.run();
+
+        assertEq(_implementationOf(proxy), oldImpl);
+        assertFalse(vm.exists(_envelope(name, "executeUpgrade")));
+        _removeRecords(name);
+    }
+
+    function test_execute_afterTheDelayUpgradesTheProxy() public {
+        string memory name = "UPGEXEC";
+        _writeRecords(name);
+        DummySchedule s = _schedule(name, "");
+        bytes32 id = s.operationId(nextImpl, "");
+        DummyExecute e = new DummyExecute();
+        e.configure(name, safe);
+
+        vm.warp(block.timestamp + DELAY);
+        e.run();
+
+        assertEq(_implementationOf(proxy), nextImpl);
+        assertTrue(timelock.isOperationDone(id));
+        // The counter state survives the upgrade.
+        assertEq(CounterV2(proxy).count(), 5);
+        assertEq(CounterV2(proxy).version(), 2);
+        string memory envelope = vm.readFile(_envelope(name, "executeUpgrade"));
+        assertEq(vm.parseJsonAddress(envelope, ".to"), address(timelock));
+
+        // A second execute finds the operation done.
+        vm.expectRevert(abi.encodeWithSelector(UpgradeManage.OperationDone.selector, id));
+        e.run();
+        _removeRecords(name);
+    }
+
+    function test_execute_rebuildsTheScheduledCallFromTheBlock() public {
+        string memory name = "UPGREBUILD";
+        _writeRecords(name);
+        DummySchedule s = _schedule(name, "");
+        DummyExecute e = new DummyExecute();
+        e.configure(name, safe);
+        (UpgradeManage.Schedule memory sched,) = e.readSchedule();
+        assertEq(
+            e.encode(sched),
+            abi.encodeCall(
+                TimelockController.execute, (proxyAdmin, 0, s.upgradeCall(nextImpl, ""), bytes32(0), s.salt(nextImpl))
+            )
+        );
+        _removeRecords(name);
+    }
+
+    function test_execute_withNoBlockReverts() public {
+        string memory name = "UPGNOSCHED";
+        _writeRecords(name);
+        DummyExecute e = new DummyExecute();
+        e.configure(name, safe);
+        vm.expectRevert(abi.encodeWithSelector(UpgradeManage.NotScheduled.selector, _path(name, "nextImplementation")));
+        e.run();
+        _removeRecords(name);
+    }
+
+    function test_execute_withAPayloadRunsTheReinitializer() public {
+        string memory name = "UPGPAY";
+        _writeRecords(name);
+        _schedule(name, abi.encodeCall(CounterV2.setStep, (3)));
+        DummyExecute e = new DummyExecute();
+        e.configure(name, safe);
+        vm.warp(block.timestamp + DELAY);
+        e.run();
+        assertEq(_implementationOf(proxy), nextImpl);
+        assertEq(CounterV2(proxy).step(), 3);
+        _removeRecords(name);
+    }
+
+    function test_cancel_removesAPendingOperation() public {
+        string memory name = "UPGCANCEL";
+        _writeRecords(name);
+        DummySchedule s = _schedule(name, "");
+        bytes32 id = s.operationId(nextImpl, "");
+        DummyCancel c = new DummyCancel();
+        c.configure(name, safe);
+
+        assertEq(c.encode(id), abi.encodeCall(TimelockController.cancel, (id)));
+        c.run();
+        assertFalse(timelock.isOperation(id));
+        string memory envelope = vm.readFile(_envelope(name, "cancelUpgrade"));
+        assertEq(vm.parseJsonAddress(envelope, ".to"), address(timelock));
+
+        // A second cancel finds nothing on chain.
+        vm.expectRevert(abi.encodeWithSelector(UpgradeManage.OperationNotOnChain.selector, id));
+        c.run();
+        _removeRecords(name);
+    }
+
+    /// The three scripts must name one operation. A salt or a payload that
+    /// differed between them would schedule an operation nobody can execute.
+    function test_theThreeScriptsAgreeOnTheOperation() public {
+        string memory name = "UPGAGREE";
+        _writeRecords(name);
+        bytes memory payload = hex"1234";
+        DummySchedule s = new DummySchedule();
+        s.configure(name, safe, payload);
+        DummyExecute e = new DummyExecute();
+        e.configure(name, safe);
+        DummyCancel c = new DummyCancel();
+        c.configure(name, safe);
+
+        bytes32 id = s.operationId(nextImpl, payload);
+        assertEq(e.operationId(nextImpl, payload), id);
+        assertEq(c.operationId(nextImpl, payload), id);
+        assertEq(
+            id, timelock.hashOperation(proxyAdmin, 0, s.upgradeCall(nextImpl, payload), bytes32(0), s.salt(nextImpl))
+        );
+
+        // The salt binds the deployment name. Another name gives another id.
+        _writeRecords("UPGOTHER");
+        DummySchedule other = new DummySchedule();
+        other.configure("UPGOTHER", safe, payload);
+        assertTrue(other.operationId(nextImpl, payload) != id);
+
+        assertEq(s.action(), "scheduleUpgrade");
+        assertEq(e.action(), "executeUpgrade");
+        assertEq(c.action(), "cancelUpgrade");
+        _removeRecords(name);
+        _removeRecords("UPGOTHER");
+    }
+
+    /// The timelock stores only the hash, so a salt that differs from the
+    /// schedule names an operation the timelock never saw.
+    function test_execute_withAnotherSaltReverts() public {
+        string memory name = "UPGSALT";
+        _writeRecords(name);
+        DummySchedule s = _schedule(name, "");
+        (UpgradeManage.Schedule memory sched,) = s.readSchedule();
+        vm.warp(block.timestamp + DELAY);
+
+        bytes32 wrongSalt = keccak256("another salt");
+        bytes32 wrongId = timelock.hashOperation(sched.target, 0, sched.callData, sched.predecessor, wrongSalt);
+        bytes32 readyBit = bytes32(uint256(1 << uint8(TimelockController.OperationState.Ready)));
+        vm.prank(safe);
+        vm.expectRevert(
+            abi.encodeWithSelector(TimelockController.TimelockUnexpectedOperationState.selector, wrongId, readyBit)
+        );
+        timelock.execute(sched.target, 0, sched.callData, sched.predecessor, wrongSalt);
+
+        assertEq(_implementationOf(proxy), oldImpl);
+        _removeRecords(name);
     }
 }
