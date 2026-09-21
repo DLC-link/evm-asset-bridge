@@ -45,6 +45,13 @@ abstract contract ManageBase is Script {
     /// must name the same contract. A per-contract base sets it.
     function contractName() public pure virtual returns (string memory);
 
+    /// A generic script drives whatever contract the record names. It
+    /// returns `true` here, and the contract guard then skips its name
+    /// comparison. Every per-contract folder keeps the default.
+    function acceptsAnyContract() public pure virtual returns (bool) {
+        return false;
+    }
+
     /// The address this action calls. It defaults to the recorded proxy.
     /// A test overrides it, and so does a script that targets another
     /// contract, such as the ProxyAdmin.
@@ -58,6 +65,9 @@ abstract contract ManageBase is Script {
     /// @dev The proxy record names TransparentUpgradeableProxy, so the check
     ///      reads the implementation record instead.
     function _requireContract() private view {
+        if (acceptsAnyContract()) {
+            return;
+        }
         string memory path =
             string.concat("deployments/", deploymentName(), ".implementation.", vm.toString(block.chainid), ".json");
         string memory recorded = vm.parseJsonString(vm.readFile(path), ".contractName");

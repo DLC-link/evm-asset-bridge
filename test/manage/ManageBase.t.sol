@@ -221,6 +221,30 @@ contract GuardBadExplicitAction is ManageBase {
     }
 }
 
+/// A generic script accepts any contract. Only ONE test function uses it,
+/// because it writes files.
+contract GuardAnyAction is ManageBase {
+    function deploymentName() public pure override returns (string memory) {
+        return "GUARDANY";
+    }
+
+    function action() public pure override returns (string memory) {
+        return "guardAny";
+    }
+
+    function contractName() public pure override returns (string memory) {
+        return "";
+    }
+
+    function acceptsAnyContract() public pure override returns (bool) {
+        return true;
+    }
+
+    function send(bytes calldata data) external {
+        _send(data);
+    }
+}
+
 contract ManageBaseTest is BridgeTestBase {
     /// Writes the implementation record that the deployment guard reads.
     /// Each caller names its own deployment, so no two test functions touch
@@ -467,6 +491,29 @@ contract ManageBaseTest is BridgeTestBase {
         guard.sendAt(address(bridge), abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
 
         vm.removeFile(implPath);
+    }
+
+    /// A generic script states that it accepts any contract. The guard then
+    /// skips its name comparison, and the send reaches the recorded target.
+    function test_send_acceptsAnyContractWhenTheScriptSaysSo() public {
+        GuardAnyAction guard = new GuardAnyAction();
+
+        string memory implPath = "deployments/GUARDANY.implementation.31337.json";
+        string memory implKey = "guardAnyImpl";
+        vm.serializeUint(implKey, "chainId", uint256(31337));
+        vm.serializeString(implKey, "contractName", "SomeOtherContract");
+        vm.writeJson(vm.serializeAddress(implKey, "address", address(bridge)), implPath);
+
+        string memory proxyPath = "deployments/GUARDANY.proxy.31337.json";
+        string memory proxyKey = "guardAnyProxy";
+        vm.serializeUint(proxyKey, "chainId", uint256(31337));
+        vm.writeJson(vm.serializeAddress(proxyKey, "address", address(bridge)), proxyPath);
+
+        // A view call succeeds from any sender, so direct mode needs no role.
+        guard.send(abi.encodeCall(BitSafeEvmAssetBridge.threshold, ()));
+
+        vm.removeFile(implPath);
+        vm.removeFile(proxyPath);
     }
 
     function test_deploymentName_rejectsAnEmptyName() public {
