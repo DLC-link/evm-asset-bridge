@@ -199,9 +199,6 @@ contract UpgradeActionsTest is UpgradeFixture {
         // The chain forgot it, but the record confirmed it once.
         vm.prank(safe);
         timelock.cancel(id);
-        // writeJson with a key adds a missing key (verified for a top-level
-        // key on 2026-09-21). If the nested add fails here, rebuild the whole
-        // block with vm.serialize* plus readyAt and write it at ".schedule".
         vm.writeJson(vm.toString(block.timestamp + DELAY), _path(name, "nextImplementation"), ".schedule.readyAt");
         vm.expectRevert(abi.encodeWithSelector(ScheduleUpgrade.AlreadyScheduled.selector, id));
         s.run();
@@ -225,6 +222,47 @@ contract UpgradeActionsTest is UpgradeFixture {
         s.configure(name, safe, "");
         vm.expectRevert(abi.encodeWithSelector(ScheduleUpgrade.NextImplementationHasNoCode.selector, nextImpl));
         s.run();
+        _removeRecords(name);
+    }
+
+    function test_schedule_rejectsAPayloadWithAnUnknownSelector() public {
+        string memory name = "UPGSEL";
+        _writeRecords(name);
+        DummySchedule s = new DummySchedule();
+        s.configure(name, safe, hex"deadbeef");
+        vm.expectRevert(
+            abi.encodeWithSelector(ScheduleUpgrade.UnknownSelector.selector, bytes4(0xdeadbeef), "CounterV2")
+        );
+        s.run();
+        assertFalse(vm.exists(_envelope(name, "scheduleUpgrade")));
+        _removeRecords(name);
+    }
+
+    /// The simulation runs the whole upgradeAndCall as the timelock. A
+    /// payload that reverts stops the run with its own error, before the
+    /// envelope and the block exist.
+    function test_schedule_stopsOnAPayloadThatReverts() public {
+        string memory name = "UPGBADPAY";
+        _writeRecords(name);
+        DummySchedule s = new DummySchedule();
+        s.configure(name, safe, abi.encodeCall(CounterV2.setStep, (0)));
+        vm.expectRevert(CounterV2.StepIsZero.selector);
+        s.run();
+        assertFalse(vm.exists(_envelope(name, "scheduleUpgrade")));
+        assertFalse(vm.keyExistsJson(vm.readFile(_path(name, "nextImplementation")), ".schedule"));
+        _removeRecords(name);
+    }
+
+    /// The simulation leaves no trace: the proxy still runs the old code.
+    function test_schedule_withAValidPayloadLeavesTheProxyUnchanged() public {
+        string memory name = "UPGPAYSIM";
+        _writeRecords(name);
+        bytes memory payload = abi.encodeCall(CounterV2.setStep, (3));
+        DummySchedule s = _schedule(name, payload);
+        assertEq(_implementationOf(proxy), oldImpl);
+        assertEq(CounterV1(proxy).count(), 5);
+        assertTrue(timelock.isOperationPending(s.operationId(nextImpl, payload)));
+        assertEq(vm.parseJsonBytes(vm.readFile(_path(name, "nextImplementation")), ".schedule.data"), payload);
         _removeRecords(name);
     }
 

@@ -119,14 +119,14 @@ abstract contract UpgradeManage is ManageBase {
         if (!vm.keyExistsJson(json, SCHEDULE_KEY)) {
             return (s, false);
         }
-        s.operationId = vm.parseJsonBytes32(json, ".schedule.operationId");
-        s.target = vm.parseJsonAddress(json, ".schedule.target");
-        s.callData = vm.parseJsonBytes(json, ".schedule.calldata");
-        s.predecessor = vm.parseJsonBytes32(json, ".schedule.predecessor");
-        s.salt = vm.parseJsonBytes32(json, ".schedule.salt");
-        s.hasReadyAt = vm.keyExistsJson(json, ".schedule.readyAt");
+        s.operationId = vm.parseJsonBytes32(json, string.concat(SCHEDULE_KEY, ".operationId"));
+        s.target = vm.parseJsonAddress(json, string.concat(SCHEDULE_KEY, ".target"));
+        s.callData = vm.parseJsonBytes(json, string.concat(SCHEDULE_KEY, ".calldata"));
+        s.predecessor = vm.parseJsonBytes32(json, string.concat(SCHEDULE_KEY, ".predecessor"));
+        s.salt = vm.parseJsonBytes32(json, string.concat(SCHEDULE_KEY, ".salt"));
+        s.hasReadyAt = vm.keyExistsJson(json, string.concat(SCHEDULE_KEY, ".readyAt"));
         if (s.hasReadyAt) {
-            s.readyAt = vm.parseJsonUint(json, ".schedule.readyAt");
+            s.readyAt = vm.parseJsonUint(json, string.concat(SCHEDULE_KEY, ".readyAt"));
         }
         return (s, true);
     }
