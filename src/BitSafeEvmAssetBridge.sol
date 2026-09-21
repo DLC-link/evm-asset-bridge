@@ -44,9 +44,7 @@ contract BitSafeEvmAssetBridge is
     /// @dev 18 is the idiomatic maximum precision for an ERC20.
     uint8 public constant MAX_ASSET_DECIMALS = 18;
     /// @dev Canton's CIP-56 token standard sets 10 as the maximum precision. This
-    ///      bridge targets Canton, so it accepts no higher value. A wider bound
-    ///      would admit a typo that clamps the deposit unit to 1 and turns the
-    ///      granularity check off without an error.
+    ///      bridge targets Canton, so it accepts no higher value.
     uint8 public constant MAX_TARGET_DECIMALS = 10;
     /// @dev ETH has no contract to ask, so its precision is a convention.
     uint8 private constant ETH_DECIMALS = 18;
@@ -59,7 +57,6 @@ contract BitSafeEvmAssetBridge is
     /// @custom:storage-location erc7201:bitsafe.storage.BitSafeEvmAssetBridge
     struct BridgeStorage {
         address asset;
-        // Packed into the `asset` slot: 20 + 1 + 1 bytes.
         uint8 assetDecimals;
         uint8 targetDecimals;
         uint256 threshold;
@@ -69,8 +66,7 @@ contract BitSafeEvmAssetBridge is
         mapping(bytes withdrawRequestId => bool used) usedWithdrawRequests;
         // Bounds the withdrawal rate with a token bucket that refills
         // linearly at `capacity / window` per second. A capacity of 0 turns
-        // the check off. There is no cross-validation against
-        // `withdrawLimits`; operations sizes both.
+        // the check off.
         RateLimiter.RefillingBucket withdrawRateLimit;
         uint256 totalLocked;
         uint256 withdrawalHorizon;
@@ -196,7 +192,7 @@ contract BitSafeEvmAssetBridge is
 
     /// @notice The withdrawal rate limit: the shared configuration and the
     ///         budget that is available now. A capacity of 0 means the check
-    ///         is off; `availableBudget` reads 0 then, but nothing limits
+    ///         is off - `availableBudget` reads 0 then, but nothing limits
     ///         withdrawals.
     function withdrawRateLimit() external view returns (uint208 capacity, uint48 window, uint256 availableBudget) {
         RateLimiter.RefillingBucket storage limiter = _getBridgeStorage().withdrawRateLimit;
@@ -207,8 +203,7 @@ contract BitSafeEvmAssetBridge is
 
     /// @notice The maximum distance a withdrawal `deadline` can sit past
     ///         `block.timestamp`, in seconds (inclusive). `0` turns the bound
-    ///         off. The attestor stack reads this value to pick its signing
-    ///         mode and to derive deadlines.
+    ///         off.
     function withdrawalHorizon() external view returns (uint256) {
         return _getBridgeStorage().withdrawalHorizon;
     }
@@ -221,11 +216,6 @@ contract BitSafeEvmAssetBridge is
         return _getBridgeStorage().usedWithdrawRequests[withdrawRequestId];
     }
 
-    /// @notice Base units the deposit paths locked and `withdraw` has not
-    ///         released. `withdraw` subtracts each payout from it with a
-    ///         checked subtraction, so a payout above the recorded total
-    ///         reverts with a `Panic(0x11)` rather than paying unbacked
-    ///         funds. Bounds `rescueSurplus` and feeds monitoring.
     function totalLocked() external view returns (uint256) {
         return _getBridgeStorage().totalLocked;
     }
@@ -237,8 +227,7 @@ contract BitSafeEvmAssetBridge is
         address asset_ = $.asset;
         uint256 balance = asset_ == address(0) ? address(this).balance : IERC20(asset_).balanceOf(address(this));
         uint256 tl = $.totalLocked;
-        // Clamps to 0: a counter above the balance reports no surplus, so the
-        // view stays readable for monitors instead of reverting on underflow.
+        // Clamps to 0: a counter above the balance reports no surplus.
         return balance > tl ? balance - tl : 0;
     }
 
@@ -268,8 +257,7 @@ contract BitSafeEvmAssetBridge is
 
     /// @notice A sentry or the bridge admin pauses. Only the bridge admin unpauses.
     /// @dev A sentry key may be hot: the role grants only a denial power, and the
-    ///      admin can always reverse it. A pause auto-expiry (as Optimism's
-    ///      Guardian has) is a possible future extension.
+    ///      admin can always reverse it.
     function pause() external {
         if (!hasRole(BRIDGE_ADMIN_ROLE, msg.sender) && !hasRole(SENTRY_ROLE, msg.sender)) {
             revert NotPauser(msg.sender);
@@ -308,7 +296,7 @@ contract BitSafeEvmAssetBridge is
         BridgeStorage storage $ = _getBridgeStorage();
         // Freeze the debt under the old settings before they change. Without
         // the sync, updateSettings re-prices the elapsed time at the new
-        // rate, and a window change mid-drain grants a full bucket at once.
+        // rate, and a window change grants a full bucket at once.
         $.withdrawRateLimit.sync(WITHDRAW_RATE_LIMIT_KEY);
         $.withdrawRateLimit.updateSettings(window, capacity);
         emit WithdrawRateLimitSet(capacity, window);
@@ -317,22 +305,15 @@ contract BitSafeEvmAssetBridge is
     /// @notice Sets the withdrawal horizon: the maximum distance a withdrawal
     ///         `deadline` can sit past `block.timestamp`, in seconds. The
     ///         bound is inclusive. `0` disables the bound.
-    /// @dev The attestor stack reads this view to pick its signing mode and
-    ///      to derive deadlines: 0 means the sentinel deadline, non-zero
-    ///      means derived deadlines. This one transaction therefore
-    ///      activates the bound. A change that lands between two attestors'
-    ///      reads splits their digests; the attestors defer the request to
-    ///      the next signing tick and re-sign.
     function setWithdrawalHorizon(uint256 horizon) external onlyRole(BRIDGE_ADMIN_ROLE) {
         _getBridgeStorage().withdrawalHorizon = horizon;
         emit WithdrawalHorizonSet(horizon);
     }
 
-    /// @notice Rescues tokens sent to the bridge by mistake. Never the bridged asset.
+    /// @notice Rescues tokens sent to the bridge by mistake.
     /// @dev The reentrancy guard is transient and shared across all guarded
     ///      functions, so a guarded function cannot nest inside another
-    ///      guarded call. For a bridge this is intended: no flow legitimately
-    ///      moves value from within a value-moving call.
+    ///      guarded call.
     function rescueERC20(address token, address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) nonReentrant {
         if (token == _getBridgeStorage().asset) revert CannotRescueBridgedAsset();
         if (to == address(0)) revert InvalidAddress();
@@ -382,9 +363,7 @@ contract BitSafeEvmAssetBridge is
         }
     }
 
-    /// @dev Reads the asset's own decimals and stores both precisions. It takes
-    ///      the asset from storage, not as a parameter: `initialize` already sits
-    ///      at the EVM stack limit, and one more argument fails to compile.
+    /// @dev Reads the asset's own decimals and stores both precisions.
     function _setDecimals(uint8 targetDecimals_) internal {
         BridgeStorage storage $ = _getBridgeStorage();
         address asset_ = $.asset;
@@ -411,14 +390,9 @@ contract BitSafeEvmAssetBridge is
     ///      the library's RateLimitExceeded when the bucket holds less. A
     ///      capacity of 0 turns the check off: the library reports an
     ///      uninitialized bucket as empty, so without this gate a zero
-    ///      config would block every withdrawal instead of none. The write
-    ///      is safe before the signature checks: any later revert in the
-    ///      same call unwinds it.
+    ///      config would block every withdrawal instead of none.
     function _consumeWithdrawRateLimit(BridgeStorage storage $, uint256 amount) internal {
         RateLimiter.RefillingBucket storage limiter = $.withdrawRateLimit;
-        // Consumption while the limiter is off is never recorded; a later
-        // sync cannot recover it. Re-enabling starts from the pre-disable
-        // debt only.
         if (limiter._capacity == 0) return;
         limiter.consume(WITHDRAW_RATE_LIMIT_KEY, amount);
     }
@@ -426,8 +400,7 @@ contract BitSafeEvmAssetBridge is
     /// @dev Reverts when `deadline` sits further than `horizon` past
     ///      `block.timestamp`. The bound is inclusive:
     ///      `deadline == block.timestamp + horizon` passes. A horizon of 0
-    ///      turns the check off. A helper, not inline code: `withdraw` sits
-    ///      at the EVM stack limit.
+    ///      turns the check off.
     function _checkHorizon(uint256 horizon, uint256 deadline) internal view {
         if (horizon != 0 && deadline > block.timestamp + horizon) {
             revert DeadlineBeyondHorizon(deadline, horizon);
@@ -539,10 +512,7 @@ contract BitSafeEvmAssetBridge is
     /// @notice Releases `amount` of the bridged asset to `destinationAddress`.
     /// @dev Requires `threshold` valid, distinct attestor signatures over the
     ///      EIP-712 digest. Signer order does not matter.
-    ///      The attestor stack derives the deadline when it signs. The
-    ///      contract compares the deadline against `block.timestamp`
-    ///      (inclusive) and bounds it by `withdrawalHorizon` (inclusive,
-    ///      0 disables).
+    ///      The attestor stack derives the deadline when it signs.
     function withdraw(
         bytes calldata withdrawRequestId,
         address destinationAddress,
