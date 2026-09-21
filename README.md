@@ -7,7 +7,7 @@ BitSafeEvmAssetBridge: an upgradeable EVM contract that locks one asset
 - Build: `forge build`
 - Test: `forge test`
 - Integration-test image: `make it-verify` (see `infra/docker/README.md`)
-- Upgrade through the timelock: `make upgrade-deploy`, `upgrade-schedule`, `upgrade-status`, `upgrade-execute` (see `script/manage/README.md` section 12)
+- Upgrade through the timelock: `make upgrade-deploy`, `upgrade-schedule`, `upgrade-status`, `upgrade-execute`, `upgrade-cancel`, `upgrade-sync` (see `script/manage/README.md` section 12)
 - The design spec is maintained locally, outside git (not tracked in this repo).
 
 ## Production deploy

@@ -33,6 +33,7 @@ abstract contract UpgradeManage is ManageBase {
     error OperationNotOnChain(bytes32 operationId);
     error OperationNotReady(bytes32 operationId, uint256 readyAt, uint256 secondsLeft);
     error OperationDone(bytes32 operationId);
+    error ScheduleMismatch(bytes32 recordedId, bytes32 derivedId);
 
     string internal constant SCHEDULE_KEY = ".schedule";
 
@@ -127,6 +128,13 @@ abstract contract UpgradeManage is ManageBase {
         s.hasReadyAt = vm.keyExistsJson(json, string.concat(SCHEDULE_KEY, ".readyAt"));
         if (s.hasReadyAt) {
             s.readyAt = vm.parseJsonUint(json, string.concat(SCHEDULE_KEY, ".readyAt"));
+        }
+        // A block edited by hand can name one operation and describe another.
+        // Execute and cancel act on both, so the two must agree.
+        bytes32 derived =
+            TimelockController(payable(timelock())).hashOperation(s.target, 0, s.callData, s.predecessor, s.salt);
+        if (s.operationId != derived) {
+            revert ScheduleMismatch(s.operationId, derived);
         }
         return (s, true);
     }

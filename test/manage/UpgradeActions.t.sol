@@ -476,6 +476,23 @@ contract UpgradeActionsTest is UpgradeFixture {
         assertEq(_implementationOf(proxy), oldImpl);
         _removeRecords(name);
     }
+
+    /// A block whose id does not hash from its own fields is a hand edit.
+    /// Execute and cancel refuse it instead of acting on two operations.
+    function test_readSchedule_refusesABlockWhoseIdDoesNotMatch() public {
+        string memory name = "UPGTAMPER";
+        _writeRecords(name);
+        DummySchedule s = _schedule(name, "");
+        bytes32 id = s.operationId(nextImpl, "");
+        bytes32 wrong = keccak256("tampered");
+        vm.writeJson(vm.toString(wrong), _path(name, "nextImplementation"), ".schedule.operationId");
+
+        DummyExecute e = new DummyExecute();
+        e.configure(name, safe);
+        vm.expectRevert(abi.encodeWithSelector(UpgradeManage.ScheduleMismatch.selector, wrong, id));
+        e.run();
+        _removeRecords(name);
+    }
 }
 
 /// The same scripts, against the bridge. The fixture builds the proxy the

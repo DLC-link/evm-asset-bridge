@@ -603,6 +603,9 @@ One `nextImplementation` record exists per deployment at a time. The
 command refuses a second deploy while the record exists. Delete the file by
 hand to drop an implementation you no longer want.
 
+Cancel a confirmed schedule first. The operation stays live on the timelock
+otherwise, and the tooling can no longer see it.
+
 ### 12.2 Verify the source
 
 ```bash
@@ -720,7 +723,8 @@ make propose ENVELOPE=deployments/.safe/<name>.<chainId>.cancelUpgrade.json SIGN
 The canceller role cancels a pending operation. The next sync drops the
 `schedule` block. The `nextImplementation` record stays, so the same
 implementation can be scheduled again with the same operation id. Delete
-the file by hand to drop the implementation.
+the file by hand to drop the implementation. Do this only after the cancel
+landed. A deleted record hides a live operation from the sync.
 
 ### 12.8 What the sync does
 

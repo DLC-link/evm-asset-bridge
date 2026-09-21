@@ -86,7 +86,9 @@ contract ScheduleUpgrade is UpgradeManage {
 
     /// The first four bytes of the payload must name a function of the next
     /// implementation. The artifact's `methodIdentifiers` lists every
-    /// external function signature, and the record names the artifact.
+    /// external function signature, and the record names the artifact. A
+    /// stale `out/` compares against an old ABI; `_simulateUpgrade` runs the
+    /// payload against the live bytecode and is the authoritative gate.
     function _requireKnownSelector(bytes memory payload) internal view {
         string memory record = vm.readFile(nextRecordPath());
         string memory name = vm.parseJsonString(record, ".contractName");
@@ -108,7 +110,9 @@ contract ScheduleUpgrade is UpgradeManage {
         uint256 snapshot = vm.snapshotState();
         vm.prank(timelock());
         ProxyAdmin(proxyAdmin()).upgradeAndCall(ITransparentUpgradeableProxy(payable(proxy())), next, payload);
-        vm.revertToState(snapshot);
+        // A schedule simulated against an already upgraded proxy would hide a
+        // real problem, so the restore must succeed.
+        require(vm.revertToState(snapshot), "state snapshot did not restore");
     }
 
     function _basename(string memory path) internal pure returns (string memory) {

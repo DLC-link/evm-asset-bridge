@@ -17,6 +17,8 @@
 # turns <name>.nextImplementation into <name>.implementation with `schedule`
 # renamed to `upgrade`, and gives the proxy record the new address,
 # numDeployments + 1 and one history entry that names the previous file.
+# The three mv calls at the end run within microseconds of each other; a kill
+# between them leaves a half promote that the next sync refuses.
 #
 # It then prints the status. `make upgrade-status` runs this same command.
 #
@@ -159,6 +161,8 @@ promote() {
 
   jq --arg role "previousImplementation_$n" '. + {role: $role}' "$IMPL_FILE" >"$prev_file.tmp"
 
+  # The upgrade block keeps the schedule block as it was. getTimestamp returns
+  # 1 for a done operation, so a readyAt written now would be false.
   jq --argjson block "$(chain_block)" \
     'del(.note) | .upgrade = (.schedule // $block) | del(.schedule) | . + {role: "implementation"}' \
     "$NEXT_FILE" >"$IMPL_FILE.tmp"
