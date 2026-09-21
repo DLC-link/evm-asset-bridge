@@ -10,6 +10,9 @@ import {CounterV1, CounterV2} from "../mocks/CounterUpgradeable.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {BridgeTestBase} from "../BridgeTestBase.t.sol";
+import {BitSafeEvmAssetBridge} from "../../src/BitSafeEvmAssetBridge.sol";
+import {BridgeV2Mock} from "../mocks/BridgeV2Mock.sol";
 
 /// Each double fixes the three values that come from the environment in a
 /// real run. Everything else comes from the record files the test writes,
@@ -471,6 +474,55 @@ contract UpgradeActionsTest is UpgradeFixture {
         timelock.execute(sched.target, 0, sched.callData, sched.predecessor, wrongSalt);
 
         assertEq(_implementationOf(proxy), oldImpl);
+        _removeRecords(name);
+    }
+}
+
+/// The same scripts, against the bridge. The fixture builds the proxy the
+/// way BridgeDeploy does: the timelock is the proxy admin.
+contract UpgradeActionsBridgeTest is BridgeTestBase, UpgradeFixture {
+    function setUp() public override {
+        super.setUp();
+        timelock = _deployTimelock();
+        BitSafeEvmAssetBridge.Limits memory open =
+            BitSafeEvmAssetBridge.Limits({minAmount: 0, maxAmount: type(uint256).max});
+        bytes memory initData = abi.encodeCall(
+            BitSafeEvmAssetBridge.initialize,
+            (
+                address(0),
+                DEFAULT_TARGET_DECIMALS,
+                defaultAdmin,
+                ADMIN_DELAY,
+                bridgeAdmin,
+                attestors,
+                THRESHOLD,
+                open,
+                open
+            )
+        );
+        oldImpl = address(new BitSafeEvmAssetBridge());
+        proxy = address(new TransparentUpgradeableProxy(oldImpl, address(timelock), initData));
+        bridge = BitSafeEvmAssetBridge(payable(proxy));
+        proxyAdmin = address(uint160(uint256(vm.load(proxy, ADMIN_SLOT))));
+        nextImpl = address(new BridgeV2Mock());
+        nextContractName = "BridgeV2Mock";
+        nextSourcePath = "test/mocks/BridgeV2Mock.sol";
+    }
+
+    function test_theScriptsUpgradeABridgeWithNoBridgeKnowledge() public {
+        string memory name = "UPGBRIDGE";
+        _writeRecords(name);
+        _schedule(name, "");
+        DummyExecute e = new DummyExecute();
+        e.configure(name, safe);
+
+        vm.warp(block.timestamp + DELAY);
+        e.run();
+
+        assertEq(_implementationOf(proxy), nextImpl);
+        assertEq(bridge.threshold(), THRESHOLD);
+        assertEq(bridge.getAttestors().length, 3);
+        assertEq(BridgeV2Mock(payable(proxy)).version(), "v2-mock");
         _removeRecords(name);
     }
 }

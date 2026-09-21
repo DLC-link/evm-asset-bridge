@@ -23,6 +23,9 @@ import {CancelDefaultAdminTransfer} from "../../script/manage/BitSafeEvmAssetBri
 import {ChangeDefaultAdminDelay} from "../../script/manage/BitSafeEvmAssetBridge/ChangeDefaultAdminDelay.s.sol";
 import {RollbackDefaultAdminDelay} from "../../script/manage/BitSafeEvmAssetBridge/RollbackDefaultAdminDelay.s.sol";
 import {Status} from "../../script/manage/BitSafeEvmAssetBridge/Status.s.sol";
+import {ScheduleUpgrade} from "../../script/manage/upgrade/ScheduleUpgrade.s.sol";
+import {ExecuteUpgrade} from "../../script/manage/upgrade/ExecuteUpgrade.s.sol";
+import {CancelUpgrade} from "../../script/manage/upgrade/CancelUpgrade.s.sol";
 import {BitSafeEvmAssetBridge} from "../../src/BitSafeEvmAssetBridge.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
@@ -398,11 +401,12 @@ contract ManageBaseTest is BridgeTestBase {
         status.report(address(bridge));
     }
 
-    /// Every BETH script must return a unique action name.
+    /// Every management script, the upgrade scripts included, must return a
+    /// unique action name.
     /// The action name picks the Safe envelope file path.
     /// Two scripts with one name would overwrite each other's envelope file.
     function test_actionNames_areAllUnique() public {
-        string[20] memory names = [
+        string[23] memory names = [
             (new Pause()).action(),
             (new Unpause()).action(),
             (new SetThreshold()).action(),
@@ -422,7 +426,10 @@ contract ManageBaseTest is BridgeTestBase {
             (new CancelDefaultAdminTransfer()).action(),
             (new ChangeDefaultAdminDelay()).action(),
             (new RollbackDefaultAdminDelay()).action(),
-            (new Status()).action()
+            (new Status()).action(),
+            (new ScheduleUpgrade()).action(),
+            (new ExecuteUpgrade()).action(),
+            (new CancelUpgrade()).action()
         ];
 
         for (uint256 i; i < names.length; ++i) {
