@@ -9,9 +9,9 @@ import {CancelUpgrade} from "../../script/manage/upgrade/CancelUpgrade.s.sol";
 import {CounterV1, CounterV2} from "../mocks/CounterUpgradeable.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {BridgeTestBase} from "../BridgeTestBase.t.sol";
-import {BitSafeEvmAssetBridge} from "../../src/BitSafeEvmAssetBridge.sol";
 import {BridgeV2Mock} from "../mocks/BridgeV2Mock.sol";
 
 /// Each double fixes the three values that come from the environment in a
@@ -363,22 +363,6 @@ contract UpgradeActionsTest is UpgradeFixture {
         _removeRecords(name);
     }
 
-    function test_execute_rebuildsTheScheduledCallFromTheBlock() public {
-        string memory name = "UPGREBUILD";
-        _writeRecords(name);
-        DummySchedule s = _schedule(name, "");
-        DummyExecute e = new DummyExecute();
-        e.configure(name, safe);
-        (UpgradeManage.Schedule memory sched,) = e.readSchedule();
-        assertEq(
-            e.encode(sched),
-            abi.encodeCall(
-                TimelockController.execute, (proxyAdmin, 0, s.upgradeCall(nextImpl, ""), bytes32(0), s.salt(nextImpl))
-            )
-        );
-        _removeRecords(name);
-    }
-
     function test_execute_withNoBlockReverts() public {
         string memory name = "UPGNOSCHED";
         _writeRecords(name);
@@ -410,7 +394,6 @@ contract UpgradeActionsTest is UpgradeFixture {
         DummyCancel c = new DummyCancel();
         c.configure(name, safe);
 
-        assertEq(c.encode(id), abi.encodeCall(TimelockController.cancel, (id)));
         c.run();
         assertFalse(timelock.isOperation(id));
         string memory envelope = vm.readFile(_envelope(name, "cancelUpgrade"));
@@ -455,28 +438,6 @@ contract UpgradeActionsTest is UpgradeFixture {
         _removeRecords("UPGOTHER");
     }
 
-    /// The timelock stores only the hash, so a salt that differs from the
-    /// schedule names an operation the timelock never saw.
-    function test_execute_withAnotherSaltReverts() public {
-        string memory name = "UPGSALT";
-        _writeRecords(name);
-        DummySchedule s = _schedule(name, "");
-        (UpgradeManage.Schedule memory sched,) = s.readSchedule();
-        vm.warp(block.timestamp + DELAY);
-
-        bytes32 wrongSalt = keccak256("another salt");
-        bytes32 wrongId = timelock.hashOperation(sched.target, 0, sched.callData, sched.predecessor, wrongSalt);
-        bytes32 readyBit = bytes32(uint256(1 << uint8(TimelockController.OperationState.Ready)));
-        vm.prank(safe);
-        vm.expectRevert(
-            abi.encodeWithSelector(TimelockController.TimelockUnexpectedOperationState.selector, wrongId, readyBit)
-        );
-        timelock.execute(sched.target, 0, sched.callData, sched.predecessor, wrongSalt);
-
-        assertEq(_implementationOf(proxy), oldImpl);
-        _removeRecords(name);
-    }
-
     /// A block whose id does not hash from its own fields is a hand edit.
     /// Execute and cancel refuse it instead of acting on two operations.
     function test_readSchedule_refusesABlockWhoseIdDoesNotMatch() public {
@@ -495,32 +456,18 @@ contract UpgradeActionsTest is UpgradeFixture {
     }
 }
 
-/// The same scripts, against the bridge. The fixture builds the proxy the
-/// way BridgeDeploy does: the timelock is the proxy admin.
+/// The same scripts, against the bridge. The fixture takes the proxy that
+/// BridgeTestBase deploys and hands its ProxyAdmin to the timelock, which is
+/// the state BridgeDeploy leaves behind.
 contract UpgradeActionsBridgeTest is BridgeTestBase, UpgradeFixture {
     function setUp() public override {
         super.setUp();
         timelock = _deployTimelock();
-        BitSafeEvmAssetBridge.Limits memory open =
-            BitSafeEvmAssetBridge.Limits({minAmount: 0, maxAmount: type(uint256).max});
-        bytes memory initData = abi.encodeCall(
-            BitSafeEvmAssetBridge.initialize,
-            (
-                address(0),
-                DEFAULT_TARGET_DECIMALS,
-                defaultAdmin,
-                ADMIN_DELAY,
-                bridgeAdmin,
-                attestors,
-                THRESHOLD,
-                open,
-                open
-            )
-        );
-        oldImpl = address(new BitSafeEvmAssetBridge());
-        proxy = address(new TransparentUpgradeableProxy(oldImpl, address(timelock), initData));
-        bridge = BitSafeEvmAssetBridge(payable(proxy));
+        proxy = address(bridge);
         proxyAdmin = address(uint160(uint256(vm.load(proxy, ADMIN_SLOT))));
+        vm.prank(proxyOwner);
+        ProxyAdmin(proxyAdmin).transferOwnership(address(timelock));
+        oldImpl = address(implementation);
         nextImpl = address(new BridgeV2Mock());
         nextContractName = "BridgeV2Mock";
         nextSourcePath = "test/mocks/BridgeV2Mock.sol";

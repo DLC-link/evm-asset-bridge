@@ -173,26 +173,16 @@ endif
 # ---- Upgrades ----------------------------------------------------------------
 #
 # The upgrade targets drive a proxy whose ProxyAdmin belongs to a timelock.
-# script/manage/README.md section 12 holds the operator sequence. Every target
-# needs DEPLOYMENT and RPC_URL. The chain id comes from the RPC. Each target
-# runs the sync before it acts, and again after a direct broadcast, so the
-# records always match the chain when the command returns.
+# Every target needs DEPLOYMENT and RPC_URL. Each one runs the sync before it
+# acts, and again after a direct broadcast. script/manage/README.md section 12
+# holds the operator sequence and every option.
 #
-# make upgrade-deploy DEPLOYMENT=BETH RPC_URL=... SIGNER="--account deployer --slow"
-#   Deploys the next implementation, records it, and syncs. CONTRACT=<path>:<Name>
-#   picks another contract. The default is the recorded implementation's.
-#
-# make upgrade-schedule DEPLOYMENT=BETH RPC_URL=... SIGNER="--account proxyOwner"
+# make upgrade-deploy   DEPLOYMENT=BETH RPC_URL=... SIGNER="--account deployer --slow" [CONTRACT=<path>:<Name>]
+# make upgrade-schedule DEPLOYMENT=BETH RPC_URL=... SIGNER="--account proxyOwner" [DATA=0x...]
 # make upgrade-execute  DEPLOYMENT=BETH RPC_URL=... SIGNER="--account proxyOwner"
 # make upgrade-cancel   DEPLOYMENT=BETH RPC_URL=... SIGNER="--account proxyOwner"
-#   Direct mode needs SIGNER. SAFE=0x... selects Safe mode. The target then
-#   writes an envelope for `make propose` and syncs nothing afterwards.
-#   DATA=0x... adds an upgradeAndCall payload to the schedule.
-#
-# make upgrade-sync DEPLOYMENT=BETH RPC_URL=...
-# make upgrade-status DEPLOYMENT=BETH RPC_URL=...
-#   Reconciles the records with the chain and prints the state. Both names
-#   run one command.
+# make upgrade-sync     DEPLOYMENT=BETH RPC_URL=...        (upgrade-status runs the same command)
+#   SAFE=0x... selects Safe mode for schedule, execute and cancel.
 
 UPGRADE_DIR := script/manage/upgrade
 
@@ -229,32 +219,25 @@ upgrade-deploy:
 	  ./script/record.sh $(DEPLOYMENT)
 	$(UPGRADE_SYNC)
 
+# One recipe serves schedule, execute and cancel. $(1) names the script. DATA
+# reaches all three; only ScheduleUpgrade reads it.
+define UPGRADE_ACTION
+$(call upgrade_require,$@)
+$(UPGRADE_SYNC)
+@echo "$@: $(UPGRADE_MODE)"
+@DEPLOYMENT="$(DEPLOYMENT)" DATA="$(DATA)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	  $(UPGRADE_DIR)/$(1).s.sol:$(1) --sig 'run()' --rpc-url "$(RPC_URL)" $(UPGRADE_FLAGS)
+$(UPGRADE_POST_SYNC)
+endef
+
 upgrade-schedule:
-	$(call upgrade_require,upgrade-schedule)
-	$(UPGRADE_SYNC)
-	@echo "upgrade-schedule: $(UPGRADE_MODE)"
-	@DEPLOYMENT="$(DEPLOYMENT)" DATA="$(DATA)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
-	  $(UPGRADE_DIR)/ScheduleUpgrade.s.sol:ScheduleUpgrade \
-	  --sig 'run()' --rpc-url "$(RPC_URL)" $(UPGRADE_FLAGS)
-	$(UPGRADE_POST_SYNC)
+	$(call UPGRADE_ACTION,ScheduleUpgrade)
 
 upgrade-execute:
-	$(call upgrade_require,upgrade-execute)
-	$(UPGRADE_SYNC)
-	@echo "upgrade-execute: $(UPGRADE_MODE)"
-	@DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
-	  $(UPGRADE_DIR)/ExecuteUpgrade.s.sol:ExecuteUpgrade \
-	  --sig 'run()' --rpc-url "$(RPC_URL)" $(UPGRADE_FLAGS)
-	$(UPGRADE_POST_SYNC)
+	$(call UPGRADE_ACTION,ExecuteUpgrade)
 
 upgrade-cancel:
-	$(call upgrade_require,upgrade-cancel)
-	$(UPGRADE_SYNC)
-	@echo "upgrade-cancel: $(UPGRADE_MODE)"
-	@DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
-	  $(UPGRADE_DIR)/CancelUpgrade.s.sol:CancelUpgrade \
-	  --sig 'run()' --rpc-url "$(RPC_URL)" $(UPGRADE_FLAGS)
-	$(UPGRADE_POST_SYNC)
+	$(call UPGRADE_ACTION,CancelUpgrade)
 
 upgrade-sync upgrade-status:
 	$(call upgrade_require,$@)

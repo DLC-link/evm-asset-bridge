@@ -5,22 +5,13 @@
 # The chain is the source of truth for a timelock operation. forge writes files
 # during simulation, before it broadcasts, and Safe mode never touches the
 # chain. So no Solidity script records what happened. This script reads the
-# timelock and the proxy, and it changes the records to match:
+# timelock and the proxy, and it changes the records to match. The `case` on
+# STATE below is the rule, and script/manage/README.md section 12.8 explains
+# it. The script then prints the status; `make upgrade-status` runs it too.
 #
-#   chain Waiting/Ready, block without readyAt  -> add readyAt
-#   chain Waiting/Ready, no block               -> write a block for an empty payload
-#   chain Unset, block without readyAt          -> keep it: not on chain yet
-#   chain Unset, block with readyAt             -> cancelled: drop the block
-#   chain Done, proxy points at next            -> promote the records
-#
-# Promote moves <name>.implementation to <name>.previousImplementation_<n>,
-# turns <name>.nextImplementation into <name>.implementation with `schedule`
-# renamed to `upgrade`, and gives the proxy record the new address,
-# numDeployments + 1 and one history entry that names the previous file.
-# The three mv calls at the end run within microseconds of each other; a kill
-# between them leaves a half promote that the next sync refuses.
-#
-# It then prints the status. `make upgrade-status` runs this same command.
+# One writer at a time. Every write stages <file>.tmp under a fixed name, and
+# the EXIT trap removes those temporaries. Two syncs on one deployment at the
+# same time would share the temporaries and undo each other.
 #
 # Usage: CHAIN_ID=<id> RPC_URL=<url> ./script/upgrade-sync.sh <deploymentName> [chainId]
 set -euo pipefail
@@ -109,7 +100,15 @@ NEXT=$(cast to-check-sum-address "$(jq -r .address "$NEXT_FILE")")
 # ---- the operation ----------------------------------------------------------
 HAS_BLOCK=$(jq -r 'has("schedule")' "$NEXT_FILE")
 if [ "$HAS_BLOCK" = "true" ]; then
-  DATA=$(jq -r .schedule.data "$NEXT_FILE")
+  DATA=$(jq -r '.schedule.data // empty' "$NEXT_FILE")
+  case "$DATA" in
+    0x*) ;;
+    *)
+      echo "upgrade-sync.sh: the schedule block in $NEXT_FILE holds no data field that starts with 0x" >&2
+      echo "upgrade-sync.sh: the record is inconsistent; repair it by hand before you continue" >&2
+      exit 1
+      ;;
+  esac
   HAS_READY=$(jq -r '.schedule | has("readyAt")' "$NEXT_FILE")
 else
   DATA=0x
@@ -174,6 +173,8 @@ promote() {
     '. + {implementation: $impl, numDeployments: ((.numDeployments // 1) + 1), history: ((.history // []) + [$entry])}' \
     "$PROXY_FILE" >"$PROXY_FILE.tmp"
 
+  # A kill between these three mv calls leaves a half promote. The next sync
+  # refuses it, because the previous file already exists.
   mv "$prev_file.tmp" "$prev_file"
   mv "$IMPL_FILE.tmp" "$IMPL_FILE"
   mv "$PROXY_FILE.tmp" "$PROXY_FILE"

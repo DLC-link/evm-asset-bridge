@@ -203,17 +203,11 @@ contract name, the compiler input hash, the git commit, the transaction hash,
 and the time. The six fields describe the old implementation, never the proxy,
 so they are enough to verify that implementation later.
 
-An upgrade through the timelock adds two files and two blocks.
-`BETH.nextImplementation.<chainId>.json` holds the new implementation before
-the upgrade. Once the schedule is sent, it gains a `schedule` block. The
-block holds `operationId`, `target`, `calldata`, `data`, `predecessor`,
-`salt`, `timelock`, `delay`, `proposer`, and `proposedAt`. The sync adds
-`readyAt` once the chain confirms the operation. After the execute,
-that record becomes the implementation record, and the block becomes
-`upgrade`. The old implementation record moves to
-`BETH.previousImplementation_<n>.<chainId>.json`, and the new `history`
-entry names that file in its `record` field. `script/manage/README.md`
-section 12 holds the operator sequence.
+An upgrade through the timelock adds `BETH.nextImplementation.<chainId>.json`
+before the switch and `BETH.previousImplementation_<n>.<chainId>.json` after
+it. The new `history` entry names the previous file in its `record` field.
+`script/manage/README.md` section 12 holds the operator sequence and the
+record blocks an upgrade writes.
 
 `deployments/solcInputs/<hash>.json` is the standard-JSON compiler input that
 produced the deployed bytes. The verify command submits that file. The

@@ -14,7 +14,6 @@ FAILURES=0
 
 . "$ROOT/test/tooling/lib.sh"
 
-lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
 count() { grep -c "$2" <<<"$1" || true; }
 
 echo "== the upgrade targets quote the RPC URL and sync around each step =="
@@ -69,24 +68,16 @@ set -e
 check    "direct schedule needs SIGNER"    "$([ "$MK_RC" -ne 0 ] && echo refused || echo ran)" "refused"
 
 
+BAK=$(mktemp -d)
 cleanup() {
-  pkill -f "anvil --port $PORT" >/dev/null 2>&1 || true
+  anvil_stop "$PORT"
   prune_untracked_solc_inputs
+  rm -rf "$BAK"
 }
 trap cleanup EXIT
 
 echo "== starting anvil on port $PORT =="
-cleanup
-anvil --port "$PORT" --silent &
-WAITED=0
-until cast chain-id --rpc-url "$RPC" >/dev/null 2>&1; do
-  sleep 0.2
-  WAITED=$((WAITED + 1))
-  if [ "$WAITED" -ge 150 ]; then
-    echo "upgrade-sync.t.sh: anvil did not answer on $RPC within 30 seconds" >&2
-    exit 1
-  fi
-done
+anvil_start "$PORT"
 
 # Every delete names chain $CHAIN_ID. A wider delete would take a real deploy
 # with it.
@@ -95,39 +86,39 @@ rm -rf "deployments/BETH."*".$CHAIN_ID.json" "broadcast/Deploy_BETH.s.sol/$CHAIN
 rm -f "deployments/.pending/BETH.$CHAIN_ID.json"
 
 echo "== deploying the bridge =="
-# Anvil's default accounts. These keys are public and well known.
+# Anvil's default accounts 0 and 3. OWNER_KEY belongs to PROXY_OWNER.
 DEPLOYER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 OWNER_KEY=0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6
-export ASSET=0x0000000000000000000000000000000000000000
-export TARGET_DECIMALS=10
-export DEFAULT_ADMIN=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
-export ADMIN_DELAY=0
-export BRIDGE_ADMIN=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
-export PROXY_OWNER=0x90F79bf6EB2c4f870365E785982E1f101E93b906
-export TIMELOCK_DELAY=60
-export ATTESTORS=0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65,0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc,0x976EA74026E726554dB657fA54763abd0C3a0aa9
-export THRESHOLD=2
-export DEPOSIT_MIN=0
-export DEPOSIT_MAX=115792089237316195423570985008687907853269984665640564039457584007913129639935
-export WITHDRAW_MIN=0
-export WITHDRAW_MAX=115792089237316195423570985008687907853269984665640564039457584007913129639935
-
-forge script script/Deploy_BETH.s.sol:Deploy_BETH \
-  --rpc-url "$RPC" --broadcast --private-key "$DEPLOYER_KEY" >/dev/null
-./script/record.sh BETH >/dev/null
+deploy_beth "$RPC" "$DEPLOYER_KEY"
 
 P="deployments/BETH.proxy.$CHAIN_ID.json"
 I="deployments/BETH.implementation.$CHAIN_ID.json"
 N="deployments/BETH.nextImplementation.$CHAIN_ID.json"
 T="deployments/BETH.timelock.$CHAIN_ID.json"
 PREV1="deployments/BETH.previousImplementation_1.$CHAIN_ID.json"
+IMPL_SLOT=0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
 PROXY_ADDR=$(jq -r .address "$P")
 TIMELOCK_ADDR=$(jq -r .address "$T")
 OLD_IMPL=$(cast to-check-sum-address "$(jq -r .address "$I")")
 onchain_impl() {
-  cast to-check-sum-address "0x$(cast storage "$PROXY_ADDR" 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --rpc-url "$RPC" | cut -c27-66)"
+  cast to-check-sum-address "0x$(cast storage "$PROXY_ADDR" "$IMPL_SLOT" --rpc-url "$RPC" | cut -c27-66)"
+}
+# set_impl_slot points the proxy at an address behind the timelock's back.
+set_impl_slot() {
+  cast rpc anvil_setStorageAt "$PROXY_ADDR" "$IMPL_SLOT" "$(cast abi-encode 'f(address)' "$1")" --rpc-url "$RPC" >/dev/null
 }
 no_temporaries() { [ -z "$(ls deployments/BETH.*.$CHAIN_ID.json.tmp 2>/dev/null)" ] && echo none || echo present; }
+# sync_refuses runs the sync and expects a non-zero exit with one message.
+sync_refuses() { # sync_refuses <label> <needle>
+  local out rc
+  set +e
+  out=$(make upgrade-sync DEPLOYMENT=BETH RPC_URL="$RPC" 2>&1)
+  rc=$?
+  set -e
+  check    "$1 refuses"     "$([ "$rc" -ne 0 ] && echo refused || echo ran)" "refused"
+  contains "$1 names the cause" "$out" "$2"
+  check    "$1 leaves no temporaries" "$(no_temporaries)" "none"
+}
 
 echo "== upgrade-sync with no next implementation =="
 OUT=$(make upgrade-sync DEPLOYMENT=BETH RPC_URL="$RPC" 2>&1)
@@ -139,6 +130,7 @@ OUT=$(make upgrade-deploy DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $
 check    "next record exists"        "$([ -f "$N" ] && echo present || echo missing)" "present"
 check    "next role"                 "$(jq -r .role "$N")" "nextImplementation"
 check    "next contractName"         "$(jq -r .contractName "$N")" "BitSafeEvmAssetBridge"
+contains "deploy prints the record path" "$OUT" "record $N"
 NEXT_IMPL=$(cast to-check-sum-address "$(jq -r .address "$N")")
 check    "next differs from the old" "$([ "$NEXT_IMPL" != "$OLD_IMPL" ] && echo yes || echo no)" "yes"
 check    "proxy record untouched"    "$(cast to-check-sum-address "$(jq -r .implementation "$P")")" "$OLD_IMPL"
@@ -177,6 +169,26 @@ check    "proposer is the owner"     "$(cast to-check-sum-address "$(jq -r .sche
 check    "state waiting"             "$(cast call "$TIMELOCK_ADDR" 'getOperationState(bytes32)(uint8)' "$ID" --rpc-url "$RPC")" "1"
 contains "status prints waiting"     "$OUT" "state           waiting"
 
+echo "== a sync with no change =="
+BEFORE=$(cat "$P" "$I" "$N")
+OUT=$(make upgrade-sync DEPLOYMENT=BETH RPC_URL="$RPC" 2>&1)
+check    "files unchanged"           "$(cat "$P" "$I" "$N")" "$BEFORE"
+contains "reports no change"         "$OUT" "sync            no change"
+contains "still waiting"             "$OUT" "state           waiting"
+
+echo "== the sync refuses a damaged record while the operation waits =="
+cp "$N" "$BAK/next.json"
+jq '.schedule.operationId = "0x0000000000000000000000000000000000000000000000000000000000000001"' "$BAK/next.json" >"$N"
+sync_refuses "a foreign operation id" "but the records derive"
+jq 'del(.schedule.data)' "$BAK/next.json" >"$N"
+sync_refuses "a block without data" "no data field that starts with 0x"
+cp "$BAK/next.json" "$N"
+set_impl_slot "$NEXT_IMPL"
+sync_refuses "a pending operation while the proxy already points at next" "already points at $NEXT_IMPL"
+set_impl_slot "$OLD_IMPL"
+check    "proxy restored"            "$(onchain_impl)" "$OLD_IMPL"
+check    "record restored"           "$(cat "$P" "$I" "$N")" "$BEFORE"
+
 echo "== upgrade-execute before the delay =="
 set +e
 OUT=$(make upgrade-execute DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $OWNER_KEY" 2>&1)
@@ -186,11 +198,34 @@ check    "refuses"                   "$([ "$RC" -ne 0 ] && echo refused || echo 
 contains "names the wait"            "$OUT" "OperationNotReady"
 check    "proxy still on the old"    "$(onchain_impl)" "$OLD_IMPL"
 
-echo "== upgrade-execute after the delay =="
+echo "== upgrade-execute after the delay, with a previous file in the way =="
 cast rpc evm_increaseTime 61 --rpc-url "$RPC" >/dev/null
 cast rpc evm_mine --rpc-url "$RPC" >/dev/null
-OUT=$(make upgrade-execute DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $OWNER_KEY" 2>&1) || { echo "$OUT"; FAILURES=$((FAILURES + 1)); }
+# The execute lands. The post-sync then refuses the promote, because a file
+# with the next previous name already exists.
+echo '{}' >"$PREV1"
+set +e
+OUT=$(make upgrade-execute DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $OWNER_KEY" 2>&1)
+RC=$?
+set -e
 check    "proxy on the next"         "$(onchain_impl)" "$NEXT_IMPL"
+check    "the post-sync refuses"     "$([ "$RC" -ne 0 ] && echo refused || echo ran)" "refused"
+contains "names the previous file"   "$OUT" "never overwrites a previous implementation"
+check    "records not promoted"      "$([ -f "$N" ] && echo present || echo gone)" "present"
+check    "no temporaries"            "$(no_temporaries)" "none"
+rm -f "$PREV1"
+
+echo "== the sync refuses a damaged record while the operation is done =="
+cp "$P" "$BAK/proxy.json"
+jq '.implementation = "0x000000000000000000000000000000000000dEaD"' "$BAK/proxy.json" >"$P"
+sync_refuses "a proxy record that names another implementation" "repair the records before you promote"
+cp "$BAK/proxy.json" "$P"
+set_impl_slot "$OLD_IMPL"
+sync_refuses "a done operation while the proxy points elsewhere" "is done, but the proxy points at $OLD_IMPL"
+set_impl_slot "$NEXT_IMPL"
+
+echo "== the sync promotes =="
+OUT=$(make upgrade-sync DEPLOYMENT=BETH RPC_URL="$RPC" 2>&1) || { echo "$OUT"; FAILURES=$((FAILURES + 1)); }
 contains "sync promoted"             "$OUT" "promoted $NEXT_IMPL"
 check    "next record gone"          "$([ -f "$N" ] && echo present || echo gone)" "gone"
 check    "previous file exists"      "$([ -f "$PREV1" ] && echo present || echo missing)" "present"
@@ -210,12 +245,6 @@ check    "history[0].implementation" "$(cast to-check-sum-address "$(jq -r '.his
 check    "history[0].record"         "$(jq -r '.history[0].record' "$P")" "BETH.previousImplementation_1.$CHAIN_ID.json"
 check    "history[0].solcInputHash"  "$(jq -r '.history[0].solcInputHash' "$P")" "$(jq -r .solcInputHash "$PREV1")"
 check    "no temporaries"            "$(no_temporaries)" "none"
-
-echo "== a sync with no change =="
-BEFORE=$(cat "$P" "$I")
-OUT=$(make upgrade-sync DEPLOYMENT=BETH RPC_URL="$RPC" 2>&1)
-check    "exit zero and files unchanged" "$(cat "$P" "$I")" "$BEFORE"
-contains "reports no next"           "$OUT" "next            none"
 
 echo "== cancel =="
 make upgrade-deploy DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $DEPLOYER_KEY" >/dev/null 2>&1 || FAILURES=$((FAILURES + 1))

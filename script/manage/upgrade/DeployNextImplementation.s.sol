@@ -17,8 +17,7 @@ import {console2} from "forge-std/console2.sol";
 ///
 ///      It refuses a contract whose constructor takes arguments. Every
 ///      implementation this repo deploys has a constructor that only disables
-///      the initializers. This is a deliberate heuristic. It loosens to an
-///      optional constructor-arguments parameter if we need one.
+///      the initializers.
 ///
 ///   DEPLOYMENT=BETH forge script script/manage/upgrade/DeployNextImplementation.s.sol --sig 'run()' \
 ///     --rpc-url $RPC_URL --broadcast --account deployer
@@ -85,7 +84,7 @@ contract DeployNextImplementation is DeployBase {
 
         console2.log("next implementation", next);
         console2.log("contract", string.concat(sourcePath, ":", name));
-        console2.log("next steps: make record, then make verify");
+        console2.log("record", nextPath);
     }
 
     /// The pending file carries no configuration. One note states that the

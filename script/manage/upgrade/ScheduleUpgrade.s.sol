@@ -93,7 +93,7 @@ contract ScheduleUpgrade is UpgradeManage {
         string memory record = vm.readFile(nextRecordPath());
         string memory name = vm.parseJsonString(record, ".contractName");
         string memory source = vm.parseJsonString(record, ".sourcePath");
-        string memory artifact = vm.readFile(string.concat("out/", _basename(source), "/", name, ".json"));
+        string memory artifact = vm.readFile(vm.getArtifactPathByCode(vm.getCode(string.concat(source, ":", name))));
         string[] memory signatures = vm.parseJsonKeys(artifact, ".methodIdentifiers");
         bytes4 selector = bytes4(payload);
         for (uint256 i; i < signatures.length; ++i) {
@@ -113,21 +113,6 @@ contract ScheduleUpgrade is UpgradeManage {
         // A schedule simulated against an already upgraded proxy would hide a
         // real problem, so the restore must succeed.
         require(vm.revertToState(snapshot), "state snapshot did not restore");
-    }
-
-    function _basename(string memory path) internal pure returns (string memory) {
-        bytes memory b = bytes(path);
-        uint256 start;
-        for (uint256 i; i < b.length; ++i) {
-            if (b[i] == "/") {
-                start = i + 1;
-            }
-        }
-        bytes memory out = new bytes(b.length - start);
-        for (uint256 i; i < out.length; ++i) {
-            out[i] = b[start + i];
-        }
-        return string(out);
     }
 
     function _writeSchedule(bytes32 id, address next, bytes memory payload, uint256 delay) internal {

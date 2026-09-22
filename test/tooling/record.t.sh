@@ -11,11 +11,9 @@ RPC="http://127.0.0.1:$PORT"
 CHAIN_ID=31337
 FAILURES=0
 
-# check, contains, and the compiler-input rule live in one file. verify.t.sh
-# sources the same file, so both tests clean up the same way.
+# check, contains, anvil, the BETH deploy and the compiler-input rule live in
+# one file, so every tooling test sets up and cleans up the same way.
 . "$ROOT/test/tooling/lib.sh"
-
-lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
 
 echo "== the deploy target quotes the RPC URL =="
 # An RPC URL often carries a query string. An unquoted `&` makes the shell run
@@ -31,25 +29,13 @@ contains "quotes the URL for forge script" "$MK_OUT" "--rpc-url \"$MK_URL\" --br
 contains "quotes the URL for cast"         "$MK_OUT" "cast chain-id --rpc-url \"$MK_URL\""
 
 cleanup() {
-  pkill -f "anvil --port $PORT" >/dev/null 2>&1 || true
+  anvil_stop "$PORT"
   prune_untracked_solc_inputs
 }
 trap cleanup EXIT
 
 echo "== starting anvil on port $PORT =="
-cleanup
-anvil --port "$PORT" --silent &
-# The wait must end. An anvil that never answers would otherwise keep this
-# script, and the CI job that runs it, alive until the job's own timeout.
-WAITED=0
-until cast chain-id --rpc-url "$RPC" >/dev/null 2>&1; do
-  sleep 0.2
-  WAITED=$((WAITED + 1))
-  if [ "$WAITED" -ge 150 ]; then
-    echo "record.t.sh: anvil did not answer on $RPC within 30 seconds" >&2
-    exit 1
-  fi
-done
+anvil_start "$PORT"
 
 # Every delete here names chain $CHAIN_ID. `broadcast/` and a pending file both
 # stay out of git, and they hold the only copy of a real deploy's transactions.
@@ -57,28 +43,9 @@ done
 rm -rf "deployments/BETH."*".$CHAIN_ID.json" "broadcast/Deploy_BETH.s.sol/$CHAIN_ID"
 rm -f "deployments/.pending/BETH.$CHAIN_ID.json"
 
-echo "== deploying =="
-# Anvil's first default account. This key is public and well known.
-export PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-export ASSET=0x0000000000000000000000000000000000000000
-export TARGET_DECIMALS=10
-export DEFAULT_ADMIN=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
-export ADMIN_DELAY=0
-export BRIDGE_ADMIN=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
-export PROXY_OWNER=0x90F79bf6EB2c4f870365E785982E1f101E93b906
-export TIMELOCK_DELAY=60
-export ATTESTORS=0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65,0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc,0x976EA74026E726554dB657fA54763abd0C3a0aa9
-export THRESHOLD=2
-export DEPOSIT_MIN=0
-export DEPOSIT_MAX=115792089237316195423570985008687907853269984665640564039457584007913129639935
-export WITHDRAW_MIN=0
-export WITHDRAW_MAX=115792089237316195423570985008687907853269984665640564039457584007913129639935
-
-forge script script/Deploy_BETH.s.sol:Deploy_BETH \
-  --rpc-url "$RPC" --broadcast --private-key "$PRIVATE_KEY" >/dev/null
-
-echo "== recording =="
-./script/record.sh BETH
+echo "== deploying and recording =="
+DEPLOYER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+deploy_beth "$RPC" "$DEPLOYER_KEY"
 
 echo "== checks =="
 P="deployments/BETH.proxy.$CHAIN_ID.json"
@@ -230,9 +197,7 @@ check "the proxy has its own compiler input" \
 IMPL_TX=$(jq -r .transactionHash "$I")
 
 echo "== second deploy: history =="
-forge script script/Deploy_BETH.s.sol:Deploy_BETH \
-  --rpc-url "$RPC" --broadcast --private-key "$PRIVATE_KEY" >/dev/null
-./script/record.sh BETH
+deploy_beth "$RPC" "$DEPLOYER_KEY"
 
 check "numDeployments now 2" "$(jq -r .numDeployments "$P")" "2"
 check "history has one entry" "$(jq -r '.history | length' "$P")" "1"

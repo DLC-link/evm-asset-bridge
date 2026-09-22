@@ -38,6 +38,5 @@ contract ExecuteUpgrade is UpgradeManage {
         _send(encode(s));
         console2.log("executed operation");
         console2.logBytes32(s.operationId);
-        console2.log("run `make upgrade-sync` to promote the records");
     }
 }

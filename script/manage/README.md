@@ -601,10 +601,7 @@ power; the timelock operation does.
 
 One `nextImplementation` record exists per deployment at a time. The
 command refuses a second deploy while the record exists. Delete the file by
-hand to drop an implementation you no longer want.
-
-Cancel a confirmed schedule first. The operation stays live on the timelock
-otherwise, and the tooling can no longer see it.
+hand to drop an implementation you no longer want. Section 12.7 says when.
 
 ### 12.2 Verify the source
 
@@ -739,7 +736,12 @@ It reads the timelock and the proxy, and it applies one rule:
 | unset | block with `readyAt` | the operation was cancelled; drop the block |
 | done, proxy on the new code | any | promote |
 
-The sync refuses two states and asks you to investigate. The first: an
+The sync refuses two chain states and asks you to investigate. The first: an
 operation that is done while the proxy points elsewhere. The second: a
 pending operation while the proxy already points at the new code. It also
-refuses a block whose operation id differs from the one the records derive.
+refuses three damaged records and asks you to repair them by hand: a block
+whose operation id differs from the one the records derive, a block without
+a `data` field, and a proxy record whose `implementation` differs from the
+implementation record. It never overwrites an existing
+`previousImplementation_<n>` file. Run one sync at a time per deployment.
+The test `test/tooling/upgrade-sync.t.sh` covers each refusal.

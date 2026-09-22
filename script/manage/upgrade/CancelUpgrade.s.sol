@@ -36,6 +36,5 @@ contract CancelUpgrade is UpgradeManage {
         _send(encode(s.operationId));
         console2.log("cancelled operation");
         console2.logBytes32(s.operationId);
-        console2.log("run `make upgrade-sync` to drop the schedule block");
     }
 }

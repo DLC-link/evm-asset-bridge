@@ -16,26 +16,17 @@ contract CounterV1 is Initializable {
         count = start;
     }
 
-    function increment() external {
+    function increment() external virtual {
         count += 1;
     }
 }
 
-/// The next version. `setStep` is the reinitializer that an
-/// `upgradeAndCall` payload runs.
-contract CounterV2 is Initializable {
-    uint256 public count;
+/// The next version. `step` takes the slot after `count`, and `setStep` is
+/// the reinitializer that an `upgradeAndCall` payload runs.
+contract CounterV2 is CounterV1 {
     uint256 public step;
 
     error StepIsZero();
-
-    constructor() {
-        _disableInitializers();
-    }
-
-    function initialize(uint256 start) external initializer {
-        count = start;
-    }
 
     function setStep(uint256 step_) external reinitializer(2) {
         if (step_ == 0) {
@@ -44,7 +35,7 @@ contract CounterV2 is Initializable {
         step = step_;
     }
 
-    function increment() external {
+    function increment() external override {
         count += step;
     }
 
