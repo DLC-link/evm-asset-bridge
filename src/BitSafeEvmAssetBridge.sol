@@ -310,7 +310,7 @@ contract BitSafeEvmAssetBridge is
         emit WithdrawalHorizonSet(horizon);
     }
 
-    /// @notice Rescues tokens sent to the bridge by mistake.
+    /// @notice Rescues tokens sent to the bridge by mistake. Never the bridged asset.
     /// @dev The reentrancy guard is transient and shared across all guarded
     ///      functions, so a guarded function cannot nest inside another
     ///      guarded call.
@@ -321,7 +321,7 @@ contract BitSafeEvmAssetBridge is
         emit ERC20Rescued(token, to, amount);
     }
 
-    /// @notice Rescues stray ETH (for example forced in via selfdestruct).
+    /// @notice Rescues stray ETH (for example forced in via selfdestruct). Never the bridged asset.
     ///         Only callable when the bridged asset is not ETH.
     function rescueETH(address to, uint256 amount) external onlyRole(BRIDGE_ADMIN_ROLE) nonReentrant {
         if (_getBridgeStorage().asset == address(0)) revert CannotRescueBridgedAsset();
