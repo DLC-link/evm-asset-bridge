@@ -61,3 +61,6 @@ jobs:
 
       - name: Run the propose tooling test
         run: ./test/tooling/propose.t.sh
+
+      - name: Run the upgrade tooling test
+        run: ./test/tooling/upgrade-sync.t.sh

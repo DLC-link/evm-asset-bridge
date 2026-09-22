@@ -7,6 +7,7 @@ BitSafeEvmAssetBridge: an upgradeable EVM contract that locks one asset
 - Build: `forge build`
 - Test: `forge test`
 - Integration-test image: `make it-verify` (see `infra/docker/README.md`)
+- Upgrade through the timelock: `make upgrade-deploy`, `upgrade-schedule`, `upgrade-status`, `upgrade-execute`, `upgrade-cancel`, `upgrade-sync` (see `script/manage/README.md` section 12)
 - The design spec is maintained locally, outside git (not tracked in this repo).
 
 ## Production deploy
@@ -152,11 +153,13 @@ One deploy creates four contracts. It therefore writes four records:
 
 ```
 deployments/
-  BETH.proxy.<chainId>.json           <- the address every consumer calls
-  BETH.implementation.<chainId>.json  <- the bridge ABI
-  BETH.proxyAdmin.<chainId>.json      <- the contract that can upgrade the proxy
-  BETH.timelock.<chainId>.json        <- the contract that owns the ProxyAdmin
-  solcInputs/<hash>.json              <- the exact compiler input
+  BETH.proxy.<chainId>.json                     <- the address every consumer calls
+  BETH.implementation.<chainId>.json            <- the bridge ABI
+  BETH.proxyAdmin.<chainId>.json                <- the contract that can upgrade the proxy
+  BETH.timelock.<chainId>.json                  <- the contract that owns the ProxyAdmin
+  BETH.nextImplementation.<chainId>.json        <- an implementation that waits for its upgrade
+  BETH.previousImplementation_<n>.<chainId>.json <- an implementation the proxy left behind
+  solcInputs/<hash>.json                        <- the exact compiler input
 ```
 
 The middle part of the name is the role, not the contract name. An upgrade that
@@ -199,6 +202,12 @@ bridge ABI from `BETH.implementation.<chainId>.json`.
 contract name, the compiler input hash, the git commit, the transaction hash,
 and the time. The six fields describe the old implementation, never the proxy,
 so they are enough to verify that implementation later.
+
+An upgrade through the timelock adds `BETH.nextImplementation.<chainId>.json`
+before the switch and `BETH.previousImplementation_<n>.<chainId>.json` after
+it. The new `history` entry names the previous file in its `record` field.
+`script/manage/README.md` section 12 holds the operator sequence and the
+record blocks an upgrade writes.
 
 `deployments/solcInputs/<hash>.json` is the standard-JSON compiler input that
 produced the deployed bytes. The verify command submits that file. The

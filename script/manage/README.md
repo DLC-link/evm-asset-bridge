@@ -187,6 +187,9 @@ accepts. In Safe mode that sender is the Safe itself.
 | `CancelDefaultAdminTransfer` | `DEFAULT_ADMIN` | `make manage SCRIPT=CancelDefaultAdminTransfer SIG='run()'` |
 | `ChangeDefaultAdminDelay` | `DEFAULT_ADMIN` | `make manage SCRIPT=ChangeDefaultAdminDelay SIG='run(uint256)' ARGS=259200` |
 | `RollbackDefaultAdminDelay` | `DEFAULT_ADMIN` | `make manage SCRIPT=RollbackDefaultAdminDelay SIG='run()'` |
+| `ScheduleUpgrade` | timelock proposer (`PROXY_OWNER`) | `make upgrade-schedule` (section 12) |
+| `ExecuteUpgrade` | timelock executor (`PROXY_OWNER`) | `make upgrade-execute` (section 12) |
+| `CancelUpgrade` | timelock canceller (`PROXY_OWNER`) | `make upgrade-cancel` (section 12) |
 
 Copy one line. Change the `ARGS` value. Send the command.
 
@@ -205,6 +208,9 @@ Read these five notes with the table:
   bridged-asset balance above `totalLocked`.
 - `RescueETH` reverts when the bridged asset is ETH. Use `RescueSurplus` on an
   ETH bridge.
+- The three upgrade scripts live in `script/manage/upgrade/`, not in the
+  bridge folder. They have their own `make` targets. Section 12 holds the
+  whole sequence.
 
 This example raises the signature threshold to 3:
 
@@ -513,6 +519,12 @@ secret.
 `test/tooling/propose.t.sh`. A fake `curl` answers the service. A fake `cast`
 answers the chain. CI runs the suite on every push.
 
+The upgrade scripts have tests in `test/manage/UpgradeActions.t.sol` and
+`test/manage/DeployNextImplementation.t.sol`. The whole upgrade sequence
+runs against a local anvil in `test/tooling/upgrade-sync.t.sh`. CI runs
+all three. No upgrade has run on a public network yet. Treat the first
+Sepolia upgrade as a test of the tooling.
+
 The whole flow also ran against the live Safe Transaction Service. This repo
 becomes public. The record therefore names no address and no transaction hash.
 
@@ -551,3 +563,185 @@ Sepolia instances use one Safe for every authority.
 
 The tooling does not depend on the shape. `SAFE` names the Safe on every
 invocation. An operator points each action at the Safe that holds its role.
+
+## 12. Upgrade through the timelock
+
+The `ProxyAdmin` of every deployment belongs to an OpenZeppelin
+`TimelockController`. An upgrade therefore takes three calls on the
+timelock: `schedule`, a wait of at least the minimum delay, and `execute`.
+Every argument of those calls must match to the byte. The scripts in
+`script/manage/upgrade/` build them from the deployment records, and the
+operator names no address.
+
+The scripts work for any recorded deployment whose `proxyAdmin` record
+names a timelock as owner. They read the roles `proxy`, `proxyAdmin`,
+`timelock` and `nextImplementation`, and nothing else. They hold no bridge
+knowledge.
+
+Every target needs `DEPLOYMENT` and `RPC_URL`. Load the environment file
+first, as section 2 describes. Each target runs the sync before it acts,
+and again after a direct broadcast. The records therefore match the chain
+when the command returns.
+
+### 12.1 Deploy the next implementation
+
+```bash
+make upgrade-deploy SIGNER="--account deployer --slow"
+```
+
+The command deploys the contract that the current implementation record
+names, records it as `deployments/<name>.nextImplementation.<chainId>.json`,
+and syncs. `CONTRACT=src/Other.sol:Other` deploys another contract. The
+script refuses a contract whose constructor takes arguments. Every
+implementation we ship only disables its initializers.
+
+The deployer key on Sepolia carries an EIP-7702 delegation, so pass
+`--slow`. Any funded key may deploy an implementation. The deploy grants no
+power; the timelock operation does.
+
+One `nextImplementation` record exists per deployment at a time. The
+command refuses a second deploy while the record exists. Delete the file by
+hand to drop an implementation you no longer want. Section 12.7 says when.
+
+### 12.2 Verify the source
+
+```bash
+make verify CHAIN_ID=<chainId>
+```
+
+`verify.sh` reads the roles from the file names, so it submits the new
+record with no change. Commit the record and the compiler input.
+
+### 12.3 Review the storage layout by hand
+
+The bridge uses ERC-7201 namespaced storage. `solc` therefore emits an
+empty `storageLayout`, and no automated layout comparison proves anything
+about this contract. A human reviews the diff instead.
+
+```bash
+git diff <gitCommit> HEAD -- src/
+```
+
+`gitCommit` comes from the current implementation record. Open the
+`BridgeStorage` struct in `src/BitSafeEvmAssetBridge.sol`. Check three
+points. No field disappears. No field changes its type or its position.
+Every new field comes after the last existing field. A second engineer confirms
+the same three points. Do not schedule before both reviews are done.
+
+### 12.4 Schedule
+
+```bash
+SAFE=0xProxyOwnerSafe make upgrade-schedule
+make propose ENVELOPE=deployments/.safe/<name>.<chainId>.scheduleUpgrade.json SIGNER="--account proposer"
+```
+
+The script checks the proposer role, simulates the whole upgrade, sends
+`schedule`, and writes a `schedule` block into the `nextImplementation`
+record. The block holds `operationId`, `target`, `calldata`, `data`,
+`predecessor`, `salt`, `timelock`, `delay`, `proposer`, and `proposedAt`.
+The sync adds `readyAt` once the chain confirms the operation. In direct
+mode, pass
+`SIGNER="--account proxyOwner"` and leave `SAFE` empty.
+
+**A payload.** `DATA=0x...` adds a call that runs inside `upgradeAndCall`
+right after the switch. A reinitializer of the new version is the usual
+case. The script checks the selector against the new contract's ABI, and it
+runs the whole upgrade as the timelock on a state snapshot. A payload that
+reverts stops the command before anyone signs.
+
+**The funded-instance trap.** The simulation proves only that the payload
+runs. It proves nothing about its effect. A reinitializer that resets
+`totalLocked` to zero on a bridge that holds deposits lets `rescueSurplus`
+sweep every deposit as surplus. The reviewer of the payload owns this check.
+Read the reinitializer line by line, and confirm that it writes no field
+that already holds a live value. Prefer an upgrade with no payload; a new
+setting can follow through a management script.
+
+**Schedule again.** The script refuses a second schedule while the chain
+holds the operation, or while the record holds a confirmed block. A block
+without `readyAt` is an intent that never landed, and the next schedule
+replaces it. Reject a Safe proposal that never executed before you schedule
+again with another payload. Two live proposals would name two different
+operations.
+
+### 12.5 Wait
+
+```bash
+make upgrade-status
+```
+
+The command prints the deployment, the proxy, the live implementation, the
+timelock and its minimum delay, the next implementation, the operation id,
+and the state. It also prints whether the proxy already points at the next
+implementation. Anyone can watch the operation on the timelock address
+during the delay.
+
+| State | Meaning |
+| --- | --- |
+| `not scheduled` | No schedule exists yet. |
+| `scheduled in the record, not yet on chain` | The record holds an intent the chain has not confirmed. |
+| `waiting; ready at <ISO> (<n>s left)` | The chain confirmed the operation; the delay has not passed. |
+| `ready to execute` | The delay has passed. |
+| `done` | The operation already executed. |
+
+### 12.6 Execute
+
+```bash
+SAFE=0xProxyOwnerSafe make upgrade-execute
+make propose ENVELOPE=deployments/.safe/<name>.<chainId>.executeUpgrade.json SIGNER="--account proposer"
+```
+
+The script rebuilds the call from the `schedule` block and asks the
+timelock for the live state. `OperationNotReady` names the seconds left.
+`OperationNotOnChain` means the schedule never landed. `OperationDone` means
+the upgrade already ran.
+
+After the Safe executes, run the sync:
+
+```bash
+make upgrade-sync
+```
+
+The sync sees the operation as done and the proxy on the new code. It
+promotes the records. The old implementation record becomes
+`<name>.previousImplementation_<n>.<chainId>.json`. The next-implementation
+record becomes the implementation record, with the `schedule` block renamed
+to `upgrade`. The proxy record gains the new address, `numDeployments + 1`,
+and one `history` entry whose `record` field names the previous file. Commit
+the three files the sync prints. In direct mode the target syncs by itself.
+
+### 12.7 Cancel
+
+```bash
+SAFE=0xProxyOwnerSafe make upgrade-cancel
+make propose ENVELOPE=deployments/.safe/<name>.<chainId>.cancelUpgrade.json SIGNER="--account proposer"
+```
+
+The canceller role cancels a pending operation. The next sync drops the
+`schedule` block. The `nextImplementation` record stays, so the same
+implementation can be scheduled again with the same operation id. Delete
+the file by hand to drop the implementation. Do this only after the cancel
+landed. A deleted record hides a live operation from the sync.
+
+### 12.8 What the sync does
+
+`script/upgrade-sync.sh` is the only writer of chain-derived record state.
+It reads the timelock and the proxy, and it applies one rule:
+
+| Chain | Record | Action |
+| --- | --- | --- |
+| waiting or ready | block without `readyAt` | add `readyAt` |
+| waiting or ready | no block | write a block for an empty payload; an operation scheduled by hand becomes visible |
+| unset | block without `readyAt` | keep it; the schedule has not landed |
+| unset | block with `readyAt` | the operation was cancelled; drop the block |
+| done, proxy on the new code | any | promote |
+
+The sync refuses two chain states and asks you to investigate. The first: an
+operation that is done while the proxy points elsewhere. The second: a
+pending operation while the proxy already points at the new code. It also
+refuses three damaged records and asks you to repair them by hand: a block
+whose operation id differs from the one the records derive, a block without
+a `data` field, and a proxy record whose `implementation` differs from the
+implementation record. It never overwrites an existing
+`previousImplementation_<n>` file. Run one sync at a time per deployment.
+The test `test/tooling/upgrade-sync.t.sh` covers each refusal.

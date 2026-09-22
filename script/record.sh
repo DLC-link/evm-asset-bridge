@@ -4,7 +4,8 @@
 #
 # It merges three sources:
 #   1. deployments/.pending/<name>.<chainId>.json   (the deploy script wrote it)
-#   2. broadcast/Deploy_<name>.s.sol/<chainId>/run-latest.json  (foundry wrote it)
+#   2. broadcast/<script>/<chainId>/run-latest.json  (foundry wrote it; the
+#      script is Deploy_<name>.s.sol, or the pending file's broadcastScript)
 #   3. out/<Contract>.sol/<Contract>.json           (the build wrote it)
 #
 # It writes deployments/<name>.<role>.<chainId>.json for each role, plus
@@ -102,7 +103,19 @@ fi
 CHAIN_ID="$PENDING_CHAIN_ID"
 
 # ---- 2. the broadcast artifact ----------------------------------------------
-BROADCAST="broadcast/Deploy_$NAME.s.sol/$CHAIN_ID/run-latest.json"
+# The pending file may name the script that broadcast the deploy. forge names
+# the broadcast folder after the script file. Empty means Deploy_<name>.s.sol.
+# The value names one file, never a path, so a pending file cannot point the
+# record at another folder.
+BROADCAST_SCRIPT=$(jq -r '.broadcastScript // empty' "$PENDING")
+case "$BROADCAST_SCRIPT" in
+  "") BROADCAST_SCRIPT="Deploy_$NAME.s.sol" ;;
+  */* | .*)
+    echo "record.sh: $PENDING names broadcastScript '$BROADCAST_SCRIPT'; it must be one file name" >&2
+    exit 1
+    ;;
+esac
+BROADCAST="broadcast/$BROADCAST_SCRIPT/$CHAIN_ID/run-latest.json"
 if [ ! -f "$BROADCAST" ]; then
   echo "record.sh: no broadcast artifact at $BROADCAST" >&2
   exit 1
@@ -361,4 +374,8 @@ done
 
 rm -f "$PENDING"
 rmdir deployments/.pending 2>/dev/null || true
-echo "done. The proxy record is $PROXY_RECORD"
+if [ -n "$PROXY_RECORD" ]; then
+  echo "done. The proxy record is $PROXY_RECORD"
+else
+  echo "done."
+fi
