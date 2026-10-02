@@ -389,7 +389,7 @@
     "timelockDelay": 3600,
     "attestors": [
       "0x3355977947F84C2b1CAE7D2903a72958aEE185e2",
-      "0xec32836897C40dc29525db3bAfBAC18e62fab363",
+      "0xd889B7F827dc65877452cC82ce3Bd01870392B4A",
       "0x48256F198CE3A0B9E4f145d8Aa791ECCd768a8a0"
     ],
     "threshold": 2,
