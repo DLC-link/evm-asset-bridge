@@ -24,12 +24,12 @@ contract BitSafeHyperEvmAssetBridge is BitSafeEvmAssetBridge {
 
     function _validateDestination(address destination) internal view override {
         super._validateDestination(destination);
-        if (_isHyperCoreBridgeAddress(destination)) revert ReservedDestination(destination);
+        if (_isHyperCoreSystemAddress(destination)) revert ReservedDestination(destination);
     }
 
     /// The HYPE system address, or a token system address. Every bridgeable
     /// token index is below 2^32, so the check fixes the top 128 bits.
-    function _isHyperCoreBridgeAddress(address a) internal pure returns (bool) {
+    function _isHyperCoreSystemAddress(address a) internal pure returns (bool) {
         return a == 0x2222222222222222222222222222222222222222
             || uint160(a) >> 32 == uint160(0x2000000000000000000000000000000000000000) >> 32;
     }
