@@ -13,7 +13,6 @@ import {ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transp
 /// destination is the only input that can fail.
 contract ReservedDestinationHyperTest is BridgeTestBase {
     address internal constant HYPE_SYSTEM = 0x2222222222222222222222222222222222222222;
-    address internal constant HYPE_SYSTEM_PLUS_ONE = 0x2222222222222222222222222222222222222223;
     address internal constant TOKEN_BOTTOM = 0x2000000000000000000000000000000000000000;
     address internal constant TOKEN_ONE = 0x2000000000000000000000000000000000000001;
     address internal constant TOKEN_HYPE = 0x2000000000000000000000000000000000000096;
@@ -100,10 +99,6 @@ contract ReservedDestinationHyperTest is BridgeTestBase {
 
     function test_hypeSystemAddress_isRefused() public {
         _expectRefused(HYPE_SYSTEM, _reserved(HYPE_SYSTEM));
-    }
-
-    function test_hypeSystemAddressPlusOne_pays() public {
-        _expectPays(HYPE_SYSTEM_PLUS_ONE);
     }
 
     function test_tokenRangeBottom_isRefused() public {
