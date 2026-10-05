@@ -43,6 +43,9 @@ contract DeployTest is Test {
 
         // BETH deploys the base contract, and the record names it.
         assertEq(vm.parseJsonStringArray(json, ".contractNames")[0], "BitSafeEvmAssetBridge");
+        // An incremental build after a second src/ edit can leave the deploy
+        // script with old bytecode, and this check then fails. Run
+        // `forge build --force` and test again. CI always builds from clean.
         assertEq(keccak256(addresses[0].code), keccak256(address(new BitSafeEvmAssetBridge()).code));
 
         // The proxy is live and initialized.
@@ -196,6 +199,9 @@ contract DeployTest is Test {
         // The script deployed the variant's code. The contract has no
         // immutable value, so two deployments carry the same code.
         address[] memory addresses = vm.parseJsonAddressArray(json, ".addresses");
+        // An incremental build after a second src/ edit can leave the deploy
+        // script with old bytecode, and this check then fails. Run
+        // `forge build --force` and test again. CI always builds from clean.
         assertEq(keccak256(addresses[0].code), keccak256(address(new BitSafeHyperEvmAssetBridge()).code));
 
         // Each HyperEVM testnet instance carries its own name.
