@@ -29,14 +29,15 @@ apart. `Deploy_BETH_DEVNET.s.sol` and `Deploy_BETH_TESTNET.s.sol` subclass
 `Deploy_BETH` and change the name only. Every name reads the same
 environment variables, and `.env.sepolia.<NAME>` holds the Sepolia values.
 
-CHYPE bridges native HYPE on HyperEVM, with the same three names.
+CHYPE bridges native HYPE on HyperEVM. It has three deployment names:
+`CHYPE`, `CHYPE_DEVNET` and `CHYPE_TESTNET`.
 `Deploy_CHYPE.s.sol` deploys `BitSafeHyperEvmAssetBridge` instead of
 `BitSafeEvmAssetBridge`. That contract also refuses the HyperCore system
 addresses as a withdraw destination. HyperEVM moves funds sent to those
 addresses into the sender's HyperCore account, and the bridge is the sender.
 `eip712Domain()` still reports `BitSafeEvmAssetBridge`, because the attestors
-sign with that name. The `.env.hyperevm*.CHYPE*.example` files list the
-values to set.
+sign with that name. `.env.hyperevm.CHYPE` and
+`.env.hyperevm-testnet.<NAME>` hold the HyperEVM values.
 
 | Name | Purpose | Network |
 | --- | --- | --- |
