@@ -473,14 +473,8 @@ contract UpgradeActionsBridgeTest is BridgeTestBase, UpgradeFixture {
         nextSourcePath = "test/mocks/BridgeV2Mock.sol";
     }
 
-    /// A subclass that runs this test again sets its own suffix. The two
-    /// runs then write different record files.
-    function _nameSuffix() internal pure virtual returns (string memory) {
-        return "";
-    }
-
     function test_theScriptsUpgradeABridgeWithNoBridgeKnowledge() public {
-        string memory name = string.concat("UPGBRIDGE", _nameSuffix());
+        string memory name = "UPGBRIDGE";
         _writeRecords(name);
         _schedule(name, "");
         DummyExecute e = new DummyExecute();
