@@ -29,13 +29,30 @@ apart. `Deploy_BETH_DEVNET.s.sol` and `Deploy_BETH_TESTNET.s.sol` subclass
 `Deploy_BETH` and change the name only. Every name reads the same
 environment variables, and `.env.sepolia.<NAME>` holds the Sepolia values.
 
+CHYPE bridges native HYPE on HyperEVM, with the same three names.
+`Deploy_CHYPE.s.sol` deploys `BitSafeHyperEvmAssetBridge` instead of
+`BitSafeEvmAssetBridge`. That contract also refuses the HyperCore system
+addresses as a withdraw destination. HyperEVM moves funds sent to those
+addresses into the sender's HyperCore account, and the bridge is the sender.
+`eip712Domain()` still reports `BitSafeEvmAssetBridge`, because the attestors
+sign with that name. The `.env.hyperevm*.CHYPE*.example` files list the
+values to set.
+
 | Name | Purpose | Network |
 | --- | --- | --- |
 | `BETH` | The production bridge | Ethereum mainnet |
 | `BETH_DEVNET` | The instance whose attestors run against Canton devnet | Sepolia |
 | `BETH_TESTNET` | The instance whose attestors run against Canton testnet | Sepolia |
+| `CHYPE` | The production HYPE bridge | HyperEVM mainnet |
+| `CHYPE_DEVNET` | The HYPE instance whose attestors run against Canton devnet | HyperEVM testnet |
+| `CHYPE_TESTNET` | The HYPE instance whose attestors run against Canton testnet | HyperEVM testnet |
 
-That runs two steps. `forge script` broadcasts the deploy. `script/record.sh`
+Deploy a HyperEVM instance only with a `CHYPE` name. A `BETH` name deploys
+the base contract, which does not refuse the HyperCore system addresses. For
+the same reason, do not set `CONTRACT` to the base contract when you upgrade
+a `CHYPE` deployment.
+
+`make deploy` runs two steps. `forge script` broadcasts the deploy. `script/record.sh`
 then writes the deployment records. The `make record` target repeats the
 second step on its own:
 
