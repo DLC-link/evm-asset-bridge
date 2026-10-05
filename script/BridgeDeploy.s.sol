@@ -74,25 +74,21 @@ abstract contract BridgeDeploy is DeployBase {
         _deployBridge(p);
     }
 
-    /// The implementation behind the proxy. A deploy script for another
-    /// contract overrides this function and the two after it together.
-    function _newImplementation() internal virtual returns (BitSafeEvmAssetBridge) {
-        return new BitSafeEvmAssetBridge();
-    }
-
-    /// The contract name in the implementation record.
-    function _implementationName() internal pure virtual returns (string memory) {
-        return "BitSafeEvmAssetBridge";
-    }
-
-    /// The source path in the implementation record.
-    function _implementationPath() internal pure virtual returns (string memory) {
-        return "src/BitSafeEvmAssetBridge.sol";
+    /// The implementation behind the proxy, with the contract name and source
+    /// path of its record. One function returns all three, so an override
+    /// changes them together.
+    function _newImplementation()
+        internal
+        virtual
+        returns (BitSafeEvmAssetBridge implementation, string memory name, string memory path)
+    {
+        return (new BitSafeEvmAssetBridge(), "BitSafeEvmAssetBridge", "src/BitSafeEvmAssetBridge.sol");
     }
 
     function _deployBridge(Params memory p) internal {
         vm.startBroadcast();
-        BitSafeEvmAssetBridge implementation = _newImplementation();
+        (BitSafeEvmAssetBridge implementation, string memory implementationName, string memory implementationPath) =
+            _newImplementation();
         TimelockController timelock = _deployTimelock(p.timelockDelay, p.proxyOwner);
         // The timelock, not the Safe, owns the ProxyAdmin. An upgrade therefore
         // waits the public delay before it can execute.
@@ -119,7 +115,7 @@ abstract contract BridgeDeploy is DeployBase {
         address proxyAdmin = address(uint160(uint256(vm.load(address(proxy), ADMIN_SLOT))));
 
         // The order is fixed. record.sh and test/Deploy.t.sol both rely on it.
-        _register("implementation", address(implementation), _implementationName(), _implementationPath());
+        _register("implementation", address(implementation), implementationName, implementationPath);
         _register("timelock", address(timelock), "TimelockController", OZ_TIMELOCK_PATH);
         _register(
             "proxy",

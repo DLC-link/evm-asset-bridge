@@ -17,15 +17,7 @@ contract Deploy_CHYPE is BridgeDeploy {
         return "CHYPE";
     }
 
-    function _newImplementation() internal override returns (BitSafeEvmAssetBridge) {
-        return new BitSafeHyperEvmAssetBridge();
-    }
-
-    function _implementationName() internal pure override returns (string memory) {
-        return "BitSafeHyperEvmAssetBridge";
-    }
-
-    function _implementationPath() internal pure override returns (string memory) {
-        return "src/BitSafeHyperEvmAssetBridge.sol";
+    function _newImplementation() internal override returns (BitSafeEvmAssetBridge, string memory, string memory) {
+        return (new BitSafeHyperEvmAssetBridge(), "BitSafeHyperEvmAssetBridge", "src/BitSafeHyperEvmAssetBridge.sol");
     }
 }
