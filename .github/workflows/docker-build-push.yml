@@ -1,19 +1,21 @@
 # Builds and publishes the evm-asset-bridge image (see infra/docker/README.md).
 #
-# A pull request builds the image and runs the smoke gate. It publishes
-# nothing. It needs no AWS credentials. It therefore never requests an
-# identity token.
+# A pull request builds the image, runs the smoke gate and scans the
+# image. It publishes nothing. It needs no AWS credentials. It therefore
+# never requests an identity token.
 #
 # A push to main publishes. A manual dispatch publishes only when it
 # runs on main. A push to main also moves `latest`.
 #
-# Publishing and scanning use gh-oidc-publish-evm-asset-bridge.
-# This role allows public-ECR access to this repository and trusts only
-# main. A failed role assumption can mean the role is missing or the
-# workflow's OIDC subject is not trusted.
+# Publishing uses gh-oidc-publish-evm-asset-bridge. This role allows
+# public-ECR access to this repository and trusts only main. A failed
+# role assumption can mean the role is missing or the workflow's OIDC
+# subject is not trusted.
 #
-# The Trivy scan runs after a publish. A pull request gets no scan,
-# because no image reaches the registry for the scan to read.
+# Trivy scans the amd64 image that the build job loads locally. A pull
+# request therefore gets its scan before anything reaches the registry.
+# The scan only reports. It writes the result to the job summary on
+# every run, and to a sticky comment on a pull request.
 name: Build and push evm-asset-bridge
 
 on:
@@ -27,13 +29,17 @@ on:
 permissions: {}
 
 jobs:
-  # This job runs on every event, and it needs no credentials. It is the
-  # hard gate: a broken image fails here before any publish starts.
+  # This job runs on every event, and it needs no AWS credentials. It is
+  # the hard gate: a broken image fails here before any publish starts.
   build:
     name: Build and smoke test
     runs-on: ubuntu-latest
+    # pull-requests: write lets the scan post its comment. Only someone
+    # who can push a branch to this private repository can open a pull
+    # request here, so this token gives PR code no new access.
     permissions:
       contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -64,6 +70,73 @@ jobs:
       - name: Smoke test the image
         run: bash infra/docker/smoke-eth.sh evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
 
+      # exit-code 0 keeps the scan report-only. A finding never fails the
+      # build.
+      - name: Scan the image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
+          format: json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "0"
+          output: trivy-report.json
+
+      - name: Write the scan report
+        env:
+          IMAGE: evm-asset-bridge-smoke:${{ steps.git-sha.outputs.sha }}
+        run: |
+          crit=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-report.json)
+          high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-report.json)
+          fixable=$(jq '[.Results[]?.Vulnerabilities[]? | select(.FixedVersion != null and .FixedVersion != "")] | length' trivy-report.json)
+          total=$((crit + high))
+
+          if [ "$total" -eq 0 ]; then
+            status="🟢 **Clean**: no HIGH or CRITICAL findings"
+          elif [ "$fixable" -gt 0 ]; then
+            status="🔴 **${fixable} fixable** of ${total} HIGH/CRITICAL findings"
+          else
+            status="🟡 ${total} HIGH/CRITICAL findings, none fixable upstream yet"
+          fi
+
+          {
+            echo "## Trivy vulnerability scan"
+            echo ""
+            echo "${status}"
+            echo ""
+            echo "| Image | CRITICAL | HIGH |"
+            echo "|---|---:|---:|"
+            echo "| \`${IMAGE}\` (linux/amd64) | ${crit} | ${high} |"
+            echo ""
+
+            if [ "$total" -gt 0 ]; then
+              echo "| Package | CVE | Severity | Installed | Fixed in |"
+              echo "|---|---|---|---|---|"
+              jq -r '
+                .Results[]?.Vulnerabilities[]?
+                | [
+                    "`" + .PkgName + "`",
+                    "[" + .VulnerabilityID + "](" + (.PrimaryURL // ("https://avd.aquasec.com/nvd/" + (.VulnerabilityID | ascii_downcase))) + ")",
+                    (if .Severity == "CRITICAL" then "🔴 CRITICAL" else "🟠 HIGH" end),
+                    "`" + .InstalledVersion + "`",
+                    (if (.FixedVersion // "") == "" then "_unfixed_" else "`" + .FixedVersion + "`" end)
+                  ]
+                | "| " + join(" | ") + " |"
+              ' trivy-report.json
+              echo ""
+              echo "<sub>A row marked \`_unfixed_\` has no upstream patch yet. A rebuild cannot fix it.</sub>"
+            fi
+          } > trivy-report.md
+
+          cat trivy-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post the scan report to the pull request
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: trivy-scan
+          path: trivy-report.md
+
   # This job holds the publish credential, so it runs only for the ref
   # that carries reviewed code. The condition keys on the ref, not the
   # event: a pull request never reaches it, and neither does a push or a
@@ -78,8 +151,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    outputs:
-      version_tag: beth-${{ steps.git-sha.outputs.sha }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -159,19 +230,3 @@ jobs:
             echo "$TAGS"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-  scan-image:
-    name: Trivy scan
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: publish
-    uses: DLC-link/dlc-infra/.github/workflows/trivy-image-scan.yaml@main
-    with:
-      image_name: evm-asset-bridge
-      image_tag: ${{ needs.publish.outputs.version_tag }}
-      registry_type: public
-      registry: public.ecr.aws/dlc-link
-      role_arn: arn:aws:iam::903295530547:role/gh-oidc-publish-evm-asset-bridge
-    permissions:
-      id-token: write
-      contents: read
-      pull-requests: write
