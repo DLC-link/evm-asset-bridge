@@ -5,7 +5,11 @@ import {Test} from "forge-std/Test.sol";
 import {Deploy_BETH} from "../script/Deploy_BETH.s.sol";
 import {Deploy_BETH_DEVNET} from "../script/Deploy_BETH_DEVNET.s.sol";
 import {Deploy_BETH_TESTNET} from "../script/Deploy_BETH_TESTNET.s.sol";
+import {Deploy_CHYPE} from "../script/Deploy_CHYPE.s.sol";
+import {Deploy_CHYPE_DEVNET} from "../script/Deploy_CHYPE_DEVNET.s.sol";
+import {Deploy_CHYPE_TESTNET} from "../script/Deploy_CHYPE_TESTNET.s.sol";
 import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
+import {BitSafeHyperEvmAssetBridge} from "../src/BitSafeHyperEvmAssetBridge.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
@@ -36,6 +40,10 @@ contract DeployTest is Test {
 
         address[] memory addresses = vm.parseJsonAddressArray(json, ".addresses");
         assertEq(addresses.length, 4);
+
+        // BETH deploys the base contract, and the record names it.
+        assertEq(vm.parseJsonStringArray(json, ".contractNames")[0], "BitSafeEvmAssetBridge");
+        assertEq(keccak256(addresses[0].code), keccak256(address(new BitSafeEvmAssetBridge()).code));
 
         // The proxy is live and initialized.
         BitSafeEvmAssetBridge bridge = BitSafeEvmAssetBridge(payable(addresses[2]));
@@ -115,6 +123,11 @@ contract DeployTest is Test {
         assertEq(vm.parseJsonString(vm.readFile(testnetPath), ".deploymentName"), "BETH_TESTNET");
         vm.removeFile(testnetPath);
 
+        // CHYPE reads the same variables and deploys the HyperEVM variant.
+        _setValidEnv();
+        new Deploy_CHYPE().run();
+        _assertCHYPEPending();
+
         // A bridge with no attestor can release nothing. The deploy must stop.
         _setValidEnv();
         vm.setEnv("ATTESTORS", "");
@@ -160,6 +173,36 @@ contract DeployTest is Test {
         vm.prank(proxyOwner);
         timelock.execute(proxyAdmin, 0, upgrade, bytes32(0), salt);
         assertEq(address(uint160(uint256(vm.load(proxy, implSlot)))), address(next));
+    }
+
+    function _assertCHYPEPending() internal {
+        string memory path = string.concat("deployments/.pending/CHYPE.", vm.toString(block.chainid), ".json");
+        string memory json = vm.readFile(path);
+        assertEq(vm.parseJsonString(json, ".deploymentName"), "CHYPE");
+
+        // The register order stays fixed. script/record.sh relies on it.
+        string[] memory roles = vm.parseJsonStringArray(json, ".roles");
+        assertEq(roles.length, 4);
+        assertEq(roles[0], "implementation");
+        assertEq(roles[1], "timelock");
+        assertEq(roles[2], "proxy");
+        assertEq(roles[3], "proxyAdmin");
+
+        // The implementation record names the variant. The manage guard and
+        // DeployNextImplementation read these two fields.
+        assertEq(vm.parseJsonStringArray(json, ".contractNames")[0], "BitSafeHyperEvmAssetBridge");
+        assertEq(vm.parseJsonStringArray(json, ".sourcePaths")[0], "src/BitSafeHyperEvmAssetBridge.sol");
+
+        // The script deployed the variant's code. The contract has no
+        // immutable value, so two deployments carry the same code.
+        address[] memory addresses = vm.parseJsonAddressArray(json, ".addresses");
+        assertEq(keccak256(addresses[0].code), keccak256(address(new BitSafeHyperEvmAssetBridge()).code));
+
+        // Each HyperEVM testnet instance carries its own name.
+        assertEq(new Deploy_CHYPE_TESTNET().deploymentName(), "CHYPE_TESTNET");
+        assertEq(new Deploy_CHYPE_DEVNET().deploymentName(), "CHYPE_DEVNET");
+
+        vm.removeFile(path);
     }
 
     function _setValidEnv() internal {
