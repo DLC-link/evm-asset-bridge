@@ -466,7 +466,7 @@ contract WithdrawTest is BridgeTestBase {
         internal
         returns (BitSafeEvmAssetBridge)
     {
-        BitSafeEvmAssetBridge impl2 = _newImplementation();
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
             (

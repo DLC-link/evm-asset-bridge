@@ -7,7 +7,7 @@ import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transpa
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 
 /// @title BridgeDeploy
-/// @notice Deploys one bridge implementation behind a TransparentUpgradeableProxy,
+/// @notice Deploys one BitSafeEvmAssetBridge behind a TransparentUpgradeableProxy,
 ///         places a TimelockController between the proxy owner and the
 ///         ProxyAdmin, and registers the four contracts the deploy creates.
 /// @dev The proxy's constructor creates its own ProxyAdmin, so the ProxyAdmin
@@ -74,21 +74,9 @@ abstract contract BridgeDeploy is DeployBase {
         _deployBridge(p);
     }
 
-    /// The implementation behind the proxy, with the contract name and source
-    /// path of its record. One function returns all three, so an override
-    /// changes them together.
-    function _newImplementation()
-        internal
-        virtual
-        returns (BitSafeEvmAssetBridge implementation, string memory name, string memory path)
-    {
-        return (new BitSafeEvmAssetBridge(), "BitSafeEvmAssetBridge", "src/BitSafeEvmAssetBridge.sol");
-    }
-
     function _deployBridge(Params memory p) internal {
         vm.startBroadcast();
-        (BitSafeEvmAssetBridge implementation, string memory implementationName, string memory implementationPath) =
-            _newImplementation();
+        BitSafeEvmAssetBridge implementation = new BitSafeEvmAssetBridge();
         TimelockController timelock = _deployTimelock(p.timelockDelay, p.proxyOwner);
         // The timelock, not the Safe, owns the ProxyAdmin. An upgrade therefore
         // waits the public delay before it can execute.
@@ -115,7 +103,7 @@ abstract contract BridgeDeploy is DeployBase {
         address proxyAdmin = address(uint160(uint256(vm.load(address(proxy), ADMIN_SLOT))));
 
         // The order is fixed. record.sh and test/Deploy.t.sol both rely on it.
-        _register("implementation", address(implementation), implementationName, implementationPath);
+        _register("implementation", address(implementation), "BitSafeEvmAssetBridge", "src/BitSafeEvmAssetBridge.sol");
         _register("timelock", address(timelock), "TimelockController", OZ_TIMELOCK_PATH);
         _register(
             "proxy",

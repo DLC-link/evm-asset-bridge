@@ -52,13 +52,6 @@ abstract contract ManageBase is Script {
         return false;
     }
 
-    /// Whether this folder drives the contract that the record names. The
-    /// default accepts `contractName()` only. A folder whose actions fit
-    /// more than one contract overrides it.
-    function acceptsContract(string memory recorded) public pure virtual returns (bool) {
-        return keccak256(bytes(recorded)) == keccak256(bytes(contractName()));
-    }
-
     /// The address this action calls. It defaults to the recorded proxy.
     /// A test overrides it, and so does a script that targets another
     /// contract, such as the ProxyAdmin.
@@ -78,8 +71,9 @@ abstract contract ManageBase is Script {
         string memory path =
             string.concat("deployments/", deploymentName(), ".implementation.", vm.toString(block.chainid), ".json");
         string memory recorded = vm.parseJsonString(vm.readFile(path), ".contractName");
-        if (!acceptsContract(recorded)) {
-            revert ContractMismatch(recorded, contractName());
+        string memory expected = contractName();
+        if (keccak256(bytes(recorded)) != keccak256(bytes(expected))) {
+            revert ContractMismatch(recorded, expected);
         }
     }
 

@@ -14,14 +14,6 @@ abstract contract BridgeManage is ManageBase {
         return "BitSafeEvmAssetBridge";
     }
 
-    /// BitSafeHyperEvmAssetBridge inherits every function that these actions
-    /// call, with the same selectors. The folder therefore drives both
-    /// bridges, and no other contract.
-    function acceptsContract(string memory recorded) public pure override returns (bool) {
-        bytes32 h = keccak256(bytes(recorded));
-        return h == keccak256("BitSafeEvmAssetBridge") || h == keccak256("BitSafeHyperEvmAssetBridge");
-    }
-
     /// Maps a role name to its hash. A name is safer than a raw bytes32.
     /// A mistyped hash names a role nobody holds. The grant then succeeds
     /// silently, with no effect.

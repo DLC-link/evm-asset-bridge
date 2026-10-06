@@ -12,13 +12,9 @@ A folder names a contract, and `DEPLOYMENT` names one instance of that
 contract. The scripts for `BitSafeEvmAssetBridge` live in
 `script/manage/BitSafeEvmAssetBridge/`. `DEPLOYMENT=BETH` picks the
 production BETH bridge, and the deployment records pin its addresses. The
-two Sepolia instances are `BETH_DEVNET` and `BETH_TESTNET`. The root README
-lists every deployment name.
-
-The `BitSafeEvmAssetBridge/` folder also drives the CHYPE deployments. Their
-records name `BitSafeHyperEvmAssetBridge`, which inherits every function that
-these scripts call. The folder guard accepts these two contract names, and
-no other.
+two Sepolia instances are `BETH_DEVNET` and `BETH_TESTNET`. The `CHYPE`,
+`CHYPE_DEVNET` and `CHYPE_TESTNET` deployments on HyperEVM use the same
+folder. The root README lists every deployment name.
 
 **Warning.** The guard checks the contract name only. It cannot tell two
 deployments of the same contract apart. A wrong `DEPLOYMENT` value that

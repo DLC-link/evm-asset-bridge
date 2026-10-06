@@ -64,7 +64,7 @@ contract InitializeTest is BridgeTestBase {
         address[] memory dup = new address[](2);
         dup[0] = attestors[0];
         dup[1] = attestors[0];
-        BitSafeEvmAssetBridge impl2 = _newImplementation();
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
             (
@@ -128,7 +128,7 @@ contract InitializeTest is BridgeTestBase {
     }
 
     function _deployBridgeWithThreshold(uint256 threshold_) internal returns (BitSafeEvmAssetBridge) {
-        BitSafeEvmAssetBridge impl2 = _newImplementation();
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = _initData(threshold_);
         TransparentUpgradeableProxyHarness proxy =
             new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
@@ -140,7 +140,7 @@ contract InitializeTest is BridgeTestBase {
     }
 
     function _expectInitRevert(uint256 threshold_, bytes memory revertData) internal {
-        BitSafeEvmAssetBridge impl2 = _newImplementation();
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = _initData(threshold_);
         vm.expectRevert(revertData);
         new TransparentUpgradeableProxyHarness(address(impl2), proxyOwner, initData);
@@ -164,7 +164,7 @@ contract InitializeTest is BridgeTestBase {
     }
 
     function test_initialize_zeroMaxLimit_reverts() public {
-        BitSafeEvmAssetBridge impl2 = _newImplementation();
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
             (
@@ -187,7 +187,7 @@ contract InitializeTest is BridgeTestBase {
         address[] memory withZero = new address[](2);
         withZero[0] = attestors[0];
         withZero[1] = address(0);
-        BitSafeEvmAssetBridge impl2 = _newImplementation();
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
             (
@@ -207,7 +207,7 @@ contract InitializeTest is BridgeTestBase {
     }
 
     function test_initialize_zeroAddressBridgeAdmin_reverts() public {
-        BitSafeEvmAssetBridge impl2 = _newImplementation();
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
             (
@@ -227,7 +227,7 @@ contract InitializeTest is BridgeTestBase {
     }
 
     function test_initialize_depositLimitsMinAboveMax_reverts() public {
-        BitSafeEvmAssetBridge impl2 = _newImplementation();
+        BitSafeEvmAssetBridge impl2 = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
             (

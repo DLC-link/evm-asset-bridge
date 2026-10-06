@@ -527,7 +527,9 @@ contract BitSafeEvmAssetBridge is
         if (threshold_ < MIN_THRESHOLD) revert ThresholdOutOfBounds();
         if (withdrawRequestId.length == 0) revert EmptyId();
         if ($.usedWithdrawRequests[withdrawRequestId]) revert WithdrawRequestAlreadyUsed();
-        _validateDestination(destinationAddress);
+        if (destinationAddress == address(0) || destinationAddress == address(this)) {
+            revert InvalidDestination();
+        }
         if (amount == 0) revert ZeroAmount();
         _checkLimits(amount, $.withdrawLimits);
         _consumeWithdrawRateLimit($, amount);
@@ -564,15 +566,6 @@ contract BitSafeEvmAssetBridge is
             IERC20(asset_).safeTransfer(destinationAddress, amount);
         }
         emit Withdraw(keccak256(withdrawRequestId), withdrawRequestId, destinationAddress, amount, deadline);
-    }
-
-    /// @dev Rejects a destination that can never receive a payout. A subclass
-    ///      for one chain extends the check with that chain's reserved
-    ///      addresses.
-    function _validateDestination(address destination) internal view virtual {
-        if (destination == address(0) || destination == address(this)) {
-            revert InvalidDestination();
-        }
     }
 
     /// @notice Marks `withdrawRequestId` used without paying it, so no signed

@@ -30,14 +30,9 @@ apart. `Deploy_BETH_DEVNET.s.sol` and `Deploy_BETH_TESTNET.s.sol` subclass
 environment variables, and `.env.sepolia.<NAME>` holds the Sepolia values.
 
 CHYPE bridges native HYPE on HyperEVM. It has three deployment names:
-`CHYPE`, `CHYPE_DEVNET` and `CHYPE_TESTNET`.
-`Deploy_CHYPE.s.sol` deploys `BitSafeHyperEvmAssetBridge` instead of
-`BitSafeEvmAssetBridge`. That contract also refuses the HyperCore system
-addresses as a withdraw destination. HyperEVM moves funds sent to those
-addresses into the sender's HyperCore account, and the bridge is the sender.
-`eip712Domain()` still reports `BitSafeEvmAssetBridge`, because the attestors
-sign with that name. `.env.hyperevm.CHYPE` and
-`.env.hyperevm-testnet.<NAME>` hold the HyperEVM values.
+`CHYPE`, `CHYPE_DEVNET` and `CHYPE_TESTNET`. `Deploy_CHYPE.s.sol` deploys
+`BitSafeEvmAssetBridge`, as `Deploy_BETH.s.sol` does. `.env.hyperevm.CHYPE`
+and `.env.hyperevm-testnet.<NAME>` hold the HyperEVM values.
 
 | Name | Purpose | Network |
 | --- | --- | --- |
@@ -47,11 +42,6 @@ sign with that name. `.env.hyperevm.CHYPE` and
 | `CHYPE` | The production HYPE bridge | HyperEVM mainnet |
 | `CHYPE_DEVNET` | The HYPE instance whose attestors run against Canton devnet | HyperEVM testnet |
 | `CHYPE_TESTNET` | The HYPE instance whose attestors run against Canton testnet | HyperEVM testnet |
-
-Deploy a HyperEVM instance only with a `CHYPE` name. A `BETH` name deploys
-the base contract, which does not refuse the HyperCore system addresses. For
-the same reason, do not set `CONTRACT` to the base contract when you upgrade
-a `CHYPE` deployment.
 
 `make deploy` runs two steps. `forge script` broadcasts the deploy. `script/record.sh`
 then writes the deployment records. The `make record` target repeats the

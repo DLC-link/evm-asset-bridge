@@ -71,19 +71,13 @@ contract BridgeTestBase is Test {
         );
     }
 
-    /// The implementation that every fixture bridge runs. A subclass returns
-    /// another contract to run the same tests against it.
-    function _newImplementation() internal virtual returns (BitSafeEvmAssetBridge) {
-        return new BitSafeEvmAssetBridge();
-    }
-
     function _deployBridgeWith(
         address asset,
         uint8 targetDecimals_,
         BitSafeEvmAssetBridge.Limits memory depositLimits_,
         BitSafeEvmAssetBridge.Limits memory withdrawLimits_
     ) internal returns (BitSafeEvmAssetBridge) {
-        implementation = _newImplementation();
+        implementation = new BitSafeEvmAssetBridge();
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
             (
