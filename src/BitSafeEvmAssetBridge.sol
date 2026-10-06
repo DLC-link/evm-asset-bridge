@@ -571,7 +571,10 @@ contract BitSafeEvmAssetBridge is
             for (uint256 j; j < count && !duplicate; ++j) {
                 duplicate = signers[j] == signer;
             }
-            if (!duplicate) signers[count++] = signer;
+            if (!duplicate) {
+                signers[count] = signer;
+                count++;
+            }
         }
     }
 
