@@ -37,6 +37,13 @@ contract BitSafeEvmAssetBridge is
         uint256 maxAmount; // type(uint256).max = no maximum. No uint256 exceeds it.
     }
 
+    /// Why `withdraw` did not count a signature.
+    enum SkipReason {
+        Malformed, // recovery failed, or recovered the zero address
+        NotAttestor, // the signer holds no ATTESTOR_ROLE now
+        Duplicate // the signer already counted in this call
+    }
+
     bytes32 public constant BRIDGE_ADMIN_ROLE = keccak256("BRIDGE_ADMIN_ROLE");
     bytes32 public constant ATTESTOR_ROLE = keccak256("ATTESTOR_ROLE");
     bytes32 public constant SENTRY_ROLE = keccak256("SENTRY_ROLE");
@@ -84,6 +91,8 @@ contract BitSafeEvmAssetBridge is
         uint256 amount,
         uint256 deadline
     );
+    /// @dev `signer` is the zero address when the reason is `Malformed`.
+    event SignatureSkipped(bytes32 indexed withdrawRequestIdHash, uint256 index, address signer, SkipReason reason);
     event WithdrawRequestVoided(bytes32 indexed withdrawRequestIdHash, bytes withdrawRequestId);
     event AttestorSetChanged(address[] attestors, uint256 threshold);
     event ThresholdSet(uint256 newThreshold);
@@ -537,7 +546,9 @@ contract BitSafeEvmAssetBridge is
         if (signatures.length < threshold_) revert NotEnoughSignatures();
 
         bytes32 digest = withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline);
-        if (_countAttestorSigners(digest, signatures) < threshold_) revert NotEnoughSignatures();
+        if (_countAttestorSigners(keccak256(withdrawRequestId), digest, signatures) < threshold_) {
+            revert NotEnoughSignatures();
+        }
 
         // Effect before interaction: consume the request id.
         $.usedWithdrawRequests[withdrawRequestId] = true;
@@ -561,20 +572,34 @@ contract BitSafeEvmAssetBridge is
     ///      malformed, non-attestor or duplicate signature does not count, but
     ///      it does not revert either: one misconfigured attestor must not
     ///      block a bundle that still carries `threshold` valid signatures.
-    function _countAttestorSigners(bytes32 digest, bytes[] calldata signatures) private view returns (uint256 count) {
+    ///      Each skipped signature emits `SignatureSkipped`, so operators see
+    ///      a faulty attestor before the bridge loses its margin. A reverted
+    ///      call keeps no events, so the event shows only on a paid withdrawal.
+    function _countAttestorSigners(bytes32 withdrawRequestIdHash, bytes32 digest, bytes[] calldata signatures)
+        private
+        returns (uint256 count)
+    {
         address[] memory signers = new address[](signatures.length);
         for (uint256 i; i < signatures.length; ++i) {
             (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signatures[i]);
-            if (err != ECDSA.RecoverError.NoError || signer == address(0)) continue;
-            if (!hasRole(ATTESTOR_ROLE, signer)) continue;
+            if (err != ECDSA.RecoverError.NoError || signer == address(0)) {
+                emit SignatureSkipped(withdrawRequestIdHash, i, address(0), SkipReason.Malformed);
+                continue;
+            }
+            if (!hasRole(ATTESTOR_ROLE, signer)) {
+                emit SignatureSkipped(withdrawRequestIdHash, i, signer, SkipReason.NotAttestor);
+                continue;
+            }
             bool duplicate;
             for (uint256 j; j < count && !duplicate; ++j) {
                 duplicate = signers[j] == signer;
             }
-            if (!duplicate) {
-                signers[count] = signer;
-                count++;
+            if (duplicate) {
+                emit SignatureSkipped(withdrawRequestIdHash, i, signer, SkipReason.Duplicate);
+                continue;
             }
+            signers[count] = signer;
+            count++;
         }
     }
 

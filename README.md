@@ -381,6 +381,10 @@ Rules the contract enforces on submission (`withdraw`):
   Each signer counts once.
 - A malformed, non-attestor or duplicate signature does not count, and it
   does not revert. One misconfigured attestor cannot block a withdrawal.
+- Each skipped signature emits `SignatureSkipped` with its index, its signer
+  and a `SkipReason` (`Malformed`, `NotAttestor` or `Duplicate`). The signer
+  is the zero address for `Malformed`. A reverted call keeps no events, so
+  monitoring sees the event only on a paid withdrawal.
 - At least `threshold` signatures must count, or the call reverts with
   `NotEnoughSignatures`. The caller must hold `ATTESTOR_ROLE`.
 - Each `withdrawRequestId` executes once, forever.
