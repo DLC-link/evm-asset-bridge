@@ -377,10 +377,12 @@ fn sign_withdrawal(
 Rules the contract enforces on submission (`withdraw`):
 
 - Signatures may arrive in ANY order; no sorting by signer address.
-- Each signer may appear once; a duplicate reverts.
-- Every submitted signature must recover to a current `ATTESTOR_ROLE` holder.
-- At least `threshold` signatures are required; the caller must hold
-  `ATTESTOR_ROLE`.
+- A signature counts when it recovers to a current `ATTESTOR_ROLE` holder.
+  Each signer counts once.
+- A malformed, non-attestor or duplicate signature does not count, and it
+  does not revert. One misconfigured attestor cannot block a withdrawal.
+- At least `threshold` signatures must count, or the call reverts with
+  `NotEnoughSignatures`. The caller must hold `ATTESTOR_ROLE`.
 - Each `withdrawRequestId` executes once, forever.
 - A bundle expires after its `deadline` (a Unix timestamp, inclusive): the
   contract rejects it when `block.timestamp > deadline`.

@@ -8,7 +8,6 @@ import {ReentrantReceiver} from "./mocks/ReentrantReceiver.sol";
 import {IBridgeWithdraw} from "./mocks/ReentrantReceiver.sol";
 import {RejectingReceiver} from "./mocks/RejectingReceiver.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
@@ -112,15 +111,29 @@ contract WithdrawTest is BridgeTestBase {
         bridge.withdraw(REQUEST_ID, destination, 1 ether, deadline, sigs);
     }
 
-    function test_withdraw_duplicateSigner_reverts() public {
-        // The same key signing twice must not satisfy the threshold.
+    function testFuzz_withdraw_duplicateSigner_countsOnce(uint256 copies) public {
+        // One key must never satisfy the threshold alone, however many
+        // copies of its signature the bundle carries.
+        copies = bound(copies, THRESHOLD, 20);
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
-        bytes[] memory sigs = new bytes[](2);
-        sigs[0] = _sign(attestorPks[0], digest);
-        sigs[1] = _sign(attestorPks[0], digest); // identical signer
-        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.DuplicateSigner.selector, attestors[0]));
+        bytes[] memory sigs = new bytes[](copies);
+        for (uint256 i; i < copies; ++i) {
+            sigs[i] = _sign(attestorPks[0], digest);
+        }
+        vm.expectRevert(BitSafeEvmAssetBridge.NotEnoughSignatures.selector);
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
+    }
+
+    function test_withdraw_duplicateSignerWithThreshold_succeeds() public {
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
+        bytes[] memory sigs = new bytes[](3);
+        sigs[0] = _sign(attestorPks[0], digest);
+        sigs[1] = _sign(attestorPks[0], digest); // identical signer
+        sigs[2] = _sign(attestorPks[1], digest);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
+        assertEq(destination.balance, 1 ether);
     }
 
     function test_withdraw_unorderedSigners_succeeds() public {
@@ -134,54 +147,64 @@ contract WithdrawTest is BridgeTestBase {
         assertTrue(bridge.isWithdrawRequestUsed(REQUEST_ID));
     }
 
-    function test_withdraw_nonAttestorSigner_reverts() public {
-        (address rogue, uint256 roguePk) = makeAddrAndKey("rogue");
-        rogue; // silence unused
+    function test_withdraw_nonAttestorSignerBelowThreshold_reverts() public {
+        (, uint256 roguePk) = makeAddrAndKey("rogue");
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
         bytes[] memory sigs = new bytes[](2);
         sigs[0] = _sign(attestorPks[0], digest);
         sigs[1] = _sign(roguePk, digest);
-        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, vm.addr(roguePk)));
+        vm.expectRevert(BitSafeEvmAssetBridge.NotEnoughSignatures.selector);
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
     }
 
-    function test_withdraw_extraRogueSignatureAfterValidThreshold_reverts() public {
-        // Every provided signature must be validated -- no early exit once
-        // the threshold count is reached. Two real attestor signatures plus
-        // a third from a rogue key must still fail on the rogue signer, even
-        // when the rogue signature comes AFTER the threshold count of valid
-        // ones (index 2, not index 0) -- a regression that only checks the
-        // first `threshold` signatures must not pass this test.
-        (address rogueAddr, uint256 roguePk) = makeAddrAndKey("rogue");
-
+    function testFuzz_withdraw_nonAttestorSignerWithThreshold_succeeds(uint256 roguePosition) public {
+        // A misconfigured attestor key must not block a bundle that still
+        // carries `threshold` valid signatures, wherever the faulty one sits.
+        roguePosition = bound(roguePosition, 0, 2);
+        (, uint256 roguePk) = makeAddrAndKey("rogue");
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
         bytes[] memory sigs = new bytes[](3);
-        sigs[0] = _sign(attestorPks[0], digest);
-        sigs[1] = _sign(attestorPks[1], digest);
-        sigs[2] = _sign(roguePk, digest); // rogue after the threshold count
-
-        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, rogueAddr));
+        uint256 nextAttestor;
+        for (uint256 i; i < 3; ++i) {
+            sigs[i] = i == roguePosition ? _sign(roguePk, digest) : _sign(attestorPks[nextAttestor++], digest);
+        }
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
+        assertEq(destination.balance, 1 ether);
+        assertTrue(bridge.isWithdrawRequestUsed(REQUEST_ID));
     }
 
-    function test_withdraw_malformedSignature_reverts() public {
+    function test_withdraw_malformedSignatureBelowThreshold_reverts() public {
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
         bytes memory badSig = _sign(attestorPks[0], digest);
         badSig[badSig.length - 1] = 0; // corrupt the v byte
         bytes[] memory sigs = new bytes[](2);
         sigs[0] = badSig;
         sigs[1] = _sign(attestorPks[1], digest);
-        vm.expectRevert(BitSafeEvmAssetBridge.InvalidSignature.selector);
+        vm.expectRevert(BitSafeEvmAssetBridge.NotEnoughSignatures.selector);
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
+    }
+
+    function test_withdraw_malformedSignatureWithThreshold_succeeds() public {
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
+        bytes memory badSig = _sign(attestorPks[0], digest);
+        badSig[badSig.length - 1] = 0; // corrupt the v byte
+        bytes[] memory sigs = new bytes[](4);
+        sigs[0] = badSig;
+        sigs[1] = hex"1234"; // wrong length
+        sigs[2] = _sign(attestorPks[1], digest);
+        sigs[3] = _sign(attestorPks[2], digest);
+        vm.prank(attestors[0]);
+        bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
+        assertEq(destination.balance, 1 ether);
     }
 
     function test_withdraw_allAttestorSignatures_succeeds() public {
         // Threshold is 2, but supplying every attestor's valid signature
         // (3 of 3) must still succeed -- extra correct signatures are not
-        // penalized, and the loop validates each one it is given.
+        // penalized.
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
         bytes[] memory sigs = _attestorSignatures(digest, 3);
         vm.prank(attestors[0]);
@@ -190,13 +213,13 @@ contract WithdrawTest is BridgeTestBase {
         assertTrue(bridge.isWithdrawRequestUsed(REQUEST_ID));
     }
 
-    function test_withdraw_revokedAttestorSignature_reverts() public {
+    function test_withdraw_revokedAttestorSignature_doesNotCount() public {
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
         bytes32 role = bridge.ATTESTOR_ROLE();
         vm.prank(defaultAdmin);
         bridge.revokeRole(role, attestors[0]);
-        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, attestors[0]));
+        vm.expectRevert(BitSafeEvmAssetBridge.NotEnoughSignatures.selector);
         vm.prank(attestors[1]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
     }
@@ -223,26 +246,22 @@ contract WithdrawTest is BridgeTestBase {
 
     function test_withdraw_tamperedField_reverts() public {
         // Signatures over amount 1 ether must not authorize amount 2 ether.
-        // The tampered call hashes a different digest, so the first signature
+        // The tampered call hashes a different digest, so each signature
         // recovers to some other address that holds no attestor role.
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
-        bytes32 tamperedDigest = bridge.withdrawalDigest(REQUEST_ID, destination, 2 ether, defaultDeadline);
-        (address recovered,,) = ECDSA.tryRecover(tamperedDigest, sigs[0]);
-        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, recovered));
+        vm.expectRevert(BitSafeEvmAssetBridge.NotEnoughSignatures.selector);
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 2 ether, defaultDeadline, sigs);
     }
 
     function test_withdraw_tamperedDeadline_reverts() public {
         // Signatures over one deadline must not authorize a later deadline.
-        // The tampered call hashes a different digest, so the first signature
+        // The tampered call hashes a different digest, so each signature
         // recovers to some other address that holds no attestor role.
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
-        bytes32 tamperedDigest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline + 1);
-        (address recovered,,) = ECDSA.tryRecover(tamperedDigest, sigs[0]);
-        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, recovered));
+        vm.expectRevert(BitSafeEvmAssetBridge.NotEnoughSignatures.selector);
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline + 1, sigs);
     }

@@ -6,7 +6,6 @@ import {BitSafeEvmAssetBridge} from "../src/BitSafeEvmAssetBridge.sol";
 import {BridgeV2Mock} from "./mocks/BridgeV2Mock.sol";
 import {ForceSend} from "./mocks/ForceSend.sol";
 import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 contract UpgradeTest is BridgeTestBase {
@@ -31,10 +30,8 @@ contract UpgradeTest is BridgeTestBase {
         bytes32 digestA = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, deadline);
         bytes[] memory sigs = _attestorSignatures(digestA, 2);
         // Bridge B hashes a different digest (its own verifyingContract), so
-        // the first signature recovers to some other, non-attestor address.
-        bytes32 digestB = bridgeB.withdrawalDigest(REQUEST_ID, destination, 1 ether, deadline);
-        (address recovered,,) = ECDSA.tryRecover(digestB, sigs[0]);
-        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, recovered));
+        // each signature recovers to some other, non-attestor address.
+        vm.expectRevert(BitSafeEvmAssetBridge.NotEnoughSignatures.selector);
         vm.prank(attestors[0]);
         bridgeB.withdraw(REQUEST_ID, destination, 1 ether, deadline, sigs);
     }
@@ -44,11 +41,9 @@ contract UpgradeTest is BridgeTestBase {
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, deadline);
         bytes[] memory sigs = _attestorSignatures(digest, 2);
         vm.chainId(11155111); // domain rebuilds with the live chainid
-        // The new chain id changes the digest, so the first signature
+        // The new chain id changes the digest, so each signature
         // recovers to some other, non-attestor address.
-        bytes32 foreignDigest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, deadline);
-        (address recovered,,) = ECDSA.tryRecover(foreignDigest, sigs[0]);
-        vm.expectRevert(abi.encodeWithSelector(BitSafeEvmAssetBridge.SignerIsNotAttestor.selector, recovered));
+        vm.expectRevert(BitSafeEvmAssetBridge.NotEnoughSignatures.selector);
         vm.prank(attestors[0]);
         bridge.withdraw(REQUEST_ID, destination, 1 ether, deadline, sigs);
     }

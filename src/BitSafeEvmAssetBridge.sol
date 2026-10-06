@@ -110,9 +110,6 @@ contract BitSafeEvmAssetBridge is
     error DeadlineBeyondHorizon(uint256 deadline, uint256 horizon);
     error InvalidDestination();
     error NotEnoughSignatures();
-    error InvalidSignature();
-    error DuplicateSigner(address signer);
-    error SignerIsNotAttestor(address signer);
     error AttestorCannotRenounce();
     error NotPauser(address caller);
     error UnexpectedBalanceChange();
@@ -511,7 +508,8 @@ contract BitSafeEvmAssetBridge is
 
     /// @notice Releases `amount` of the bridged asset to `destinationAddress`.
     /// @dev Requires `threshold` valid, distinct attestor signatures over the
-    ///      EIP-712 digest. Signer order does not matter.
+    ///      EIP-712 digest. Signer order does not matter. A malformed,
+    ///      non-attestor or duplicate signature does not count.
     ///      The attestor stack derives the deadline when it signs.
     function withdraw(
         bytes calldata withdrawRequestId,
@@ -539,16 +537,7 @@ contract BitSafeEvmAssetBridge is
         if (signatures.length < threshold_) revert NotEnoughSignatures();
 
         bytes32 digest = withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline);
-        address[] memory seenSigners = new address[](signatures.length);
-        for (uint256 i; i < signatures.length; ++i) {
-            (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signatures[i]);
-            if (err != ECDSA.RecoverError.NoError || signer == address(0)) revert InvalidSignature();
-            if (!hasRole(ATTESTOR_ROLE, signer)) revert SignerIsNotAttestor(signer);
-            for (uint256 j; j < i; ++j) {
-                if (seenSigners[j] == signer) revert DuplicateSigner(signer);
-            }
-            seenSigners[i] = signer;
-        }
+        if (_countAttestorSigners(digest, signatures) < threshold_) revert NotEnoughSignatures();
 
         // Effect before interaction: consume the request id.
         $.usedWithdrawRequests[withdrawRequestId] = true;
@@ -566,6 +555,24 @@ contract BitSafeEvmAssetBridge is
             IERC20(asset_).safeTransfer(destinationAddress, amount);
         }
         emit Withdraw(keccak256(withdrawRequestId), withdrawRequestId, destinationAddress, amount, deadline);
+    }
+
+    /// @dev Counts the distinct current attestors that signed `digest`. A
+    ///      malformed, non-attestor or duplicate signature does not count, but
+    ///      it does not revert either: one misconfigured attestor must not
+    ///      block a bundle that still carries `threshold` valid signatures.
+    function _countAttestorSigners(bytes32 digest, bytes[] calldata signatures) private view returns (uint256 count) {
+        address[] memory signers = new address[](signatures.length);
+        for (uint256 i; i < signatures.length; ++i) {
+            (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signatures[i]);
+            if (err != ECDSA.RecoverError.NoError || signer == address(0)) continue;
+            if (!hasRole(ATTESTOR_ROLE, signer)) continue;
+            bool duplicate;
+            for (uint256 j; j < count && !duplicate; ++j) {
+                duplicate = signers[j] == signer;
+            }
+            if (!duplicate) signers[count++] = signer;
+        }
     }
 
     /// @notice Marks `withdrawRequestId` used without paying it, so no signed
