@@ -182,6 +182,24 @@ contract WithdrawTest is BridgeTestBase {
         bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
     }
 
+    function test_withdraw_twoKeysAtThresholdThree_reverts() public {
+        // Every order of three signatures from keys A and B holds at most two
+        // distinct signers, so each must revert. Bit i of `pattern` picks the
+        // key at index i, which covers [A, A, B], [A, B, B] and [B, A, A].
+        vm.prank(defaultAdmin);
+        bridge.setThreshold(3);
+        bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
+        for (uint256 pattern; pattern < 8; ++pattern) {
+            bytes[] memory sigs = new bytes[](3);
+            for (uint256 i; i < 3; ++i) {
+                sigs[i] = _sign(attestorPks[(pattern >> i) & 1], digest);
+            }
+            vm.expectRevert(BitSafeEvmAssetBridge.NotEnoughSignatures.selector);
+            vm.prank(attestors[0]);
+            bridge.withdraw(REQUEST_ID, destination, 1 ether, defaultDeadline, sigs);
+        }
+    }
+
     function test_withdraw_nonAdjacentDuplicateAtThresholdThree_succeeds() public {
         vm.prank(defaultAdmin);
         bridge.setThreshold(3);
