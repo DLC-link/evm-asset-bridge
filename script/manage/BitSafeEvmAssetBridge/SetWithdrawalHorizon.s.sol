@@ -7,9 +7,8 @@ import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
 /// @notice Sets the withdrawal horizon in seconds. The horizon is the maximum
 ///         distance a withdrawal deadline can sit past the current time. A
 ///         horizon of 0 disables the bound.
-/// @dev The attestor stack reads this value to pick its signing mode. A
-///      change during signing splits the attestors. The attestors then
-///      re-sign on the next signing tick.
+/// @dev A change invalidates every unsubmitted bundle whose deadline lies
+///      past the new bound. The signers must re-sign those requests.
 ///
 /// Direct:
 ///   DEPLOYMENT=BETH forge script script/manage/BitSafeEvmAssetBridge/SetWithdrawalHorizon.s.sol \

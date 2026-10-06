@@ -25,7 +25,7 @@ transaction.
 A second deployment of the same contract needs no new script. It needs one
 set of deployment records and one `.env.{network}.{deployment}` file. This
 promise covers the management scripts only. The deploy script still needs
-one new file for each deployment, and issue #42 tracks that gap.
+one new file for each deployment. A follow-up issue tracks that gap.
 
 `script/manage/ManageBase.s.sol` holds the shared code.
 `script/manage/BitSafeEvmAssetBridge/BridgeManage.s.sol` binds that base to
@@ -291,14 +291,10 @@ rounded value falls below `minAmount`. Read `depositUnit` from
 The horizon bounds how far a withdrawal deadline can sit past the current
 time. A horizon of 0 disables the bound.
 
-The attestors read `withdrawalHorizon()` to pick their signing mode. A zero
-value means the fixed sentinel deadline. A non-zero value means derived
-deadlines. One `SetWithdrawalHorizon` transaction therefore activates the
-bound.
-
-A change between two attestor reads splits their digests. The attestors defer
-the request to the next signing tick. They then re-sign the request in the new
-mode. Expect a short delay in withdrawals after this change. Start with a long
+One `SetWithdrawalHorizon` transaction activates the bound. A change
+invalidates every unsubmitted bundle whose deadline lies past the new bound.
+The signers must re-sign those requests. Expect a short delay in withdrawals
+after this change. Start with a long
 horizon, such as 48 hours.
 
 ```bash
