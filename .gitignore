@@ -3,7 +3,7 @@ cache/
 out/
 broadcast/
 
-# Local-only design docs (superpowers specs and plans)
+# Local-only design notes
 docs/superpowers/
 
 # Local test-run deployment artifacts

@@ -19,8 +19,8 @@ contract VoidWithdrawRequestTest is BridgeTestBase {
         bridge.depositETH{value: 100 ether}(DEPOSIT_ID);
     }
 
-    /// A fully valid, threshold-signed bundle for REQUEST_ID, as the
-    /// coordinator would have collected it before the Canton cancel.
+    /// A fully valid, threshold-signed bundle for REQUEST_ID, collected
+    /// before the Canton cancel.
     function _validBundle() internal view returns (bytes[] memory) {
         bytes32 digest = bridge.withdrawalDigest(REQUEST_ID, destination, 1 ether, defaultDeadline);
         return _attestorSignatures(digest, 2);

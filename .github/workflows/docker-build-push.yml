@@ -7,13 +7,10 @@
 # A push to main publishes. A manual dispatch publishes only when it
 # runs on main. A push to main also moves `latest`.
 #
-# Publishing and scanning use gh-oidc-publish-evm-asset-bridge.
-# This role allows public-ECR access to this repository and trusts only
-# main. A failed role assumption can mean the role is missing or the
-# workflow's OIDC subject is not trusted.
-#
-# The Trivy scan runs after a publish. A pull request gets no scan,
-# because no image reaches the registry for the scan to read.
+# Publishing uses gh-oidc-publish-evm-asset-bridge. This role allows
+# public-ECR access to this repository and trusts only main. A failed
+# role assumption can mean the role is missing or the workflow's OIDC
+# subject is not trusted.
 name: Build and push evm-asset-bridge
 
 on:
@@ -159,19 +156,3 @@ jobs:
             echo "$TAGS"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-  scan-image:
-    name: Trivy scan
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: publish
-    uses: DLC-link/dlc-infra/.github/workflows/trivy-image-scan.yaml@main
-    with:
-      image_name: evm-asset-bridge
-      image_tag: ${{ needs.publish.outputs.version_tag }}
-      registry_type: public
-      registry: public.ecr.aws/dlc-link
-      role_arn: arn:aws:iam::903295530547:role/gh-oidc-publish-evm-asset-bridge
-    permissions:
-      id-token: write
-      contents: read
-      pull-requests: write

@@ -3,13 +3,13 @@
 # developer runs it through `make it-verify`. CI runs it against a
 # locally built amd64 image before it pushes anything.
 #
-# It proves the four properties DLC-link/dlc-attestor-stack depends on:
+# It proves the four properties a consumer of the image depends on:
 #
 #   1. the bridge proxy holds code at the pinned address;
 #   2. threshold() returns 2, with exactly three attestors;
-#   3. the `finalized` tag advances, which the attestors read;
+#   3. the `finalized` tag advances;
 #   4. a deposit emits a Deposit event that a scan bounded by
-#      `finalized` finds — the attestors' exact read path.
+#      `finalized` finds.
 #
 # Every check runs `cast` INSIDE the container. The host needs no
 # Foundry install. All diagnostics go to stderr.
@@ -71,7 +71,7 @@ while true; do
 done
 echo "smoke: bridge is deployed at $PROXY"
 
-# 2. The configuration the attestor stack pins.
+# 2. The configuration a consumer pins.
 threshold=$(docker exec "$CONTAINER" cast call --rpc-url "$RPC" "$PROXY" "threshold()(uint256)")
 [ "$threshold" = 2 ] || fail "threshold is '$threshold', want 2"
 

@@ -121,14 +121,11 @@ stack limit.
 
 The horizon bounds how far a withdrawal `deadline` can sit past
 `block.timestamp` (inclusive). The contract deploys with `0`, which disables
-the bound. The attestors derive their signing mode from the
-`withdrawalHorizon()` view. While the view returns `0`, they sign the fixed
-sentinel deadline. When the view returns a non-zero value, they derive real
-deadlines. Activation is therefore one admin transaction:
-`setWithdrawalHorizon(horizon)`. That transaction invalidates every
-unsubmitted sentinel bundle, and the attestors re-sign those requests in
-derived mode. The suggested first value is 48 hours; tighten it later with
-one admin transaction. `initialize` cannot take the horizon as a parameter
+the bound. Activation is one admin transaction: `setWithdrawalHorizon(horizon)`.
+That transaction invalidates every unsubmitted bundle whose deadline lies
+past the new bound, and the signers must re-sign those requests. The
+suggested first value is 48 hours; tighten it later with one admin
+transaction. `initialize` cannot take the horizon as a parameter
 because it already sits at the EVM stack limit.
 
 ### Post-deploy: the sentry pause role
@@ -138,8 +135,7 @@ monitoring-bot keys with `grantRole(SENTRY_ROLE, <bot>)`. A sentry can only
 call `pause()`; only the bridge admin unpauses. A hot key is acceptable for
 this role: it grants only a denial power, and the admin can always reverse it.
 
-No sentry holder exists at launch. Until a monitoring bot exists, the runbook
-keeps a pre-signed `pause()` Safe transaction to cover the gap.
+No sentry holder exists at launch.
 
 ### Post-deploy: the admin runbook
 
@@ -303,11 +299,11 @@ Four rules follow from the formula:
 The withdraw path carries no granularity check. Canton cannot burn an amount it
 cannot express, so the release amount is always representable by construction.
 
-## Attestor signing (Rust)
+## Attestor signing
 
 Attestors authorize a withdrawal by signing an EIP-712 typed-data digest.
-The contract verifies the digest with `_hashTypedDataV4`; the Rust attestor
-stack produces the identical digest with [Alloy](https://docs.rs/alloy-sol-types).
+The contract verifies the digest with `_hashTypedDataV4`. Any EIP-712
+library produces the identical digest from the struct and domain below.
 
 The signed struct and its type string (field names are part of the digest —
 they must match byte for byte):
@@ -326,53 +322,8 @@ of the target deployment, never the implementation address:
 | `chainId` | The target chain id (read live by the contract) |
 | `verifyingContract` | The bridge proxy address |
 
-Complete Rust flow:
-
-```rust
-use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_signer::SignerSync;
-use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::{eip712_domain, sol, SolStruct};
-
-sol! {
-    struct Withdrawal {
-        bytes withdrawRequestId;
-        address destinationAddress;
-        uint256 amount;
-        uint256 deadline;
-    }
-}
-
-fn sign_withdrawal(
-    signer: &PrivateKeySigner,
-    bridge_proxy: Address,
-    chain_id: u64,
-    cid_bytes: Vec<u8>,        // the raw Canton WithdrawRequest cid bytes
-    destination: Address,
-    amount_wei: U256,
-    deadline: U256,            // Unix seconds; see the derivation rule below
-) -> eyre::Result<Vec<u8>> {
-    let domain = eip712_domain! {
-        name: "BitSafeEvmAssetBridge",
-        version: "1",
-        chain_id: chain_id,
-        verifying_contract: bridge_proxy,
-    };
-
-    let message = Withdrawal {
-        withdrawRequestId: Bytes::from(cid_bytes),
-        destinationAddress: destination,
-        amount: amount_wei,
-        deadline,
-    };
-
-    let digest: B256 = message.eip712_signing_hash(&domain);
-    let signature = signer.sign_hash_sync(&digest)?;
-
-    // 65 bytes: r (32) || s (32) || v (1), v in {27, 28}, low-s form.
-    Ok(signature.as_bytes().to_vec())
-}
-```
+The signature is 65 bytes: `r (32) || s (32) || v (1)`, with `v` in
+`{27, 28}` and `s` in low-s form.
 
 Rules the contract enforces on submission (`withdraw`):
 
@@ -389,32 +340,13 @@ Rules the contract enforces on submission (`withdraw`):
   `deadline == block.timestamp + horizon` passes. A horizon of `0` disables
   the bound.
 
-The deadline runs in one of two modes, and the contract's
-`withdrawalHorizon()` view selects the mode. While the view returns `0`,
-every attestor signs the same fixed sentinel deadline, a far-future constant
-in the shared release, and the bound stays off. When the view returns a
-non-zero value, every attestor derives the deadline alone, with the same
-rule: `deadline = ledgerTimeOf(WithdrawRequest create) + withdrawalHorizon`.
-Every input is a ledger record or the on-chain view: no local clocks, no
-slack constant, no per-node horizon config. All attestors compute the same
-value, so the signatures combine with no coordinator-proposed field.
-Activation is one admin transaction (see the deploy notes); start long — 48
-hours is suggested — and tighten later with one admin transaction.
-
-A horizon change can land between two attestors' reads. The attestors then
-derive different deadlines, sign different digests, and the signatures do not
-combine. An attestor that sees a deadline mismatch defers the request to the
-next signing tick, re-reads the horizon, and re-signs. The request ids stay
-unused, so no funds are at risk. The same deferral covers activation day:
-every unsubmitted sentinel bundle fails the new bound, and the attestors
-re-sign those requests in derived mode.
-
-A pause longer than the horizon expires every pending bundle. A re-sign alone
-does not recover them: the derivation rule is deterministic, so it computes
-the same expired deadline. The bridge admin raises the horizon above the age
-of the oldest pending request; the attestors re-derive and re-sign; the admin
-lowers the horizon after the backlog clears. The request ids stay unused, so
-no funds are at risk.
+The signers choose the `deadline`. While `withdrawalHorizon()` returns `0`
+any deadline passes. Once the horizon is set, a deadline past the bound is
+rejected, so a bundle signed under an old horizon may need a new signature.
+A pause longer than the horizon expires every pending bundle. The bridge
+admin then raises the horizon above the age of the oldest pending request,
+the signers re-sign, and the admin lowers the horizon after the backlog
+clears. The request ids stay unused, so no funds are at risk.
 
 ## Voiding a withdraw request
 
@@ -422,16 +354,12 @@ no funds are at risk.
 id used without paying it and emits `WithdrawRequestVoided`. A signed
 `Withdrawal` bundle stays valid until its deadline, so only a used id stops
 it at once.
-The order matters: void first, cancel second. When an operator proposes a
-cancel for the matching Canton withdraw request, the admin voids the id
-before the attestors confirm the cancel. Each attestor confirms only after
-it sees the `WithdrawRequestVoided` event for the id in a **finalized**
-block on its own RPC node. That check is positive evidence with one
-finality anchor: a reorg or an incomplete log scan cannot fake it. A
-`Withdraw` event for the id means the payout happened, so the attestor
-rejects the cancel. The confirmed cancel then credits the user back on
-Canton. A void after the credit leaves a window where an old bundle still
-pays the id. The function reverts with `EmptyId` or
+The order matters: void first, cancel second. The admin voids the id before
+the matching Canton withdraw request is cancelled and credited back. A
+cancel must wait for the `WithdrawRequestVoided` event in a **finalized**
+block. A `Withdraw` event for the id means the payout happened, so the
+cancel must not proceed. A void after the credit leaves a window where an
+old bundle still pays the id. The function reverts with `EmptyId` or
 `WithdrawRequestAlreadyUsed` exactly as `withdraw` does, so a paid id
 cannot be voided and a voided id cannot be paid. It works while the bridge
 is paused, since a pause is the incident response and the void is part of
@@ -442,11 +370,11 @@ event makes every void auditable.
 Before rollout, cross-check the encoding against the live contract: the view
 `withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline)`
 returns the exact digest the contract verifies. Assert your locally computed
-digest equals it. Note for raw-key or KMS setups: sign the digest bytes
-directly (no `personal_sign` / Ethereum Signed Message prefix — the EIP-712
-`\x19\x01` envelope is already inside the digest).
+digest equals it. Sign the digest bytes directly (no `personal_sign` /
+Ethereum Signed Message prefix — the EIP-712 `\x19\x01` envelope is already
+inside the digest).
 
-## Watching Deposit events (Rust)
+## Deposit events
 
 Both `depositETH` and `depositERC20` emit the same event:
 
@@ -465,42 +393,5 @@ event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, addr
 
 Emit address: always the bridge PROXY address, never the implementation.
 
-Complete Rust flow with [Alloy](https://docs.rs/alloy):
-
-```rust
-use alloy_primitives::address;
-use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types::Filter;
-use alloy_sol_types::{sol, SolEvent};
-
-sol! {
-    event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
-}
-
-#[tokio::main]
-async fn main() -> eyre::Result<()> {
-    // Values for the local evm-asset-bridge container (see infra/docker/README.md).
-    // For another deployment, use its RPC URL and its proxy address.
-    let provider = ProviderBuilder::new().connect("http://localhost:8545").await?;
-    let bridge_proxy = address!("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512");
-
-    let filter = Filter::new()
-        .address(bridge_proxy)
-        .event_signature(Deposit::SIGNATURE_HASH)
-        .from_block(0u64);
-
-    for log in provider.get_logs(&filter).await? {
-        let deposit = log.log_decode::<Deposit>()?.inner.data;
-        println!(
-            "deposit: account_id={} sender={} amount={}",
-            deposit.depositAccountId, // Bytes prints as 0x-prefixed hex
-            deposit.sender,
-            deposit.amount,
-        );
-    }
-    Ok(())
-}
-```
-
-A poller advances `from_block` past the last block it saw. A pubsub setup
-subscribes with `subscribe_logs` over WebSocket instead of `get_logs`.
+A consumer filters on the proxy address and `topic0`, and advances its
+start block past the last block it saw.

@@ -4,10 +4,8 @@ One container runs a local anvil chain and deploys one
 `BitSafeEvmAssetBridge` (native ETH) into it. A consumer starts the
 container and uses it. A consumer runs no deploy step.
 
-This mirrors the `canton-sandbox` and `dlc-solidity` images that
-DLC-link/dlc-attestor-stack already imports. Each image bundles chain,
-deploy and healthcheck. A consumer adds each one as a single compose
-service.
+The image bundles chain, deploy and healthcheck. A consumer adds it as
+a single compose service.
 
 ## Where to get it
 
@@ -132,8 +130,8 @@ drift.
 
 ## Reading Deposit events
 
-The top-level `README.md` documents the `Deposit` event signature, its
-topic layout, and a Rust sample that reads it.
+The top-level `README.md` documents the `Deposit` event signature and
+its topic layout.
 
 ## Building and testing it locally
 
@@ -156,10 +154,10 @@ A push to `main` publishes. It publishes the `beth-<short-sha>` tag. It
 also moves `latest`. Every published tag therefore names a commit on
 `main`.
 
-The workflow assumes the IAM role `gh-oidc-build-evm-asset-bridge`. The
-image name matches this repository's name on purpose. The org names a
-build role after the ECR repository. That role allows pushes to that
-one repository only. Do not rename either one on its own.
+The workflow assumes the IAM role `gh-oidc-publish-evm-asset-bridge`.
+That role allows pushes to this one ECR repository only. The image name
+matches this repository's name on purpose. Do not rename either one on
+its own.
 
 ## Safety
 
