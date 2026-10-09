@@ -25,8 +25,7 @@ abstract contract BridgeDeploy is DeployBase {
     /// lets the proxy owner schedule and execute an upgrade in one block.
     uint256 internal constant MIN_TIMELOCK_DELAY = 60;
 
-    /// One struct keeps `run` inside the EVM stack limit. The ninth
-    /// initialize parameter already pushed the old script past it.
+    /// One struct keeps `run` inside the EVM stack limit.
     struct Params {
         address asset;
         uint8 targetDecimals;

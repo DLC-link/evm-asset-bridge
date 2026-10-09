@@ -121,4 +121,3 @@ The proxy record lists the admin addresses and the attestor addresses of that ne
 
 The threshold and the attestor set together define how many operators must agree on a withdrawal.
 One role therefore owns both values.
-Pull request #48 moves the threshold under the default admin.

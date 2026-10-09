@@ -25,7 +25,7 @@ transaction.
 A second deployment of the same contract needs no new script. It needs one
 set of deployment records and one `.env.{network}.{deployment}` file. This
 promise covers the management scripts only. The deploy script still needs
-one new file for each deployment. A follow-up issue tracks that gap.
+one new file for each deployment.
 
 `script/manage/ManageBase.s.sol` holds the shared code.
 `script/manage/BitSafeEvmAssetBridge/BridgeManage.s.sol` binds that base to
@@ -518,7 +518,7 @@ limit.
 Keep the key out of every tracked file. `.env.sepolia.BETH_DEVNET` holds no
 secret.
 
-## 10. Status of this tooling
+## 10. Tests for this tooling
 
 `script/manage/safe/propose.sh` has offline tests in
 `test/tooling/propose.t.sh`. A fake `curl` answers the service. A fake `cast`
@@ -527,29 +527,10 @@ answers the chain. CI runs the suite on every push.
 The upgrade scripts have tests in `test/manage/UpgradeActions.t.sol` and
 `test/manage/DeployNextImplementation.t.sol`. The whole upgrade sequence
 runs against a local anvil in `test/tooling/upgrade-sync.t.sh`. CI runs
-all three. No upgrade has run on a public network yet. Treat the first
-Sepolia upgrade as a test of the tooling.
+all three.
 
-The whole flow also ran against the live Safe Transaction Service. This repo
-becomes public. The record therefore names no address and no transaction hash.
-
-| Field | Value |
-| --- | --- |
-| Date | 2026-09-11 |
-| Network | Sepolia |
-| Action | `setWithdrawRateLimit` |
-| Result | The Safe executed the transaction. |
-| Proposer record | The service set the `proposedByDelegate` field. |
-| Confirmations | The list held the Safe owner only. |
-| Hash agreement | The stored `safeTxHash` matched the computed hash. |
-
-The run proves three points. A delegate proposes a transaction. A delegate
-never confirms a transaction. The hash that the script computes before the
-signature matches the hash that the service stores.
-
-One item stays unproven. The script maps each chain to a Safe short name. Only
-the Sepolia short name `sep` ran live. Treat the first run on another chain as
-a test.
+The script maps each chain to a Safe short name. On a new chain, open the
+queue link that the script prints, and check that it names the correct Safe.
 
 ## 11. Which Safes govern a deployment
 
@@ -600,8 +581,7 @@ and syncs. `CONTRACT=src/Other.sol:Other` deploys another contract. The
 script refuses a contract whose constructor takes arguments. Every
 implementation we ship only disables its initializers.
 
-The deployer key on Sepolia carries an EIP-7702 delegation, so pass
-`--slow`. Any funded key may deploy an implementation. The deploy grants no
+Pass `--slow` when the deployer key carries an EIP-7702 delegation. Any funded key may deploy an implementation. The deploy grants no
 power; the timelock operation does.
 
 One `nextImplementation` record exists per deployment at a time. The
