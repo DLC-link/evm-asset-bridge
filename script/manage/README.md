@@ -302,6 +302,15 @@ make manage SCRIPT=SetWithdrawalHorizon SIG='run(uint256)' ARGS=172800 \
   RPC_URL=https://... SIGNER="--account bridgeAdmin"
 ```
 
+### Recover after a long pause
+
+A pause longer than the horizon expires every pending bundle. The request ids
+stay unused, so no funds are at risk. Recover in three steps:
+
+1. Raise the horizon above the age of the oldest pending request.
+2. Let the signers re-sign the pending requests.
+3. Lower the horizon after the pending requests clear.
+
 ## 6. The default admin transfer
 
 `DEFAULT_ADMIN_ROLE` moves in two steps, with one delay between them. Five
@@ -741,3 +750,29 @@ a `data` field, and a proxy record whose `implementation` differs from the
 implementation record. It never overwrites an existing
 `previousImplementation_<n>` file. Run one sync at a time per deployment.
 The test `test/tooling/upgrade-sync.t.sh` covers each refusal.
+
+## 13. Void a withdraw request
+
+`VoidWithdrawRequest` marks an id as used without a payout. The contract
+emits `WithdrawRequestVoided`. A signed `Withdrawal` bundle stays valid until
+its deadline. Only a used id stops the bundle at once.
+
+Void first, and cancel second:
+
+1. Void the id on the bridge.
+2. Wait for the `WithdrawRequestVoided` event in a **finalized** block.
+3. Cancel the matching Canton withdraw request, which credits the user back.
+
+A `Withdraw` event for the id means that the payout happened. Do not cancel
+the Canton request in that case. A void after the Canton credit leaves a
+period in which an old bundle can still pay the id.
+
+```bash
+make manage SCRIPT=VoidWithdrawRequest SIG='run(bytes)' ARGS=0x0011deadbeef22 \
+  RPC_URL=https://... SIGNER="--account bridgeAdmin"
+```
+
+The void works while the bridge is paused. A pause is the incident response,
+and the void is part of the same response. A wrong void locks no funds. The
+ETH stays in the bridge, and the Canton cancel credits the user back. The
+`WithdrawRequestVoided` event records every void.
