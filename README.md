@@ -7,8 +7,7 @@ BitSafeEvmAssetBridge: an upgradeable EVM contract that locks one asset
 - Build: `forge build`
 - Test: `forge test`
 - Integration-test image: `make it-verify` (see `infra/docker/README.md`)
-- Upgrade through the timelock: `make upgrade-deploy`, `upgrade-schedule`, `upgrade-status`, `upgrade-execute`, `upgrade-cancel`, `upgrade-sync` (see `script/manage/README.md` section 12)
-- The design spec is maintained locally, outside git (not tracked in this repo).
+- Upgrade through the timelock: `make upgrade-deploy`, `upgrade-schedule`, `upgrade-status`, `upgrade-execute`, `upgrade-cancel`, `upgrade-sync` (see [Upgrade through the timelock](script/manage/README.md#12-upgrade-through-the-timelock))
 
 ## Production deploy
 
@@ -91,8 +90,8 @@ variable into the child process's environment.
 
 ### Commit the records
 
-The deploy writes files that only your machine holds. Commit them right after
-the deploy, or the source can never be verified again:
+The deploy writes files that only your machine holds. Commit them after the
+deploy. The verify command needs them to verify the source:
 
 ```
 git add deployments/BETH.*.<chainId>.json deployments/solcInputs/
@@ -108,34 +107,30 @@ deployed one whenever the source matches, so an extra file is harmless.
 
 ### Post-deploy: the withdrawal rate limit
 
-After deploy, the bridge admin sets the withdrawal rate limit with
+The bridge admin sets the withdrawal rate limit with
 `setWithdrawRateLimit(capacity, window)`. Withdrawals draw from a token
-bucket that holds at most `capacity` base units and refills at
-`capacity / window` per second, so a drained bucket is full again after
-`window` seconds. A `capacity` of `0` disables the check, and the contract
-deploys with `0`, so this step is what turns the limit on. `initialize`
-cannot take the limit as a parameter because it already sits at the EVM
-stack limit.
+bucket that holds at most `capacity` base units. The bucket refills at
+`capacity / window` per second, so an empty bucket is full again after
+`window` seconds. A `capacity` of `0` disables the check. `initialize` does
+not set the rate limit.
 
 ### Post-deploy: the withdrawal horizon
 
-The horizon bounds how far a withdrawal `deadline` can sit past
-`block.timestamp` (inclusive). The contract deploys with `0`, which disables
-the bound. Activation is one admin transaction: `setWithdrawalHorizon(horizon)`.
-That transaction invalidates every unsubmitted bundle whose deadline lies
-past the new bound, and the signers must re-sign those requests. The
-suggested first value is 48 hours; tighten it later with one admin
-transaction. `initialize` cannot take the horizon as a parameter
-because it already sits at the EVM stack limit.
+The horizon bounds how far a withdrawal `deadline` can lie past
+`block.timestamp`. The bound is inclusive. A horizon of `0` disables the
+bound. The bridge admin sets the horizon with `setWithdrawalHorizon(horizon)`.
+`initialize` does not set the horizon.
+
+A new horizon invalidates every unsubmitted bundle whose deadline lies past
+the new bound. The signers must then re-sign those requests.
+[The withdrawal horizon rule](script/manage/README.md#5-the-withdrawal-horizon-rule)
+gives the procedure.
 
 ### Post-deploy: the sentry pause role
 
-After deploy, the default admin MAY grant `SENTRY_ROLE` to one or more
-monitoring-bot keys with `grantRole(SENTRY_ROLE, <bot>)`. A sentry can only
-call `pause()`; only the bridge admin unpauses. A hot key is acceptable for
-this role: it grants only a denial power, and the admin can always reverse it.
-
-No sentry holder exists at launch.
+The default admin can grant `SENTRY_ROLE` to monitoring-bot keys with
+`grantRole(SENTRY_ROLE, <bot>)`. A sentry can only call `pause()`. Only the
+bridge admin can unpause the bridge.
 
 ### Post-deploy: the admin runbook
 
@@ -163,8 +158,7 @@ keeps the contract name still updates the same file.
 
 Every record holds the address, the ABI-encoded constructor arguments, the
 transaction receipt, the contract ABI, the compiler settings, and the git
-commit. It holds nothing that names the machine that ran the deploy. The proxy
-record holds five more fields: `implementation`,
+commit. The proxy record holds five more fields: `implementation`,
 `proxyAdmin`, `bridgeConfig`, `numDeployments`, and `history`. The ProxyAdmin
 record holds `owner`, which names the timelock, and `createdBy`, which names
 the proxy. The timelock record holds `minDelay`, `proposers`, `executors`, and
@@ -202,8 +196,8 @@ so they are enough to verify that implementation later.
 An upgrade through the timelock adds `BETH.nextImplementation.<chainId>.json`
 before the switch and `BETH.previousImplementation_<n>.<chainId>.json` after
 it. The new `history` entry names the previous file in its `record` field.
-`script/manage/README.md` section 12 holds the operator sequence and the
-record blocks an upgrade writes.
+[Upgrade through the timelock](script/manage/README.md#12-upgrade-through-the-timelock)
+holds the operator sequence and the record blocks that an upgrade writes.
 
 `deployments/solcInputs/<hash>.json` is the standard-JSON compiler input that
 produced the deployed bytes. The verify command submits that file. The
@@ -267,7 +261,7 @@ The contract blocks this at the source.
 
 `initialize` takes `targetDecimals` and reads the asset's own decimals. For ETH
 it uses 18, because ETH has no contract to ask. For an ERC20 it calls
-`decimals()`. That function is OPTIONAL in EIP-20, so a token without it cannot
+`decimals()`. That function is optional in EIP-20, so a token without it cannot
 be bridged; `initialize` reverts.
 
 From the two values the contract derives the deposit unit:
@@ -312,7 +306,7 @@ they must match byte for byte):
 Withdrawal(bytes withdrawRequestId,address destinationAddress,uint256 amount,uint256 deadline)
 ```
 
-The domain has four fields. `verifyingContract` is the bridge PROXY address
+The domain has four fields. `verifyingContract` is the bridge proxy address
 of the target deployment, never the implementation address:
 
 | Domain field | Value |
@@ -327,7 +321,7 @@ The signature is 65 bytes: `r (32) || s (32) || v (1)`, with `v` in
 
 Rules the contract enforces on submission (`withdraw`):
 
-- Signatures may arrive in ANY order; no sorting by signer address.
+- Signatures may arrive in any order; no sorting by signer address.
 - Each signer may appear once; a duplicate reverts.
 - Every submitted signature must recover to a current `ATTESTOR_ROLE` holder.
 - At least `threshold` signatures are required; the caller must hold
@@ -340,39 +334,26 @@ Rules the contract enforces on submission (`withdraw`):
   `deadline == block.timestamp + horizon` passes. A horizon of `0` disables
   the bound.
 
-The signers choose the `deadline`. While `withdrawalHorizon()` returns `0`
-any deadline passes. Once the horizon is set, a deadline past the bound is
-rejected, so a bundle signed under an old horizon may need a new signature.
-A pause longer than the horizon expires every pending bundle. The bridge
-admin then raises the horizon above the age of the oldest pending request,
-the signers re-sign, and the admin lowers the horizon after the backlog
-clears. The request ids stay unused, so no funds are at risk.
+The signers choose the `deadline`. A lower horizon can reject a bundle that
+the signers signed under the old horizon. The signers then sign the request
+again.
+
+A signer checks its encoding against the live contract. The view
+`withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline)`
+returns the exact digest that the contract verifies. The locally computed
+digest must equal it. Sign the digest bytes directly. Do not use
+`personal_sign` or the Ethereum Signed Message prefix, because the digest
+already holds the EIP-712 `\x19\x01` prefix.
 
 ## Voiding a withdraw request
 
 `voidWithdrawRequest(bytes withdrawRequestId)` (`BRIDGE_ADMIN_ROLE`) marks an
-id used without paying it and emits `WithdrawRequestVoided`. A signed
-`Withdrawal` bundle stays valid until its deadline, so only a used id stops
-it at once.
-The order matters: void first, cancel second. The admin voids the id before
-the matching Canton withdraw request is cancelled and credited back. A
-cancel must wait for the `WithdrawRequestVoided` event in a **finalized**
-block. A `Withdraw` event for the id means the payout happened, so the
-cancel must not proceed. A void after the credit leaves a window where an
-old bundle still pays the id. The function reverts with `EmptyId` or
-`WithdrawRequestAlreadyUsed` exactly as `withdraw` does, so a paid id
-cannot be voided and a voided id cannot be paid. It works while the bridge
-is paused, since a pause is the incident response and the void is part of
-resolving it. A wrongful void locks no funds: the ETH stays in the bridge,
-the Canton cancel credits the user back, and the `WithdrawRequestVoided`
-event makes every void auditable.
-
-Before rollout, cross-check the encoding against the live contract: the view
-`withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline)`
-returns the exact digest the contract verifies. Assert your locally computed
-digest equals it. Sign the digest bytes directly (no `personal_sign` /
-Ethereum Signed Message prefix — the EIP-712 `\x19\x01` envelope is already
-inside the digest).
+id as used without a payout. It emits `WithdrawRequestVoided`. It reverts with
+`EmptyId` or `WithdrawRequestAlreadyUsed` exactly as `withdraw` does. A paid
+id therefore cannot be voided, and a voided id cannot be paid. The function
+works while the bridge is paused.
+[Void a withdraw request](script/manage/README.md#13-void-a-withdraw-request)
+gives the order of the void and the Canton cancel.
 
 ## Deposit events
 
@@ -391,7 +372,8 @@ event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, addr
 - The data part carries the raw `depositAccountId` bytes (the Canton deposit
   account id) and `amount` (wei for ETH, base units for an ERC20 asset).
 
-Emit address: always the bridge PROXY address, never the implementation.
+The bridge emits the event from the proxy address, never from the
+implementation address.
 
 A consumer filters on the proxy address and `topic0`, and advances its
 start block past the last block it saw.
