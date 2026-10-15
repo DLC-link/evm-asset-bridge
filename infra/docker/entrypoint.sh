@@ -16,11 +16,15 @@
 # The mnemonic is anvil's own default, spelled out. This keeps the
 # account table reproducible. THESE ARE PUBLIC, WELL-KNOWN TEST KEYS.
 # NEVER send real funds to any address this chain funds.
+#
+# CHAIN_ID sets the chain id, 31337 by default. A consumer that runs two
+# bridges side by side gives each container its own value.
 set -eu
 
 MNEMONIC="test test test test test test test test test test test junk"
+CHAIN_ID="${CHAIN_ID:-31337}"
 
-anvil --host 0.0.0.0 --port 8545 --chain-id 31337 \
+anvil --host 0.0.0.0 --port 8545 --chain-id "$CHAIN_ID" \
       --slots-in-an-epoch 1 --block-time 1 \
       --mnemonic "$MNEMONIC" &
 ANVIL_PID=$!

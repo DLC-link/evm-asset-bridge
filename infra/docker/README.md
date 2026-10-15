@@ -72,10 +72,22 @@ cast code --rpc-url http://localhost:8545 \
 The container runs anvil with these flags:
 
 ```
-anvil --host 0.0.0.0 --port 8545 --chain-id 31337 \
+anvil --host 0.0.0.0 --port 8545 --chain-id "$CHAIN_ID" \
       --slots-in-an-epoch 1 --block-time 1 \
       --mnemonic "test test test test test test test test test test test junk"
 ```
+
+`CHAIN_ID` is an environment variable with the default `31337`. Set it
+to run a second bridge on a second chain:
+
+```
+docker run -e CHAIN_ID=31338 -p 8546:8545 public.ecr.aws/dlc-link/evm-asset-bridge:<tag>
+```
+
+The bridge deploys at the same addresses on every chain id, because an
+address depends only on the deployer and its nonce. The EIP-712 domain
+reads `block.chainid`, so a signature for one chain does not verify on
+the other.
 
 The image requires both timing flags. Neither one works alone.
 
