@@ -512,7 +512,7 @@ contract BitSafeEvmAssetBridge is
     /// @notice Releases `amount` of the bridged asset to `destinationAddress`.
     /// @dev Requires `threshold` valid, distinct attestor signatures over the
     ///      EIP-712 digest. Signer order does not matter.
-    ///      The signers set the deadline when they sign.
+    ///      The attestor stack derives the deadline when it signs.
     function withdraw(
         bytes calldata withdrawRequestId,
         address destinationAddress,
