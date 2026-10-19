@@ -197,7 +197,7 @@ The record holds `targetDecimals` and `depositUnit` as deploy-time values.
 `make manage-status` prints the default admin, the attestors, the threshold,
 the limits, and the delays. No status command prints the holders of
 `BRIDGE_ADMIN_ROLE` or `SENTRY_ROLE`. No status command prints the ProxyAdmin
-owner or the timelock proposers and executors. Read them with `cast call`:
+owner or the timelock proposers and executors. Check them with `cast call`:
 
 ```bash
 cast call <timelock> "hasRole(bytes32,address)(bool)" $(cast keccak PROPOSER_ROLE) <account> --rpc-url $RPC_URL
@@ -205,7 +205,8 @@ cast call <proxyAdmin> "owner()(address)" --rpc-url $RPC_URL
 ```
 
 Call `hasRole` on the bridge in the same way for `BRIDGE_ADMIN_ROLE` and
-`SENTRY_ROLE`.
+`SENTRY_ROLE`. `hasRole` checks one account that you name. To list every holder
+of a role, read the `RoleGranted` and `RoleRevoked` events of the contract.
 
 `make upgrade-status` syncs the upgrade records with the chain. It then prints
 the upgrade state.
