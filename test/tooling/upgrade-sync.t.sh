@@ -244,6 +244,8 @@ check    "history length"            "$(jq -r '.history | length' "$P")" "1"
 check    "history[0].implementation" "$(cast to-check-sum-address "$(jq -r '.history[0].implementation' "$P")")" "$OLD_IMPL"
 check    "history[0].record"         "$(jq -r '.history[0].record' "$P")" "BETH.previousImplementation_1.$CHAIN_ID.json"
 check    "history[0].solcInputHash"  "$(jq -r '.history[0].solcInputHash' "$P")" "$(jq -r .solcInputHash "$PREV1")"
+check    "promoted proxy keeps deployTimeConfig" "$(jq -r 'has("deployTimeConfig")' "$P")" "true"
+check    "promoted impl schemaVersion" "$(jq -r .schemaVersion "$I")" "2"
 check    "no temporaries"            "$(no_temporaries)" "none"
 
 echo "== cancel =="

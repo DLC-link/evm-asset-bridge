@@ -158,17 +158,22 @@ keeps the contract name still updates the same file.
 
 Every record holds the address, the ABI-encoded constructor arguments, the
 transaction receipt, the contract ABI, the compiler settings, and the git
-commit. The proxy record holds five more fields: `implementation`,
-`proxyAdmin`, `bridgeConfig`, `numDeployments`, and `history`. The ProxyAdmin
-record holds `owner`, which names the timelock, and `createdBy`, which names
-the proxy. The timelock record holds `minDelay`, `proposers`, `executors`, and
-`admin`. The admin is the zero address, so the timelock administers itself.
+commit. The proxy record holds five more fields: `implementation`, `proxyAdmin`,
+`deployTimeConfig`, `numDeployments`, and `history`.
 
-Every record also opens with `schemaVersion`, which is `1` today. A consumer
+The ProxyAdmin record holds `createdBy`, which names the proxy. It also holds
+`deployTimeConfig`, which has `owner`. At deploy time `owner` names the
+timelock.
+
+The timelock record holds `deployTimeConfig`, which has `minDelay`,
+`proposers`, `executors`, and `admin`. At deploy time the admin is the zero
+address, so the timelock administers itself.
+
+Every record also opens with `schemaVersion`, which is `2` today. A consumer
 outside this repo reads it to detect a migration.
 
-`bridgeConfig` holds the whole `initialize` configuration, not just the
-decimals fields:
+In the proxy record, `deployTimeConfig` holds the whole `initialize`
+configuration, not just the decimals fields:
 
 ```
 asset, assetDecimals, targetDecimals, depositUnit, defaultAdmin, adminDelay,
@@ -176,13 +181,16 @@ bridgeAdmin, proxyOwner, timelock, timelockDelay, attestors, threshold,
 depositLimits, withdrawLimits
 ```
 
-The record holds the deploy-time configuration only. The post-deploy setters
-change live state that no record shows: `setWithdrawRateLimit`,
-`setWithdrawalHorizon`, and the `SENTRY_ROLE` grants. Read that state from
-the contract itself.
+The deployment records track the deployment itself. That is the address and
+the deploy facts of each contract that the tooling deploys, and the progress
+of an upgrade through the timelock. The records never track business
+configuration after the deploy. The roles, the attestors, the threshold, the
+limits and the delays stay at their deploy-time values in
+`deployTimeConfig`. The chain holds the live values.
+When a record and the chain disagree, the chain is correct.
 
-An operator reads the live granularity rule from `targetDecimals` and
-`depositUnit`, both inside `bridgeConfig`.
+Run `make manage-status` to print the live configuration. Run
+`make upgrade-status` to read the live upgrade state.
 
 Each record holds the ABI of the contract at its own address. A consumer
 therefore reads the address from `BETH.proxy.<chainId>.json`. It reads the

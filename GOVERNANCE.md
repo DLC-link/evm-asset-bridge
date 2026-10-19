@@ -110,12 +110,16 @@ The Multi-org Safe is the only account that can execute an upgrade.
 If that Safe cannot act, no upgrade path remains.
 The team accepts that tradeoff. It is the standard one for a timelock with a single executor.
 A change of the delay itself must pass through the same scheduled process.
-The mainnet deployment uses this design.
+A deploy from this repo builds this design.
 
 ## Where the live addresses are
 
 The `deployments/` folder holds one record per contract per network.
-The proxy record lists the admin addresses and the attestor addresses of that network.
+The records hold the contract addresses and the deploy-time configuration.
+The records never track business configuration after the deploy.
+When a record and the chain disagree, the chain is correct.
+The status commands show the live default admin and the live attestors.
+Use `make manage-status` for the bridge and `make upgrade-status` for the upgrade state.
 
 ## Why the default admin sets the threshold
 

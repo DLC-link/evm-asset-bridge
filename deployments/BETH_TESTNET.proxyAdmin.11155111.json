@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deploymentName": "BETH_TESTNET",
   "role": "proxyAdmin",
   "chainId": 11155111,
@@ -385,6 +385,8 @@
   },
   "gitCommit": "bf5449e",
   "deployedAt": "2026-09-17T13:57:25Z",
-  "owner": "0x2667a8711083f2d53881337fFBa6e8B7A483A2a8",
+  "deployTimeConfig": {
+    "owner": "0x2667a8711083f2d53881337fFBa6e8B7A483A2a8"
+  },
   "createdBy": "0x5d60b6c3ec2fd5e4227ae0008babe95be86dd172"
 }

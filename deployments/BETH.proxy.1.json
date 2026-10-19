@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deploymentName": "BETH",
   "role": "proxy",
   "chainId": 1,
@@ -376,7 +376,7 @@
   "deployedAt": "2026-09-22T12:00:49Z",
   "implementation": "0x881dEb0164604308C172d9b46a25955F3a2Df06B",
   "proxyAdmin": "0x393aa3Ca8566C10fc5aaB740B8fE43CEc8F141aD",
-  "bridgeConfig": {
+  "deployTimeConfig": {
     "asset": "0x0000000000000000000000000000000000000000",
     "assetDecimals": 18,
     "targetDecimals": 10,
@@ -389,7 +389,7 @@
     "timelockDelay": 600,
     "attestors": [
       "0xd889B7F827dc65877452cC82ce3Bd01870392B4A",
-      "0xE74c19c0A4B54E37dd5E8B1c0E2f5f21494468f9",
+      "0x48256F198CE3A0B9E4f145d8Aa791ECCd768a8a0",
       "0xa92E4313894FbE76CED75fEb5e6Bd059849e18C5"
     ],
     "threshold": 2,
