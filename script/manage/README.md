@@ -746,14 +746,18 @@ delay therefore needs a schedule, a wait, and an execute. The scripts need
 `DEPLOYMENT`, `RPC_URL` and `DELAY`. `DELAY` is the new delay in seconds. The
 steps below use `86400` as an example value.
 
-1. Schedule the change, and propose the envelope.
+1. Schedule the change, and propose the envelope. The schedule prints the
+   operation id. Keep it until the change runs or you cancel it.
 
    ```bash
    SAFE=0xProxyOwnerSafe make timelock-delay-schedule DELAY=86400
    make propose ENVELOPE=deployments/.safe/<name>.<chainId>.scheduleUpdateDelay.json SIGNER="--account proposer"
    ```
 
-2. The Safe owners execute the schedule. Wait for the current delay.
+2. The Safe owners execute the schedule. Wait for the current delay from
+   that moment. Safe mode cannot write the execute envelope before the delay
+   passes (section 7). If the execute stops with `OperationNotReady`, wait
+   the seconds that it shows.
 3. Execute the change, and propose the envelope.
 
    ```bash
@@ -783,7 +787,8 @@ These rules apply:
   scripts cannot find the other one, and they stop with `OperationNotOnChain`.
   Cancel that change by its id in the Safe web app.
 - A change from one value to another runs once for each timelock. A repeat
-  stops with `OperationDone`.
+  stops with `OperationDone`. In that case, choose a value that differs by
+  one second, for example `86401`.
 - The script refuses a delay below 60 seconds (`DelayTooShort`).
 - The script refuses a delay above 7 days (`DelayTooLong`).
 - An upgrade that you scheduled before the change keeps its own ready time.

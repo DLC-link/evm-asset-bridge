@@ -53,6 +53,12 @@ contract ScheduleUpdateDelay is UpdateDelayManage {
             revert AlreadyScheduled(id);
         }
 
+        // A decrease shortens the review window of every later upgrade.
+        // The script prints one line for it and does not stop.
+        if (newDelay < delay) {
+            console2.log("DECREASE: current delay (s)", delay, "-> new delay (s)", newDelay);
+        }
+
         _send(encode(newDelay));
 
         console2.log("timelock", address(tl));

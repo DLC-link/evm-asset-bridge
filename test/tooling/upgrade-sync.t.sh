@@ -77,11 +77,17 @@ contains "delay schedule prints its mode"   "$MK_OUT" "direct broadcast"
 
 MK_OUT=$(make -n timelock-delay-execute DEPLOYMENT=BETH RPC_URL="$MK_URL" SIGNER='--account d' DELAY=120 2>&1)
 contains "delay execute names the script"   "$MK_OUT" "ExecuteUpdateDelay.s.sol:ExecuteUpdateDelay"
+contains "delay execute passes DELAY"       "$MK_OUT" "--sig 'run(uint256)' \"120\""
 MK_OUT=$(make -n timelock-delay-cancel DEPLOYMENT=BETH RPC_URL="$MK_URL" SIGNER='--account d' DELAY=120 2>&1)
 contains "delay cancel names the script"    "$MK_OUT" "CancelUpdateDelay.s.sol:CancelUpdateDelay"
+contains "delay cancel passes DELAY"        "$MK_OUT" "--sig 'run(uint256)' \"120\""
 
 MK_OUT=$(SAFE=0x0000000000000000000000000000000000000001 make -n timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$MK_URL" DELAY=120 2>&1)
 check    "delay Safe mode never broadcasts" "$(count "$MK_OUT" "\-\-broadcast")" "0"
+MK_OUT=$(SAFE=0x0000000000000000000000000000000000000001 make -n timelock-delay-execute DEPLOYMENT=BETH RPC_URL="$MK_URL" DELAY=120 2>&1)
+check    "delay execute Safe mode never broadcasts" "$(count "$MK_OUT" "\-\-broadcast")" "0"
+MK_OUT=$(SAFE=0x0000000000000000000000000000000000000001 make -n timelock-delay-cancel DEPLOYMENT=BETH RPC_URL="$MK_URL" DELAY=120 2>&1)
+check    "delay cancel Safe mode never broadcasts" "$(count "$MK_OUT" "\-\-broadcast")" "0"
 
 set +e
 MK_OUT=$(make -n timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$MK_URL" SIGNER='--account d' 2>&1)
@@ -89,6 +95,15 @@ MK_RC=$?
 set -e
 check    "delay schedule needs DELAY"       "$([ "$MK_RC" -ne 0 ] && echo refused || echo ran)" "refused"
 contains "delay schedule names the variable" "$MK_OUT" "DELAY is not set"
+
+for T_NAME in execute cancel; do
+  set +e
+  MK_OUT=$(make -n "timelock-delay-$T_NAME" DEPLOYMENT=BETH RPC_URL="$MK_URL" SIGNER='--account d' 2>&1)
+  MK_RC=$?
+  set -e
+  check    "delay $T_NAME needs DELAY"        "$([ "$MK_RC" -ne 0 ] && echo refused || echo ran)" "refused"
+  contains "delay $T_NAME names the variable" "$MK_OUT" "DELAY is not set"
+done
 
 set +e
 MK_OUT=$(make -n timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$MK_URL" DELAY=120 2>&1)
@@ -332,7 +347,8 @@ OUT=$(make manage-status DEPLOYMENT=BETH RPC_URL="$RPC" 2>&1) || { echo "$OUT"; 
 contains "status prints timelockMinDelay"  "$OUT" "timelockMinDelay"
 check    "status prints the new delay"     "$(printf '%s\n' "$OUT" | grep -E '^ *timelockMinDelay +120$' | tr -s ' ' | sed 's/^ //')" "timelockMinDelay 120"
 set +e
-OUT=$(make timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $OWNER_KEY" DELAY=1d 2>&1)
+# Safe mode writes an envelope on success. The refusal must leave none.
+OUT=$(SAFE="$(cast wallet address --private-key "$OWNER_KEY")" make timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$RPC" DELAY=1d 2>&1)
 RC=$?
 set -e
 check    "a malformed DELAY refuses"       "$([ "$RC" -ne 0 ] && echo refused || echo ran)" "refused"
