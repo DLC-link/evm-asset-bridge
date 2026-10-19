@@ -84,10 +84,13 @@ contains "delay cancel passes DELAY"        "$MK_OUT" "--sig 'run(uint256)' \"12
 
 MK_OUT=$(SAFE=0x0000000000000000000000000000000000000001 make -n timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$MK_URL" DELAY=120 2>&1)
 check    "delay Safe mode never broadcasts" "$(count "$MK_OUT" "\-\-broadcast")" "0"
+contains "delay schedule prints Safe mode"   "$MK_OUT" "Safe mode"
 MK_OUT=$(SAFE=0x0000000000000000000000000000000000000001 make -n timelock-delay-execute DEPLOYMENT=BETH RPC_URL="$MK_URL" DELAY=120 2>&1)
 check    "delay execute Safe mode never broadcasts" "$(count "$MK_OUT" "\-\-broadcast")" "0"
+contains "delay execute prints Safe mode"   "$MK_OUT" "Safe mode"
 MK_OUT=$(SAFE=0x0000000000000000000000000000000000000001 make -n timelock-delay-cancel DEPLOYMENT=BETH RPC_URL="$MK_URL" DELAY=120 2>&1)
 check    "delay cancel Safe mode never broadcasts" "$(count "$MK_OUT" "\-\-broadcast")" "0"
+contains "delay cancel prints Safe mode"   "$MK_OUT" "Safe mode"
 
 set +e
 MK_OUT=$(make -n timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$MK_URL" SIGNER='--account d' 2>&1)
@@ -337,7 +340,8 @@ contains "reports the hand schedule" "$OUT" "scheduled by hand"
 
 echo "== the timelock delay change =="
 T_BEFORE=$(shasum "$T")
-make timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $OWNER_KEY" DELAY=120 >/dev/null 2>&1 || FAILURES=$((FAILURES + 1))
+OUT=$(make timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $OWNER_KEY" DELAY=120 2>&1) || { echo "$OUT"; FAILURES=$((FAILURES + 1)); }
+check    "an increase prints no DECREASE line" "$(count "$OUT" "DECREASE")" "0"
 cast rpc evm_increaseTime 61 --rpc-url "$RPC" >/dev/null
 cast rpc evm_mine --rpc-url "$RPC" >/dev/null
 make timelock-delay-execute DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $OWNER_KEY" DELAY=120 >/dev/null 2>&1 || FAILURES=$((FAILURES + 1))
@@ -353,6 +357,10 @@ RC=$?
 set -e
 check    "a malformed DELAY refuses"       "$([ "$RC" -ne 0 ] && echo refused || echo ran)" "refused"
 check    "no envelope for the refused DELAY" "$([ -f "deployments/.safe/BETH.$CHAIN_ID.scheduleUpdateDelay.json" ] && echo present || echo absent)" "absent"
+# A decrease from 120 to 60 prints the DECREASE line. Safe mode sends nothing.
+OUT=$(SAFE="$(cast wallet address --private-key "$OWNER_KEY")" make timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$RPC" DELAY=60 2>&1) || { echo "$OUT"; FAILURES=$((FAILURES + 1)); }
+contains "a decrease prints the DECREASE line" "$OUT" "DECREASE"
+rm -f "deployments/.safe/BETH.$CHAIN_ID.scheduleUpdateDelay.json"
 
 echo "== usage =="
 set +e
