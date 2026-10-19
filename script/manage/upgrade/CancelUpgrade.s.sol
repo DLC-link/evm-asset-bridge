@@ -32,7 +32,7 @@ contract CancelUpgrade is UpgradeManage {
         if (!exists) {
             revert NotScheduled(nextRecordPath());
         }
-        _requireLive(s, false);
+        _requireLive(s.operationId, false);
         _send(encode(s.operationId));
         console2.log("cancelled operation");
         console2.logBytes32(s.operationId);

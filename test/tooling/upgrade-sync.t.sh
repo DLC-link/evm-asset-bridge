@@ -67,6 +67,35 @@ MK_RC=$?
 set -e
 check    "direct schedule needs SIGNER"    "$([ "$MK_RC" -ne 0 ] && echo refused || echo ran)" "refused"
 
+echo "== the timelock delay targets send DELAY and run no sync =="
+MK_OUT=$(make -n timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$MK_URL" SIGNER='--account d' DELAY=120 2>&1)
+contains "delay schedule names the script"  "$MK_OUT" "ScheduleUpdateDelay.s.sol:ScheduleUpdateDelay"
+contains "delay schedule passes DELAY"      "$MK_OUT" "--sig 'run(uint256)' \"120\""
+contains "delay schedule broadcasts in direct mode" "$MK_OUT" "--broadcast --account d"
+check    "delay schedule runs no sync"      "$(count "$MK_OUT" "upgrade-sync.sh")" "0"
+contains "delay schedule prints its mode"   "$MK_OUT" "direct broadcast"
+
+MK_OUT=$(make -n timelock-delay-execute DEPLOYMENT=BETH RPC_URL="$MK_URL" SIGNER='--account d' DELAY=120 2>&1)
+contains "delay execute names the script"   "$MK_OUT" "ExecuteUpdateDelay.s.sol:ExecuteUpdateDelay"
+MK_OUT=$(make -n timelock-delay-cancel DEPLOYMENT=BETH RPC_URL="$MK_URL" SIGNER='--account d' DELAY=120 2>&1)
+contains "delay cancel names the script"    "$MK_OUT" "CancelUpdateDelay.s.sol:CancelUpdateDelay"
+
+MK_OUT=$(SAFE=0x0000000000000000000000000000000000000001 make -n timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$MK_URL" DELAY=120 2>&1)
+check    "delay Safe mode never broadcasts" "$(count "$MK_OUT" "\-\-broadcast")" "0"
+
+set +e
+MK_OUT=$(make -n timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$MK_URL" SIGNER='--account d' 2>&1)
+MK_RC=$?
+set -e
+check    "delay schedule needs DELAY"       "$([ "$MK_RC" -ne 0 ] && echo refused || echo ran)" "refused"
+contains "delay schedule names the variable" "$MK_OUT" "DELAY is not set"
+
+set +e
+MK_OUT=$(make -n timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$MK_URL" DELAY=120 2>&1)
+MK_RC=$?
+set -e
+check    "direct delay schedule needs SIGNER" "$([ "$MK_RC" -ne 0 ] && echo refused || echo ran)" "refused"
+
 
 BAK=$(mktemp -d)
 cleanup() {
@@ -290,6 +319,24 @@ check    "hand block id"             "$(lower "$(jq -r .schedule.operationId "$N
 check    "hand block readyAt"        "$(jq -r '.schedule | has("readyAt")' "$N")" "true"
 check    "hand block proposer null"  "$(jq -r .schedule.proposer "$N")" "null"
 contains "reports the hand schedule" "$OUT" "scheduled by hand"
+
+echo "== the timelock delay change =="
+T_BEFORE=$(shasum "$T")
+make timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $OWNER_KEY" DELAY=120 >/dev/null 2>&1 || FAILURES=$((FAILURES + 1))
+cast rpc evm_increaseTime 61 --rpc-url "$RPC" >/dev/null
+cast rpc evm_mine --rpc-url "$RPC" >/dev/null
+make timelock-delay-execute DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $OWNER_KEY" DELAY=120 >/dev/null 2>&1 || FAILURES=$((FAILURES + 1))
+check    "the live delay is the new one"   "$(cast call "$TIMELOCK_ADDR" 'getMinDelay()(uint256)' --rpc-url "$RPC")" "120"
+check    "the timelock record keeps the deploy-time delay" "$(shasum "$T")" "$T_BEFORE"
+OUT=$(make manage-status DEPLOYMENT=BETH RPC_URL="$RPC" 2>&1) || { echo "$OUT"; FAILURES=$((FAILURES + 1)); }
+contains "status prints timelockMinDelay"  "$OUT" "timelockMinDelay"
+check    "status prints the new delay"     "$(printf '%s\n' "$OUT" | grep -E '^ *timelockMinDelay +120$' | tr -s ' ' | sed 's/^ //')" "timelockMinDelay 120"
+set +e
+OUT=$(make timelock-delay-schedule DEPLOYMENT=BETH RPC_URL="$RPC" SIGNER="--private-key $OWNER_KEY" DELAY=1d 2>&1)
+RC=$?
+set -e
+check    "a malformed DELAY refuses"       "$([ "$RC" -ne 0 ] && echo refused || echo ran)" "refused"
+check    "no envelope for the refused DELAY" "$([ -f "deployments/.safe/BETH.$CHAIN_ID.scheduleUpdateDelay.json" ] && echo present || echo absent)" "absent"
 
 echo "== usage =="
 set +e

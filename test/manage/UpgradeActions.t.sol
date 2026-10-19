@@ -3,6 +3,7 @@ pragma solidity 0.8.34;
 
 import {Test} from "forge-std/Test.sol";
 import {UpgradeManage} from "../../script/manage/upgrade/UpgradeManage.s.sol";
+import {TimelockManage} from "../../script/manage/upgrade/TimelockManage.s.sol";
 import {ScheduleUpgrade} from "../../script/manage/upgrade/ScheduleUpgrade.s.sol";
 import {ExecuteUpgrade} from "../../script/manage/upgrade/ExecuteUpgrade.s.sol";
 import {CancelUpgrade} from "../../script/manage/upgrade/CancelUpgrade.s.sol";
@@ -234,14 +235,14 @@ contract UpgradeActionsTest is UpgradeFixture {
         bytes32 id = s.operationId(nextImpl, "");
 
         // The chain knows the operation.
-        vm.expectRevert(abi.encodeWithSelector(ScheduleUpgrade.AlreadyScheduled.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(TimelockManage.AlreadyScheduled.selector, id));
         s.run();
 
         // The chain forgot it, but the record confirmed it once.
         vm.prank(safe);
         timelock.cancel(id);
         vm.writeJson(vm.toString(block.timestamp + DELAY), _path(name, "nextImplementation"), ".schedule.readyAt");
-        vm.expectRevert(abi.encodeWithSelector(ScheduleUpgrade.AlreadyScheduled.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(TimelockManage.AlreadyScheduled.selector, id));
         s.run();
 
         // An unconfirmed block gives way to a new schedule.
@@ -330,7 +331,7 @@ contract UpgradeActionsTest is UpgradeFixture {
         e.configure(name, safe);
 
         vm.warp(readyAt - 100);
-        vm.expectRevert(abi.encodeWithSelector(UpgradeManage.OperationNotReady.selector, id, readyAt, 100));
+        vm.expectRevert(abi.encodeWithSelector(TimelockManage.OperationNotReady.selector, id, readyAt, 100));
         e.run();
 
         assertEq(_implementationOf(proxy), oldImpl);
@@ -358,7 +359,7 @@ contract UpgradeActionsTest is UpgradeFixture {
         assertEq(vm.parseJsonAddress(envelope, ".to"), address(timelock));
 
         // A second execute finds the operation done.
-        vm.expectRevert(abi.encodeWithSelector(UpgradeManage.OperationDone.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(TimelockManage.OperationDone.selector, id));
         e.run();
         _removeRecords(name);
     }
@@ -400,7 +401,7 @@ contract UpgradeActionsTest is UpgradeFixture {
         assertEq(vm.parseJsonAddress(envelope, ".to"), address(timelock));
 
         // A second cancel finds nothing on chain.
-        vm.expectRevert(abi.encodeWithSelector(UpgradeManage.OperationNotOnChain.selector, id));
+        vm.expectRevert(abi.encodeWithSelector(TimelockManage.OperationNotOnChain.selector, id));
         c.run();
         _removeRecords(name);
     }
