@@ -112,15 +112,6 @@ The team accepts that tradeoff. It is the standard one for a timelock with a sin
 A change of the delay itself must pass through the same scheduled process.
 A deploy from this repo builds this design.
 
-## Where the live addresses are
-
-The `deployments/` folder holds one record per contract per network.
-The records hold the contract addresses and the deploy-time configuration.
-The records never track business configuration after the deploy.
-When a record and the chain disagree, the chain is correct.
-The status commands show the live default admin and the live attestors.
-Use `make manage-status` for the bridge and `make upgrade-status` for the upgrade state.
-
 ## Why the default admin sets the threshold
 
 The threshold and the attestor set together define how many operators must agree on a withdrawal.

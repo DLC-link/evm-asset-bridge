@@ -23,8 +23,9 @@
 #
 # The records track the deployment itself. The records never track business
 # configuration after the deploy. The values in `deployTimeConfig` stay at their
-# deploy-time values. Nobody edits a record by hand after the deploy. The
-# commands `make manage-status` and `make upgrade-status` show the live state.
+# deploy-time values. Nobody edits a record by hand after the deploy.
+# `make manage-status` prints the live bridge state. `make upgrade-status` syncs
+# the upgrade records with the chain and then prints the upgrade state.
 # When a record and the chain disagree, the chain is correct.
 #
 # Usage: ./script/record.sh <deploymentName> [chainId]

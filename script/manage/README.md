@@ -546,7 +546,7 @@ describes them for a non-technical reader.
 
 No Safe owns the `ProxyAdmin` directly. The timelock owns it, and an upgrade
 waits `TIMELOCK_DELAY` seconds between its proposal and its execution. The
-Sepolia instances use one Safe for every authority.
+Sepolia env files name one Safe for every authority.
 
 The tooling does not depend on the shape. `SAFE` names the Safe on every
 invocation. An operator points each action at the Safe that holds its role.

@@ -130,6 +130,11 @@ check "deployTimeConfig.targetDecimals" "$(jq -r .deployTimeConfig.targetDecimal
 check "deployTimeConfig.assetDecimals"  "$(jq -r .deployTimeConfig.assetDecimals "$P")" "18"
 check "deployTimeConfig.depositUnit"    "$(jq -r .deployTimeConfig.depositUnit "$P")" "100000000"
 check "deployTimeConfig.attestors" "$(jq -r '.deployTimeConfig.attestors | length' "$P")" "3"
+check "proxy deployTimeConfig keys" "$(jq -c '.deployTimeConfig | keys_unsorted' "$P")" \
+  '["asset","assetDecimals","targetDecimals","depositUnit","defaultAdmin","adminDelay","bridgeAdmin","proxyOwner","timelock","timelockDelay","attestors","threshold","depositLimits","withdrawLimits"]'
+check "timelock deployTimeConfig keys" "$(jq -c '.deployTimeConfig | keys_unsorted' "$T")" \
+  '["minDelay","proposers","executors","admin"]'
+check "proxyAdmin deployTimeConfig keys" "$(jq -c '.deployTimeConfig | keys_unsorted' "$A")" '["owner"]'
 check "no bridgeConfig on proxy" "$(jq -r 'has("bridgeConfig")' "$P")" "false"
 check "no top-level minDelay" "$(jq -r 'has("minDelay")' "$T")" "false"
 check "no top-level owner" "$(jq -r 'has("owner")' "$A")" "false"
