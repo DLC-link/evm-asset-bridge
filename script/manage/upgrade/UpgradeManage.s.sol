@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.34;
 
-import {ManageBase} from "../ManageBase.s.sol";
+import {TimelockManage} from "./TimelockManage.s.sol";
 import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 import {ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
@@ -9,12 +9,13 @@ import {TimelockController} from "@openzeppelin/contracts/governance/TimelockCon
 /// @title UpgradeManage
 /// @notice The shared half of the three upgrade scripts. Each one calls the
 ///         timelock that owns the ProxyAdmin, never the ProxyAdmin itself.
+///         The timelock handling lives in TimelockManage.
 /// @dev Schedule, execute and cancel must name one operation. Every argument
 ///      of that operation therefore comes from this one place. The scripts
 ///      hold no knowledge of the contract behind the proxy. They read the
 ///      roles `proxy`, `proxyAdmin`, `timelock` and `nextImplementation`
 ///      from the deployment records, and nothing else.
-abstract contract UpgradeManage is ManageBase {
+abstract contract UpgradeManage is TimelockManage {
     /// The part of the `schedule` block that execute and cancel need. The
     /// block lives in the nextImplementation record. ScheduleUpgrade writes
     /// it, and `script/upgrade-sync.sh` adds `readyAt` once the chain knows
@@ -30,26 +31,9 @@ abstract contract UpgradeManage is ManageBase {
     }
 
     error NotScheduled(string recordPath);
-    error OperationNotOnChain(bytes32 operationId);
-    error OperationNotReady(bytes32 operationId, uint256 readyAt, uint256 secondsLeft);
-    error OperationDone(bytes32 operationId);
     error ScheduleMismatch(bytes32 recordedId, bytes32 derivedId);
 
     string internal constant SCHEDULE_KEY = ".schedule";
-
-    /// The record defines the contract. The folder guard therefore skips
-    /// its name comparison.
-    function acceptsAnyContract() public pure override returns (bool) {
-        return true;
-    }
-
-    function contractName() public pure override returns (string memory) {
-        return "";
-    }
-
-    function timelock() public view returns (address) {
-        return recordAddress("timelock");
-    }
 
     function proxyAdmin() public view returns (address) {
         return recordAddress("proxyAdmin");
@@ -61,12 +45,6 @@ abstract contract UpgradeManage is ManageBase {
 
     function nextImplementation() public view returns (address) {
         return recordAddress("nextImplementation");
-    }
-
-    /// Every upgrade action calls the timelock. The timelock then calls the
-    /// ProxyAdmin, after the delay.
-    function target() internal view override returns (address) {
-        return timelock();
     }
 
     /// The optional payload for `upgradeAndCall`. The operator sets DATA in
@@ -96,11 +74,6 @@ abstract contract UpgradeManage is ManageBase {
     /// salt then keeps their operation ids apart.
     function salt(address next) public view returns (bytes32) {
         return keccak256(abi.encodePacked(deploymentName(), "-upgrade-", next));
-    }
-
-    /// An upgrade depends on no earlier operation.
-    function predecessor() public pure returns (bytes32) {
-        return bytes32(0);
     }
 
     /// The id that the timelock stores for this upgrade.
@@ -137,23 +110,5 @@ abstract contract UpgradeManage is ManageBase {
             revert ScheduleMismatch(s.operationId, derived);
         }
         return (s, true);
-    }
-
-    /// Reads the live state of the scheduled operation. It rejects `Unset`
-    /// and `Done` always, and `Waiting` when the caller needs `Ready`. The
-    /// errors tell the operator what to do next.
-    function _requireLive(Schedule memory s, bool needReady) internal view {
-        TimelockController tl = TimelockController(payable(timelock()));
-        TimelockController.OperationState state = tl.getOperationState(s.operationId);
-        if (state == TimelockController.OperationState.Unset) {
-            revert OperationNotOnChain(s.operationId);
-        }
-        if (state == TimelockController.OperationState.Done) {
-            revert OperationDone(s.operationId);
-        }
-        if (needReady && state == TimelockController.OperationState.Waiting) {
-            uint256 readyAt = tl.getTimestamp(s.operationId);
-            revert OperationNotReady(s.operationId, readyAt, readyAt - block.timestamp);
-        }
     }
 }

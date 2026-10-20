@@ -34,7 +34,7 @@ contract ExecuteUpgrade is UpgradeManage {
         if (!exists) {
             revert NotScheduled(nextRecordPath());
         }
-        _requireLive(s, true);
+        _requireLive(s.operationId, true);
         _send(encode(s));
         console2.log("executed operation");
         console2.logBytes32(s.operationId);

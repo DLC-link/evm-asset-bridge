@@ -4,6 +4,7 @@ pragma solidity 0.8.34;
 import {BridgeManage} from "./BridgeManage.s.sol";
 import {console2} from "forge-std/console2.sol";
 import {BitSafeEvmAssetBridge} from "../../../src/BitSafeEvmAssetBridge.sol";
+import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 
 /// @notice Prints the live configuration of the recorded bridge. The script
 ///         sends no transaction. It therefore needs no sender and no
@@ -16,10 +17,24 @@ contract Status is BridgeManage {
     }
 
     function run() external view {
-        report(target());
+        report(target(), timelockAddress());
     }
 
-    function report(address bridgeAddress) public view {
+    /// Returns the recorded timelock, or zero when the deployment has no
+    /// timelock record. Older deployments have no timelock. Status must still
+    /// work for them. It reads only the address, never the deploy-time config.
+    function timelockAddress() public view returns (address) {
+        string memory path =
+            string.concat("deployments/", deploymentName(), ".timelock.", vm.toString(block.chainid), ".json");
+        if (!vm.exists(path)) {
+            return address(0);
+        }
+        return recordAddress("timelock");
+    }
+
+    /// The timelock delay comes from the chain. A record can differ from the
+    /// live value after an `updateDelay` operation.
+    function report(address bridgeAddress, address timelockAddress_) public view {
         BitSafeEvmAssetBridge b = BitSafeEvmAssetBridge(payable(bridgeAddress));
         console2.log("bridge           ", bridgeAddress);
         console2.log("paused           ", b.paused());
@@ -33,6 +48,9 @@ contract Status is BridgeManage {
         console2.log("withdrawalHorizon", b.withdrawalHorizon());
         console2.log("defaultAdmin     ", b.defaultAdmin());
         console2.log("defaultAdminDelay", b.defaultAdminDelay());
+        if (timelockAddress_ != address(0)) {
+            console2.log("timelockMinDelay ", TimelockController(payable(timelockAddress_)).getMinDelay());
+        }
 
         BitSafeEvmAssetBridge.Limits memory d = b.depositLimits();
         console2.log("depositMin       ", d.minAmount);

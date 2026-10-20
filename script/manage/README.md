@@ -190,10 +190,13 @@ accepts. In Safe mode that sender is the Safe itself.
 | `ScheduleUpgrade` | timelock proposer (`PROXY_OWNER`) | `make upgrade-schedule` (section 12) |
 | `ExecuteUpgrade` | timelock executor (`PROXY_OWNER`) | `make upgrade-execute` (section 12) |
 | `CancelUpgrade` | timelock canceller (`PROXY_OWNER`) | `make upgrade-cancel` (section 12) |
+| `ScheduleUpdateDelay` | timelock proposer (`PROXY_OWNER`) | `make timelock-delay-schedule DELAY=86400` (section 12.9) |
+| `ExecuteUpdateDelay` | timelock executor (`PROXY_OWNER`) | `make timelock-delay-execute DELAY=86400` (section 12.9) |
+| `CancelUpdateDelay` | timelock canceller (`PROXY_OWNER`) | `make timelock-delay-cancel DELAY=86400` (section 12.9) |
 
 Copy one line. Change the `ARGS` value. Send the command.
 
-Read these five notes with the table:
+Read these notes with the table:
 
 - `Status` sends nothing. It therefore needs no `SIGNER` and no `SAFE`.
   `make manage-status RPC_URL=https://...` is the shorter form of the same
@@ -208,9 +211,12 @@ Read these five notes with the table:
   bridged-asset balance above `totalLocked`.
 - `RescueETH` reverts when the bridged asset is ETH. Use `RescueSurplus` on an
   ETH bridge.
+- `ChangeDefaultAdminDelay` refuses a delay above 7 days. The timelock delay
+  scripts use the same maximum.
 - The three upgrade scripts live in `script/manage/upgrade/`, not in the
-  bridge folder. They have their own `make` targets. Section 12 holds the
-  whole sequence.
+  bridge folder. The three delay scripts also live there. All six have their
+  own `make` targets. Section 12 holds the upgrade sequence. Section 12.9
+  holds the delay change.
 
 This example raises the signature threshold to 3:
 
@@ -338,7 +344,10 @@ The two delay scripts are `ChangeDefaultAdminDelay` and
 `RollbackDefaultAdminDelay`. The current admin sends both. A new delay takes
 effect only after its own wait period passes. An increase waits up to
 `defaultAdminDelayIncreaseWait()`. A decrease waits the difference between the
-old delay and the new delay.
+old delay and the new delay. `ChangeDefaultAdminDelay` refuses a delay above
+7 days (`DelayTooLong`). The timelock delay scripts use the same maximum
+(section 12.9). The script prints a `DECREASE` line when the new delay is
+shorter.
 
 ## 7. The complete Safe flow
 
@@ -443,14 +452,16 @@ queue after every warning of this kind.
 ### Safe mode cannot pre-stage a time-gated action
 
 Safe mode simulates the call from the Safe address first. The simulation must
-succeed at the current block. Two actions fail that simulation before their
+succeed at the current block. These actions fail that simulation before their
 time arrives:
 
 - `AcceptDefaultAdminTransfer` reverts until the schedule of the transfer
   passes.
 - `Unpause` reverts while the bridge runs.
+- `ExecuteUpgrade` reverts until the delay of the timelock passes.
+- `ExecuteUpdateDelay` reverts until the delay of the timelock passes.
 
-An operator cannot build these two envelopes in advance. The operator waits for
+An operator cannot build these four envelopes in advance. The operator waits for
 the condition. The operator then writes the envelope. The operator proposes it
 in the same session. Plan the owner confirmations for that later moment.
 
@@ -525,9 +536,10 @@ secret.
 answers the chain. CI runs the suite on every push.
 
 The upgrade scripts have tests in `test/manage/UpgradeActions.t.sol` and
-`test/manage/DeployNextImplementation.t.sol`. The whole upgrade sequence
-runs against a local anvil in `test/tooling/upgrade-sync.t.sh`. CI runs
-all three.
+`test/manage/DeployNextImplementation.t.sol`. The delay scripts have tests in
+`test/manage/TimelockDelayActions.t.sol`. The whole upgrade sequence and a
+delay change run against a local anvil in `test/tooling/upgrade-sync.t.sh`.
+CI runs all four.
 
 The script maps each chain to a Safe short name. On a new chain, open the
 queue link that the script prints, and check that it names the correct Safe.
@@ -565,9 +577,10 @@ names a timelock as owner. They read the roles `proxy`, `proxyAdmin`,
 knowledge.
 
 Every target needs `DEPLOYMENT` and `RPC_URL`. Load the environment file
-first, as section 2 describes. Each target runs the sync before it acts,
-and again after a direct broadcast. The records therefore match the chain
-when the command returns.
+first, as section 2 describes. Each upgrade target runs the sync before it
+acts, and again after a direct broadcast. The records therefore match the
+chain when the command returns. The delay targets of section 12.9 run no
+sync.
 
 ### 12.1 Deploy the next implementation
 
@@ -730,6 +743,61 @@ a `data` field, and a proxy record whose `implementation` differs from the
 implementation record. It never overwrites an existing
 `previousImplementation_<n>` file. Run one sync at a time per deployment.
 The test `test/tooling/upgrade-sync.t.sh` covers each refusal.
+
+### 12.9 Change the timelock delay
+
+The timelock accepts the call `updateDelay` only from itself. A change of the
+delay therefore needs a schedule, a wait, and an execute. The scripts need
+`DEPLOYMENT`, `RPC_URL` and `DELAY`. `DELAY` is the new delay in seconds. The
+steps below use `86400` as an example value.
+
+1. Schedule the change, and propose the envelope. The schedule prints the
+   operation id. Keep it until the change runs or you cancel it.
+
+   ```bash
+   SAFE=0xProxyOwnerSafe make timelock-delay-schedule DELAY=86400
+   make propose ENVELOPE=deployments/.safe/<name>.<chainId>.scheduleUpdateDelay.json SIGNER="--account proposer"
+   ```
+
+2. The Safe owners execute the schedule. Wait for the current delay from
+   that moment. Safe mode cannot write the execute envelope before the delay
+   passes (section 7). If the execute stops with `OperationNotReady`, wait
+   the seconds that it shows.
+3. Execute the change, and propose the envelope.
+
+   ```bash
+   SAFE=0xProxyOwnerSafe make timelock-delay-execute DELAY=86400
+   make propose ENVELOPE=deployments/.safe/<name>.<chainId>.executeUpdateDelay.json SIGNER="--account proposer"
+   ```
+
+4. The Safe owners execute. `make manage-status` now shows the new
+   `timelockMinDelay`.
+
+In direct mode, pass `SIGNER="--account proxyOwner"` and leave `SAFE` empty.
+
+To cancel a pending change, use the same form as in section 12.7:
+
+```bash
+SAFE=0xProxyOwnerSafe make timelock-delay-cancel DELAY=86400
+make propose ENVELOPE=deployments/.safe/<name>.<chainId>.cancelUpdateDelay.json SIGNER="--account proposer"
+```
+
+These rules apply:
+
+- Use the same `DELAY` on every command. The scripts keep no record, so they
+  find the operation from the deployment name, the live delay and `DELAY`.
+- The scripts do not stop a second schedule. Keep one delay change pending at
+  a time. Cancel an unwanted change while it waits, with
+  `make timelock-delay-cancel DELAY=<its value>`. After one change runs, the
+  scripts cannot find the other one, and they stop with `OperationNotOnChain`.
+  Cancel that change by its id in the Safe web app.
+- A change from one value to another runs once for each timelock. A repeat
+  stops with `OperationDone`. In that case, choose a value that differs by
+  one second, for example `86401`.
+- The script refuses a delay above 7 days (`DelayTooLong`).
+- An upgrade that you scheduled before the change keeps its own ready time.
+- The records keep the delay from the time of the deploy. Read the live delay
+  with `make manage-status`.
 
 ## 13. Void a withdraw request
 
