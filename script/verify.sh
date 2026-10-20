@@ -39,7 +39,7 @@ done
 
 # The record schema this script reads. script/record.sh stamps the same number
 # on every record it writes. A record with any other version stops its role.
-READS_SCHEMA_VERSION=1
+READS_SCHEMA_VERSION=2
 
 # A curl config file holds one directive per line, so a newline inside a value
 # would start a new directive. cfg_escape cannot escape that, and the values

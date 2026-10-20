@@ -552,12 +552,13 @@ describes them for a non-technical reader.
 1. **The multi-organisation Safe.** BitSafe and the operator partners control
    it together. It holds `DEFAULT_ADMIN`, and it is the proposer, canceller,
    and executor of the timelock that owns the `ProxyAdmin`. `DEFAULT_ADMIN`
-   and `PROXY_OWNER` therefore name the same address on mainnet.
+   and `PROXY_OWNER` therefore name the same address in the mainnet deploy
+   inputs.
 2. **The BitSafe Safe.** BitSafe alone controls it. It holds `BRIDGE_ADMIN`.
 
 No Safe owns the `ProxyAdmin` directly. The timelock owns it, and an upgrade
 waits `TIMELOCK_DELAY` seconds between its proposal and its execution. The
-Sepolia instances use one Safe for every authority.
+Sepolia env files name one Safe for every authority.
 
 The tooling does not depend on the shape. `SAFE` names the Safe on every
 invocation. An operator points each action at the Safe that holds its role.

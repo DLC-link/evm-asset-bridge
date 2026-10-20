@@ -272,6 +272,7 @@ sync_refuses "a done operation while the proxy points elsewhere" "is done, but t
 set_impl_slot "$NEXT_IMPL"
 
 echo "== the sync promotes =="
+DTC_BEFORE=$(jq -c .deployTimeConfig "$P")
 OUT=$(make upgrade-sync DEPLOYMENT=BETH RPC_URL="$RPC" 2>&1) || { echo "$OUT"; FAILURES=$((FAILURES + 1)); }
 contains "sync promoted"             "$OUT" "promoted $NEXT_IMPL"
 check    "next record gone"          "$([ -f "$N" ] && echo present || echo gone)" "gone"
@@ -291,6 +292,8 @@ check    "history length"            "$(jq -r '.history | length' "$P")" "1"
 check    "history[0].implementation" "$(cast to-check-sum-address "$(jq -r '.history[0].implementation' "$P")")" "$OLD_IMPL"
 check    "history[0].record"         "$(jq -r '.history[0].record' "$P")" "BETH.previousImplementation_1.$CHAIN_ID.json"
 check    "history[0].solcInputHash"  "$(jq -r '.history[0].solcInputHash' "$P")" "$(jq -r .solcInputHash "$PREV1")"
+check    "promoted proxy keeps deployTimeConfig" "$(jq -c .deployTimeConfig "$P")" "$DTC_BEFORE"
+check    "promoted impl schemaVersion" "$(jq -r .schemaVersion "$I")" "2"
 check    "no temporaries"            "$(no_temporaries)" "none"
 
 echo "== cancel =="

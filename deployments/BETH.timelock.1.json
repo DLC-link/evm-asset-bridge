@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deploymentName": "BETH",
   "role": "timelock",
   "chainId": 1,
@@ -1114,12 +1114,14 @@
   },
   "gitCommit": "d5264f6",
   "deployedAt": "2026-09-22T12:00:49Z",
-  "minDelay": 600,
-  "proposers": [
-    "0xb28270e6D63222D14453e1a76322C8313d5A1D63"
-  ],
-  "executors": [
-    "0xb28270e6D63222D14453e1a76322C8313d5A1D63"
-  ],
-  "admin": "0x0000000000000000000000000000000000000000"
+  "deployTimeConfig": {
+    "minDelay": 600,
+    "proposers": [
+      "0xb28270e6D63222D14453e1a76322C8313d5A1D63"
+    ],
+    "executors": [
+      "0xb28270e6D63222D14453e1a76322C8313d5A1D63"
+    ],
+    "admin": "0x0000000000000000000000000000000000000000"
+  }
 }

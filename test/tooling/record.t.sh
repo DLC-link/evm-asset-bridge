@@ -69,10 +69,10 @@ check "deploymentName"      "$(jq -r .deploymentName "$P")" "BETH"
 check "chainId"             "$(jq -r .chainId "$P")"       "$CHAIN_ID"
 
 # A consumer outside this repo reads the schema version to detect a migration.
-check "proxy schemaVersion" "$(jq -r .schemaVersion "$P")" "1"
-check "impl schemaVersion"  "$(jq -r .schemaVersion "$I")" "1"
-check "admin schemaVersion" "$(jq -r .schemaVersion "$A")" "1"
-check "timelock schemaVersion" "$(jq -r .schemaVersion "$T")" "1"
+check "proxy schemaVersion" "$(jq -r .schemaVersion "$P")" "2"
+check "impl schemaVersion"  "$(jq -r .schemaVersion "$I")" "2"
+check "admin schemaVersion" "$(jq -r .schemaVersion "$A")" "2"
+check "timelock schemaVersion" "$(jq -r .schemaVersion "$T")" "2"
 
 # The proxy's third constructor argument is the initialize calldata.
 check "impl has no ctor args" "$(jq -r .encodedConstructorArgs "$I")" "0x"
@@ -92,21 +92,20 @@ check "proxy arg0 == implementation" "$(cast to-check-sum-address "$DECODED_IMPL
 # argument and its owner field both name the timelock.
 DECODED_OWNER=$(cast abi-decode --input "c(address)" "$(jq -r .encodedConstructorArgs "$A")")
 check "proxyAdmin arg0 == timelock" "$(cast to-check-sum-address "$DECODED_OWNER")" "$(cast to-check-sum-address "$TIMELOCK_ADDR")"
-check "proxyAdmin owner field"      "$(cast to-check-sum-address "$(jq -r .owner "$A")")" "$(cast to-check-sum-address "$TIMELOCK_ADDR")"
+check "proxyAdmin deployTimeConfig.owner" "$(cast to-check-sum-address "$(jq -r .deployTimeConfig.owner "$A")")" "$(cast to-check-sum-address "$TIMELOCK_ADDR")"
 check "proxyAdmin createdBy"        "$(cast to-check-sum-address "$(jq -r .createdBy "$A")")" "$(cast to-check-sum-address "$PROXY_ADDR")"
 
-# The timelock record names its own configuration. An operator reads the
-# delay and the roles from the record without a chain call.
+# The record keeps the timelock's deploy-time configuration.
 check "timelock role"     "$(jq -r .role "$T")"     "timelock"
-check "timelock minDelay" "$(jq -r .minDelay "$T")" "$TIMELOCK_DELAY"
-check "timelock proposers" "$(jq -r '.proposers | length' "$T")" "1"
+check "timelock deployTimeConfig.minDelay" "$(jq -r .deployTimeConfig.minDelay "$T")" "$TIMELOCK_DELAY"
+check "timelock proposers" "$(jq -r '.deployTimeConfig.proposers | length' "$T")" "1"
 check "timelock proposer is PROXY_OWNER" \
-  "$(cast to-check-sum-address "$(jq -r '.proposers[0]' "$T")")" "$(cast to-check-sum-address "$PROXY_OWNER")"
-check "timelock executors" "$(jq -r '.executors | length' "$T")" "1"
+  "$(cast to-check-sum-address "$(jq -r '.deployTimeConfig.proposers[0]' "$T")")" "$(cast to-check-sum-address "$PROXY_OWNER")"
+check "timelock executors" "$(jq -r '.deployTimeConfig.executors | length' "$T")" "1"
 check "timelock executor is PROXY_OWNER" \
-  "$(cast to-check-sum-address "$(jq -r '.executors[0]' "$T")")" "$(cast to-check-sum-address "$PROXY_OWNER")"
+  "$(cast to-check-sum-address "$(jq -r '.deployTimeConfig.executors[0]' "$T")")" "$(cast to-check-sum-address "$PROXY_OWNER")"
 # The zero admin makes the timelock its own admin.
-check "timelock admin is zero" "$(jq -r .admin "$T")" "$ZERO"
+check "timelock admin is zero" "$(jq -r .deployTimeConfig.admin "$T")" "$ZERO"
 
 # The constructor arguments agree with the four fields above.
 TL_ARGS=$(cast abi-decode --input "c(uint256,address[],address[],address)" "$(jq -r .encodedConstructorArgs "$T")")
@@ -121,17 +120,25 @@ check "no bridgeConfig on timelock" "$(jq -r 'has("bridgeConfig")' "$T")" "false
 # The proxy record links the other two.
 check "proxy.implementation" "$(cast to-check-sum-address "$(jq -r .implementation "$P")")" "$(cast to-check-sum-address "$IMPL_ADDR")"
 check "proxy.proxyAdmin"     "$(cast to-check-sum-address "$(jq -r .proxyAdmin "$P")")"     "$(cast to-check-sum-address "$ADMIN_ADDR")"
-check "bridgeConfig.timelock" "$(cast to-check-sum-address "$(jq -r .bridgeConfig.timelock "$P")")" "$(cast to-check-sum-address "$TIMELOCK_ADDR")"
-check "bridgeConfig.timelockDelay" "$(jq -r .bridgeConfig.timelockDelay "$P")" "$TIMELOCK_DELAY"
-check "bridgeConfig.proxyOwner"    "$(cast to-check-sum-address "$(jq -r .bridgeConfig.proxyOwner "$P")")" "$(cast to-check-sum-address "$PROXY_OWNER")"
+check "deployTimeConfig.timelock" "$(cast to-check-sum-address "$(jq -r .deployTimeConfig.timelock "$P")")" "$(cast to-check-sum-address "$TIMELOCK_ADDR")"
+check "deployTimeConfig.timelockDelay" "$(jq -r .deployTimeConfig.timelockDelay "$P")" "$TIMELOCK_DELAY"
+check "deployTimeConfig.proxyOwner"    "$(cast to-check-sum-address "$(jq -r .deployTimeConfig.proxyOwner "$P")")" "$(cast to-check-sum-address "$PROXY_OWNER")"
 
-# The bridge configuration is nested on the proxy record only.
-check "bridgeConfig.threshold" "$(jq -r .bridgeConfig.threshold "$P")" "2"
-check "bridgeConfig.targetDecimals" "$(jq -r .bridgeConfig.targetDecimals "$P")" "10"
-check "bridgeConfig.assetDecimals"  "$(jq -r .bridgeConfig.assetDecimals "$P")" "18"
-check "bridgeConfig.depositUnit"    "$(jq -r .bridgeConfig.depositUnit "$P")" "100000000"
-check "bridgeConfig.attestors" "$(jq -r '.bridgeConfig.attestors | length' "$P")" "3"
-check "no bridgeConfig on impl" "$(jq -r 'has("bridgeConfig")' "$I")" "false"
+# The deploy-time configuration of the bridge is nested on the proxy record only.
+check "deployTimeConfig.threshold" "$(jq -r .deployTimeConfig.threshold "$P")" "2"
+check "deployTimeConfig.targetDecimals" "$(jq -r .deployTimeConfig.targetDecimals "$P")" "10"
+check "deployTimeConfig.assetDecimals"  "$(jq -r .deployTimeConfig.assetDecimals "$P")" "18"
+check "deployTimeConfig.depositUnit"    "$(jq -r .deployTimeConfig.depositUnit "$P")" "100000000"
+check "deployTimeConfig.attestors" "$(jq -r '.deployTimeConfig.attestors | length' "$P")" "3"
+check "proxy deployTimeConfig keys" "$(jq -c '.deployTimeConfig | keys_unsorted' "$P")" \
+  '["asset","assetDecimals","targetDecimals","depositUnit","defaultAdmin","adminDelay","bridgeAdmin","proxyOwner","timelock","timelockDelay","attestors","threshold","depositLimits","withdrawLimits"]'
+check "timelock deployTimeConfig keys" "$(jq -c '.deployTimeConfig | keys_unsorted' "$T")" \
+  '["minDelay","proposers","executors","admin"]'
+check "proxyAdmin deployTimeConfig keys" "$(jq -c '.deployTimeConfig | keys_unsorted' "$A")" '["owner"]'
+check "no bridgeConfig on proxy" "$(jq -r 'has("bridgeConfig")' "$P")" "false"
+check "no top-level minDelay" "$(jq -r 'has("minDelay")' "$T")" "false"
+check "no top-level owner" "$(jq -r 'has("owner")' "$A")" "false"
+check "no deployTimeConfig on impl" "$(jq -r 'has("deployTimeConfig")' "$I")" "false"
 
 # Receipt and provenance.
 check "receipt status"  "$(jq -r .receipt.status "$P")" "0x1"
@@ -212,6 +219,7 @@ check "history names the old solc input"    "$(jq -r '.history[0].solcInputHash'
 check "history names the old transaction"   "$(jq -r '.history[0].transactionHash' "$P")" "$IMPL_TX"
 check "history keeps the old commit"        "$(jq -r '.history[0].gitCommit | length > 0' "$P")" "true"
 check "history keeps the old timestamp"     "$(jq -r '.history[0].deployedAt | length > 0' "$P")" "true"
+check "second deploy keeps deployTimeConfig" "$(jq -r 'has("deployTimeConfig") and (has("bridgeConfig") | not)' "$P")" "true"
 
 echo "== a pending file that names no roles =="
 # A missing roles array reads as length zero. `seq 0 -1` prints nothing on Linux

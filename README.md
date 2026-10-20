@@ -52,10 +52,10 @@ The deploy reads its configuration from the environment:
 | --- | --- |
 | `ASSET` | Bridged asset address; `address(0)` for ETH, else the ERC20 address |
 | `TARGET_DECIMALS` | Decimal places the target chain expresses; `10` for Canton, 1 to 10 |
-| `DEFAULT_ADMIN` | Address granted the default admin role (governs role management and the signature threshold); on mainnet the multi-organisation Safe, which also drives the upgrade timelock |
+| `DEFAULT_ADMIN` | Address granted the default admin role (governs role management and the signature threshold); in the mainnet deploy inputs, the multi-organisation Safe, which also drives the upgrade timelock |
 | `ADMIN_DELAY` | Default-admin transfer delay, in seconds |
 | `BRIDGE_ADMIN` | Address granted `BRIDGE_ADMIN_ROLE` (pause, limits, rescue) |
-| `PROXY_OWNER` | Proposer, canceller, and executor of the timelock that owns the `ProxyAdmin`; on mainnet the multi-organisation Safe, same as `DEFAULT_ADMIN` |
+| `PROXY_OWNER` | Proposer, canceller, and executor of the timelock that owns the `ProxyAdmin`; in the mainnet deploy inputs, the multi-organisation Safe, same as `DEFAULT_ADMIN` |
 | `TIMELOCK_DELAY` | Upgrade timelock delay, in seconds; an upgrade waits this long after its proposal |
 | `ATTESTORS` | Comma-separated attestor addresses granted `ATTESTOR_ROLE` |
 | `THRESHOLD` | Number of attestor signatures required per withdrawal |
@@ -158,17 +158,24 @@ keeps the contract name still updates the same file.
 
 Every record holds the address, the ABI-encoded constructor arguments, the
 transaction receipt, the contract ABI, the compiler settings, and the git
-commit. The proxy record holds five more fields: `implementation`,
-`proxyAdmin`, `bridgeConfig`, `numDeployments`, and `history`. The ProxyAdmin
-record holds `owner`, which names the timelock, and `createdBy`, which names
-the proxy. The timelock record holds `minDelay`, `proposers`, `executors`, and
-`admin`. The admin is the zero address, so the timelock administers itself.
+commit. The proxy record holds five more fields: `implementation`, `proxyAdmin`,
+`deployTimeConfig`, `numDeployments`, and `history`.
 
-Every record also opens with `schemaVersion`, which is `1` today. A consumer
+The ProxyAdmin record holds `createdBy`, which names the proxy. It also holds
+`deployTimeConfig`, which has `owner`. At deploy time `owner` names the
+timelock.
+A deployment without a timelock record, such as BETH_DEVNET, sets `owner` to the
+proxy owner.
+
+The timelock record holds `deployTimeConfig`, which has `minDelay`,
+`proposers`, `executors`, and `admin`. At deploy time the admin is the zero
+address, so the timelock administers itself.
+
+Every record also opens with `schemaVersion`, which is `2` today. A consumer
 outside this repo reads it to detect a migration.
 
-`bridgeConfig` holds the whole `initialize` configuration, not just the
-decimals fields:
+In the proxy record, `deployTimeConfig` holds the whole `initialize`
+configuration, not just the decimals fields:
 
 ```
 asset, assetDecimals, targetDecimals, depositUnit, defaultAdmin, adminDelay,
@@ -176,13 +183,33 @@ bridgeAdmin, proxyOwner, timelock, timelockDelay, attestors, threshold,
 depositLimits, withdrawLimits
 ```
 
-The record holds the deploy-time configuration only. The post-deploy setters
-change live state that no record shows: `setWithdrawRateLimit`,
-`setWithdrawalHorizon`, and the `SENTRY_ROLE` grants. Read that state from
-the contract itself.
+The deployment records track the deployment itself. That is the address and
+the deploy facts of each contract that the tooling deploys, and the progress
+of an upgrade through the timelock. The records never track business
+configuration after the deploy. The roles, the attestors, the threshold, the
+limits and the delays stay at their deploy-time values in
+`deployTimeConfig`. The chain holds the live values.
+When a record and the chain disagree, the chain is correct.
 
-An operator reads the live granularity rule from `targetDecimals` and
-`depositUnit`, both inside `bridgeConfig`.
+The record holds `targetDecimals` and `depositUnit` as deploy-time values.
+`make manage-status` prints the live ones.
+
+`make manage-status` prints the default admin, the attestors, the threshold,
+the limits, and the delays. No status command prints the holders of
+`BRIDGE_ADMIN_ROLE` or `SENTRY_ROLE`. No status command prints the ProxyAdmin
+owner or the timelock proposers and executors. Check them with `cast call`:
+
+```bash
+cast call <timelock> "hasRole(bytes32,address)(bool)" $(cast keccak PROPOSER_ROLE) <account> --rpc-url $RPC_URL
+cast call <proxyAdmin> "owner()(address)" --rpc-url $RPC_URL
+```
+
+Call `hasRole` on the bridge in the same way for `BRIDGE_ADMIN_ROLE` and
+`SENTRY_ROLE`. `hasRole` checks one account that you name. To list every holder
+of a role, read the `RoleGranted` and `RoleRevoked` events of the contract.
+
+`make upgrade-status` syncs the upgrade records with the chain. It then prints
+the upgrade state.
 
 Each record holds the ABI of the contract at its own address. A consumer
 therefore reads the address from `BETH.proxy.<chainId>.json`. It reads the
