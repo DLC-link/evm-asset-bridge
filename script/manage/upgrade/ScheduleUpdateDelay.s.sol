@@ -8,7 +8,7 @@ import {console2} from "forge-std/console2.sol";
 /// @notice Schedules a change of the timelock's minimum delay. The timelock
 ///         accepts the call from a proposer. The proxy owner Safe holds that
 ///         role.
-/// @dev The script checks the floor, the ceiling, the change and the operation state
+/// @dev The script checks the maximum, the change and the operation state
 ///      before the send. Change one delay at a time; see UpdateDelayManage.
 ///      The script writes no record. Execute and cancel derive the operation
 ///      again from the same new delay.
@@ -32,9 +32,6 @@ contract ScheduleUpdateDelay is UpdateDelayManage {
     }
 
     function run(uint256 newDelay) external {
-        if (newDelay < MIN_DELAY) {
-            revert DelayTooShort(newDelay, MIN_DELAY);
-        }
         if (newDelay > MAX_DELAY) {
             revert DelayTooLong(newDelay, MAX_DELAY);
         }

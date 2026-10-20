@@ -2,6 +2,7 @@
 pragma solidity 0.8.34;
 
 import {Test} from "forge-std/Test.sol";
+import {ManageBase} from "../../script/manage/ManageBase.s.sol";
 import {TimelockManage} from "../../script/manage/upgrade/TimelockManage.s.sol";
 import {UpdateDelayManage} from "../../script/manage/upgrade/UpdateDelayManage.s.sol";
 import {ScheduleUpdateDelay} from "../../script/manage/upgrade/ScheduleUpdateDelay.s.sol";
@@ -156,23 +157,13 @@ contract TimelockDelayActionsTest is Test {
         _clean(name);
     }
 
-    function test_schedule_rejectsADelayBelowTheFloor() public {
-        string memory name = "DLYFLOOR";
-        _writeRecord(name);
-        DummyScheduleDelay s = _schedule(name);
-        vm.expectRevert(abi.encodeWithSelector(UpdateDelayManage.DelayTooShort.selector, 59, 60));
-        s.run(59);
-        assertFalse(vm.exists(_envelope(name, "scheduleUpdateDelay")));
-        _clean(name);
-    }
-
     /// The schedule refuses a delay above the maximum. An extra zero in DELAY
     /// would otherwise set a very long delay.
     function test_schedule_rejectsADelayAboveTheMaximum() public {
         string memory name = "DLYCEIL";
         _writeRecord(name);
         DummyScheduleDelay s = _schedule(name);
-        vm.expectRevert(abi.encodeWithSelector(UpdateDelayManage.DelayTooLong.selector, 7 days + 1, 7 days));
+        vm.expectRevert(abi.encodeWithSelector(ManageBase.DelayTooLong.selector, 7 days + 1, 7 days));
         s.run(7 days + 1);
         assertFalse(vm.exists(_envelope(name, "scheduleUpdateDelay")));
 

@@ -196,7 +196,7 @@ accepts. In Safe mode that sender is the Safe itself.
 
 Copy one line. Change the `ARGS` value. Send the command.
 
-Read these five notes with the table:
+Read these notes with the table:
 
 - `Status` sends nothing. It therefore needs no `SIGNER` and no `SAFE`.
   `make manage-status RPC_URL=https://...` is the shorter form of the same
@@ -211,6 +211,8 @@ Read these five notes with the table:
   bridged-asset balance above `totalLocked`.
 - `RescueETH` reverts when the bridged asset is ETH. Use `RescueSurplus` on an
   ETH bridge.
+- `ChangeDefaultAdminDelay` refuses a delay above 7 days. The timelock delay
+  scripts use the same maximum.
 - The three upgrade scripts live in `script/manage/upgrade/`, not in the
   bridge folder. The three delay scripts also live there. All six have their
   own `make` targets. Section 12 holds the upgrade sequence. Section 12.9
@@ -342,7 +344,10 @@ The two delay scripts are `ChangeDefaultAdminDelay` and
 `RollbackDefaultAdminDelay`. The current admin sends both. A new delay takes
 effect only after its own wait period passes. An increase waits up to
 `defaultAdminDelayIncreaseWait()`. A decrease waits the difference between the
-old delay and the new delay.
+old delay and the new delay. `ChangeDefaultAdminDelay` refuses a delay above
+7 days (`DelayTooLong`). The timelock delay scripts use the same maximum
+(section 12.9). The script prints a `DECREASE` line when the new delay is
+shorter.
 
 ## 7. The complete Safe flow
 
@@ -789,7 +794,6 @@ These rules apply:
 - A change from one value to another runs once for each timelock. A repeat
   stops with `OperationDone`. In that case, choose a value that differs by
   one second, for example `86401`.
-- The script refuses a delay below 60 seconds (`DelayTooShort`).
 - The script refuses a delay above 7 days (`DelayTooLong`).
 - An upgrade that you scheduled before the change keeps its own ready time.
 - The records keep the delay from the time of the deploy. Read the live delay

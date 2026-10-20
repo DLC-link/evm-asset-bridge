@@ -23,18 +23,6 @@ import {TimelockController} from "@openzeppelin/contracts/governance/TimelockCon
 ///      sequence A to B, B to A, A to B meets a done operation at the third
 ///      step. A cancelled operation does not count.
 abstract contract UpdateDelayManage is TimelockManage {
-    /// The same value as `BridgeDeploy.MIN_TIMELOCK_DELAY`. The delay below
-    /// it gives no time to react.
-    uint256 public constant MIN_DELAY = 60;
-
-    /// An extra zero in DELAY sets a very long delay. Every later upgrade
-    /// then waits that long. A change back waits that long too, because
-    /// `updateDelay` runs through the timelock. The schedule therefore
-    /// refuses a delay above this value.
-    uint256 public constant MAX_DELAY = 7 days;
-
-    error DelayTooShort(uint256 newDelay, uint256 minimum);
-    error DelayTooLong(uint256 newDelay, uint256 maximum);
     error DelayUnchanged(uint256 delay);
 
     /// The live minimum delay of the timelock.
