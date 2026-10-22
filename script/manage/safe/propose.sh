@@ -127,16 +127,20 @@ if [ "$RPC_CHAIN" != "$ENV_CHAIN" ]; then
   exit 2
 fi
 
-# The Safe service addresses a chain by its EIP-3770 short name.
+# Safe names each chain twice, and the two names can differ. SHORT goes into
+# the service URL, and APP goes into the Safe app link. For chain <id>,
+# https://safe-client.safe.global/v1/chains/<id> gives both: the
+# `transactionService` URL ends with SHORT, and `shortName` is APP.
 case "$ENV_CHAIN" in
-  1) SHORT="eth" ;;
-  11155111) SHORT="sep" ;;
-  8453) SHORT="base" ;;
-  42161) SHORT="arb1" ;;
-  137) SHORT="pol" ;;
+  1) SHORT="eth" APP="eth" ;;
+  11155111) SHORT="sep" APP="sep" ;;
+  8453) SHORT="base" APP="base" ;;
+  42161) SHORT="arb1" APP="arb1" ;;
+  137) SHORT="pol" APP="matic" ;;
+  999) SHORT="hyper" APP="hyper-evm" ;;
   *)
     echo "propose.sh: no Safe service short name for chain $ENV_CHAIN" >&2
-    echo "propose.sh: add it from https://github.com/ethereum-lists/chains" >&2
+    echo "propose.sh: add it from https://safe-client.safe.global/v1/chains/$ENV_CHAIN" >&2
     exit 2
     ;;
 esac
@@ -333,7 +337,7 @@ if [ "$STATUS" != "201" ]; then
 fi
 
 echo "propose.sh: proposed. safeTxHash $SAFE_TX_HASH"
-echo "propose.sh: owners confirm at https://app.safe.global/transactions/queue?safe=$SHORT:$SAFE"
+echo "propose.sh: owners confirm at https://app.safe.global/transactions/queue?safe=$APP:$SAFE"
 
 # The envelope file name carries no arguments, so a second run of the same
 # action replaces the first file. The proposed transaction lives in the Safe
