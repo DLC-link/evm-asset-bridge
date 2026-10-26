@@ -26,7 +26,11 @@ import {Status} from "../../script/manage/BitSafeEvmAssetBridge/Status.s.sol";
 import {ScheduleUpgrade} from "../../script/manage/upgrade/ScheduleUpgrade.s.sol";
 import {ExecuteUpgrade} from "../../script/manage/upgrade/ExecuteUpgrade.s.sol";
 import {CancelUpgrade} from "../../script/manage/upgrade/CancelUpgrade.s.sol";
+import {ScheduleUpdateDelay} from "../../script/manage/upgrade/ScheduleUpdateDelay.s.sol";
+import {ExecuteUpdateDelay} from "../../script/manage/upgrade/ExecuteUpdateDelay.s.sol";
+import {CancelUpdateDelay} from "../../script/manage/upgrade/CancelUpdateDelay.s.sol";
 import {BitSafeEvmAssetBridge} from "../../src/BitSafeEvmAssetBridge.sol";
+import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 /// A stand-in action. It overrides the two getters that read external state.
@@ -146,6 +150,22 @@ contract RecordReader is ManageBase {
 
     function contractName() public pure override returns (string memory) {
         return "BitSafeEvmAssetBridge";
+    }
+}
+
+/// A Status script with its own deployment name. The name keeps the record
+/// file of the test apart from the files of other tests.
+contract StatusNamed is Status {
+    function deploymentName() public pure override returns (string memory) {
+        return "STATUSTIMELOCK";
+    }
+}
+
+/// A Status script for the test without a record. Its own deployment name
+/// keeps its path apart from the path of `StatusNamed`.
+contract StatusAbsent is Status {
+    function deploymentName() public pure override returns (string memory) {
+        return "STATUSNORECORD";
     }
 }
 
@@ -396,9 +416,31 @@ contract ManageBaseTest is BridgeTestBase {
 
     function test_status_readsTheLiveConfiguration() public {
         Status status = new Status();
-        // The report function takes the address as an argument.
+        // The report function takes the addresses as arguments.
         // The test needs no deployment record file.
-        status.report(address(bridge));
+        status.report(address(bridge), address(0));
+
+        address[] memory holders = new address[](1);
+        holders[0] = makeAddr("safe");
+        TimelockController timelock = new TimelockController(1 hours, holders, holders, address(0));
+        status.report(address(bridge), address(timelock));
+    }
+
+    function test_status_timelockAddress_isZeroWithoutARecord() public {
+        assertEq((new StatusAbsent()).timelockAddress(), address(0));
+    }
+
+    function test_status_timelockAddress_readsTheRecord() public {
+        StatusNamed status = new StatusNamed();
+        string memory path = "deployments/STATUSTIMELOCK.timelock.31337.json";
+        string memory key = "statusTimelock";
+        vm.serializeUint(key, "chainId", uint256(31337));
+        vm.writeJson(vm.serializeAddress(key, "address", address(0xBEEF)), path);
+
+        address found = status.timelockAddress();
+        vm.removeFile(path);
+
+        assertEq(found, address(0xBEEF));
     }
 
     /// Every management script, the upgrade scripts included, must return a
@@ -406,7 +448,7 @@ contract ManageBaseTest is BridgeTestBase {
     /// The action name picks the Safe envelope file path.
     /// Two scripts with one name would overwrite each other's envelope file.
     function test_actionNames_areAllUnique() public {
-        string[23] memory names = [
+        string[26] memory names = [
             (new Pause()).action(),
             (new Unpause()).action(),
             (new SetThreshold()).action(),
@@ -429,7 +471,10 @@ contract ManageBaseTest is BridgeTestBase {
             (new Status()).action(),
             (new ScheduleUpgrade()).action(),
             (new ExecuteUpgrade()).action(),
-            (new CancelUpgrade()).action()
+            (new CancelUpgrade()).action(),
+            (new ScheduleUpdateDelay()).action(),
+            (new ExecuteUpdateDelay()).action(),
+            (new CancelUpdateDelay()).action()
         ];
 
         for (uint256 i; i < names.length; ++i) {

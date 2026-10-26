@@ -200,9 +200,8 @@ contract RateLimitTest is BridgeTestBase {
         _withdraw(hex"03", CAPACITY);
     }
 
-    /// Pins the audit fix: the tumbling window allowed ~2x the cap around a
-    /// window edge. The bucket has no edge: after a full spend, the budget at
-    /// ANY later offset is the linear refill, and it never exceeds capacity.
+    /// A token bucket has no window edge. After a full spend, the budget at
+    /// any later offset is the linear refill, and it never exceeds capacity.
     function testFuzz_noBurstAtAnyOffset(uint256 offset) public {
         offset = bound(offset, 0, 3 * uint256(WINDOW));
         _setLimit(CAPACITY, WINDOW);

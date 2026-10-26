@@ -12,10 +12,21 @@
 # deployments/solcInputs/<hash>.json for each distinct compiler input. Then it
 # removes the pending file.
 #
-# Three roles carry extra fields. `timelock` gets minDelay, proposers,
-# executors, and admin. `proxyAdmin` gets owner and createdBy, where owner is
-# the timelock. `proxy` gets implementation, proxyAdmin, bridgeConfig,
-# numDeployments, and history.
+# Three roles carry a `deployTimeConfig` object. Each entry below names what
+# goes in it and what stays at the top level.
+#   timelock    `deployTimeConfig` holds minDelay, proposers, executors, and
+#               admin. The top level keeps no role-specific field.
+#   proxyAdmin  `deployTimeConfig` holds owner. The top level keeps createdBy.
+#   proxy       `deployTimeConfig` holds the bridge settings: asset, decimals,
+#               roles, delays, attestors, threshold, and limits. The top level
+#               keeps implementation, proxyAdmin, numDeployments, and history.
+#
+# The records track the deployment itself. The records never track business
+# configuration after the deploy. The values in `deployTimeConfig` stay at their
+# deploy-time values. Nobody edits a record by hand after the deploy.
+# `make manage-status` prints the live bridge state. `make upgrade-status` syncs
+# the upgrade records with the chain and then prints the upgrade state.
+# When a record and the chain disagree, the chain is correct.
 #
 # Usage: ./script/record.sh <deploymentName> [chainId]
 #
@@ -36,7 +47,7 @@ fi
 
 # The schema version travels with every record. A consumer reads it to detect a
 # migration. Raise it whenever a field changes meaning or leaves the record.
-SCHEMA_VERSION=1
+SCHEMA_VERSION=2
 
 for tool in jq forge awk; do
   command -v "$tool" >/dev/null || { echo "record.sh: $tool is not installed" >&2; exit 2; }
@@ -288,10 +299,12 @@ for ((i = 0; i < COUNT; i++)); do
     # named fields, so an operator reads them without a decode.
     jq --slurpfile pending "$PENDING" \
       '. + {
-        minDelay: $pending[0].timelockDelay,
-        proposers: [$pending[0].proxyOwner],
-        executors: [$pending[0].proxyOwner],
-        admin: "0x0000000000000000000000000000000000000000"
+        deployTimeConfig: {
+          minDelay: $pending[0].timelockDelay,
+          proposers: [$pending[0].proxyOwner],
+          executors: [$pending[0].proxyOwner],
+          admin: "0x0000000000000000000000000000000000000000"
+        }
       }' "$OUT.tmp" >"$OUT.tmp2" && mv "$OUT.tmp2" "$OUT.tmp"
   fi
 
@@ -299,7 +312,7 @@ for ((i = 0; i < COUNT; i++)); do
     # The timelock owns the ProxyAdmin. The Safe drives the timelock.
     OWNER=$(jq -r .timelock "$PENDING")
     jq --arg owner "$OWNER" --arg createdBy "$CREATED_BY" \
-      '. + {owner: $owner, createdBy: $createdBy}' "$OUT.tmp" >"$OUT.tmp2" && mv "$OUT.tmp2" "$OUT.tmp"
+      '. + {deployTimeConfig: {owner: $owner}, createdBy: $createdBy}' "$OUT.tmp" >"$OUT.tmp2" && mv "$OUT.tmp2" "$OUT.tmp"
   fi
 
   if [ "$ROLE" = "proxy" ]; then
@@ -346,7 +359,7 @@ for ((i = 0; i < COUNT; i++)); do
       '. + {
         implementation: $impl,
         proxyAdmin: $padmin,
-        bridgeConfig: {
+        deployTimeConfig: {
           asset: $pending[0].asset,
           assetDecimals: $pending[0].assetDecimals,
           targetDecimals: $pending[0].targetDecimals,

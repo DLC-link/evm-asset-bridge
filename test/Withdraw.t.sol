@@ -382,7 +382,7 @@ contract WithdrawTest is BridgeTestBase {
 
     function test_digest_matchesManualEip712Construction() public view {
         // Independent re-derivation without OZ helpers: the reference vector
-        // for the Rust attestor stack.
+        // for an external signer.
         bytes32 domainSeparator = keccak256(
             abi.encode(
                 keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),

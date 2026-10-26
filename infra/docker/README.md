@@ -4,10 +4,8 @@ One container runs a local anvil chain and deploys one
 `BitSafeEvmAssetBridge` (native ETH) into it. A consumer starts the
 container and uses it. A consumer runs no deploy step.
 
-This mirrors the `canton-sandbox` and `dlc-solidity` images that
-DLC-link/dlc-attestor-stack already imports. Each image bundles chain,
-deploy and healthcheck. A consumer adds each one as a single compose
-service.
+The image bundles chain, deploy and healthcheck. A consumer adds it as
+a single compose service.
 
 ## Where to get it
 
@@ -74,10 +72,22 @@ cast code --rpc-url http://localhost:8545 \
 The container runs anvil with these flags:
 
 ```
-anvil --host 0.0.0.0 --port 8545 --chain-id 31337 \
+anvil --host 0.0.0.0 --port 8545 --chain-id "$CHAIN_ID" \
       --slots-in-an-epoch 1 --block-time 1 \
       --mnemonic "test test test test test test test test test test test junk"
 ```
+
+`CHAIN_ID` is an environment variable with the default `31337`. Set it
+to run a second bridge on a second chain:
+
+```
+docker run -e CHAIN_ID=31338 -p 8546:8545 public.ecr.aws/dlc-link/evm-asset-bridge:<tag>
+```
+
+The bridge deploys at the same addresses on every chain id, because an
+address depends only on the deployer and its nonce. The EIP-712 domain
+reads `block.chainid`, so a signature for one chain does not verify on
+the other.
 
 The image requires both timing flags. Neither one works alone.
 
@@ -132,8 +142,8 @@ drift.
 
 ## Reading Deposit events
 
-The top-level `README.md` documents the `Deposit` event signature, its
-topic layout, and a Rust sample that reads it.
+The top-level `README.md` documents the `Deposit` event signature and
+its topic layout.
 
 ## Building and testing it locally
 
@@ -156,10 +166,10 @@ A push to `main` publishes. It publishes the `beth-<short-sha>` tag. It
 also moves `latest`. Every published tag therefore names a commit on
 `main`.
 
-The workflow assumes the IAM role `gh-oidc-build-evm-asset-bridge`. The
-image name matches this repository's name on purpose. The org names a
-build role after the ECR repository. That role allows pushes to that
-one repository only. Do not rename either one on its own.
+The workflow assumes the IAM role `gh-oidc-publish-evm-asset-bridge`.
+That role allows pushes to this one ECR repository only. The image name
+matches this repository's name on purpose. Do not rename either one on
+its own.
 
 ## Safety
 

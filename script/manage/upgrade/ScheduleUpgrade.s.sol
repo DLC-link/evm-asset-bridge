@@ -28,7 +28,6 @@ import {console2} from "forge-std/console2.sol";
 ///     --sig 'run()' --rpc-url $RPC_URL
 contract ScheduleUpgrade is UpgradeManage {
     error NextImplementationHasNoCode(address next);
-    error AlreadyScheduled(bytes32 operationId);
     error UnknownSelector(bytes4 selector, string contractName);
 
     function action() public pure override returns (string memory) {

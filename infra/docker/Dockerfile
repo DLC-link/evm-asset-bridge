@@ -6,9 +6,8 @@
 # only after the bridge exists. A compose service that waits on
 # service_healthy starts against a ready bridge.
 #
-# This mirrors the canton-sandbox and dlc-solidity images that
-# dlc-attestor-stack already consumes: chain, deploy and healthcheck in one
-# image, imported as a single compose service.
+# The image bundles chain, deploy and healthcheck. A consumer imports it
+# as a single compose service.
 #
 # THESE ARE PUBLIC, WELL-KNOWN TEST KEYS (see it/attestor-keys.env).
 # NEVER send real funds to any address this chain funds.
@@ -21,7 +20,7 @@
 # fast.
 #
 # mirror.gcr.io is Google's Docker Hub pull-through mirror. It avoids the
-# anonymous docker.io rate limit. Canton uses it for the same reason.
+# anonymous docker.io rate limit.
 FROM mirror.gcr.io/library/alpine:3 AS solc
 ARG TARGETARCH
 ARG SOLC_VERSION=0.8.34

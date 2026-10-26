@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deploymentName": "BETH_DEVNET",
   "role": "proxy",
   "chainId": 11155111,
@@ -376,7 +376,7 @@
   "deployedAt": "2026-09-11T08:56:13Z",
   "implementation": "0xc2DBb9AF52DA4BA877c13Fdf55d128dA76AEE950",
   "proxyAdmin": "0x9B0493a269A6591095A2e0be847f50A73De83A74",
-  "bridgeConfig": {
+  "deployTimeConfig": {
     "asset": "0x0000000000000000000000000000000000000000",
     "assetDecimals": 18,
     "targetDecimals": 10,

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deploymentName": "BETH_TESTNET",
   "role": "timelock",
   "chainId": 11155111,
@@ -1114,12 +1114,14 @@
   },
   "gitCommit": "bf5449e",
   "deployedAt": "2026-09-17T13:57:25Z",
-  "minDelay": 3600,
-  "proposers": [
-    "0x995236279E21ab9c65658bf4B32AC3D6e6880342"
-  ],
-  "executors": [
-    "0x995236279E21ab9c65658bf4B32AC3D6e6880342"
-  ],
-  "admin": "0x0000000000000000000000000000000000000000"
+  "deployTimeConfig": {
+    "minDelay": 3600,
+    "proposers": [
+      "0x995236279E21ab9c65658bf4B32AC3D6e6880342"
+    ],
+    "executors": [
+      "0x995236279E21ab9c65658bf4B32AC3D6e6880342"
+    ],
+    "admin": "0x0000000000000000000000000000000000000000"
+  }
 }

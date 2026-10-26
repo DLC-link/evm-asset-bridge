@@ -184,6 +184,14 @@ endif
 # make upgrade-cancel   DEPLOYMENT=BETH RPC_URL=... SIGNER="--account proxyOwner"
 # make upgrade-sync     DEPLOYMENT=BETH RPC_URL=...        (upgrade-status runs the same command)
 #   SAFE=0x... selects Safe mode for schedule, execute and cancel.
+#
+# The timelock delay targets change the minimum delay of the timelock. Each one
+# needs DEPLOYMENT, RPC_URL and DELAY, the new delay in seconds. They run no
+# sync. Section 12.9 of the README holds the sequence.
+#
+# make timelock-delay-schedule DEPLOYMENT=BETH RPC_URL=... DELAY=86400 SIGNER="--account proxyOwner"
+# make timelock-delay-execute  DEPLOYMENT=BETH RPC_URL=... DELAY=86400 SIGNER="--account proxyOwner"
+# make timelock-delay-cancel   DEPLOYMENT=BETH RPC_URL=... DELAY=86400 SIGNER="--account proxyOwner"
 
 UPGRADE_DIR := script/manage/upgrade
 
@@ -206,10 +214,11 @@ UPGRADE_POST_SYNC = $(UPGRADE_SYNC)
 endif
 
 # $(error) inside a recipe stops make when the recipe expands, before any
-# command runs. One function serves the six targets.
+# command runs. One function serves the nine targets.
 upgrade_require = $(if $(DEPLOYMENT),,$(error DEPLOYMENT is not set. Example: make $(1) DEPLOYMENT=BETH RPC_URL=...))$(if $(RPC_URL),,$(error RPC_URL is not set. Example: make $(1) DEPLOYMENT=BETH RPC_URL=...))
 
 .PHONY: upgrade-deploy upgrade-schedule upgrade-execute upgrade-cancel upgrade-sync upgrade-status
+.PHONY: timelock-delay-schedule timelock-delay-execute timelock-delay-cancel
 
 upgrade-deploy:
 	$(call upgrade_require,upgrade-deploy)
@@ -244,6 +253,26 @@ upgrade-sync upgrade-status:
 	$(call upgrade_require,$@)
 	$(UPGRADE_SYNC)
 
+# One recipe serves the three timelock delay targets. $(1) names the script.
+# The scripts keep no record, so the recipe runs no sync. The operator gives
+# the same DELAY on every command.
+define TIMELOCK_DELAY_ACTION
+$(call upgrade_require,$@)
+$(if $(DELAY),,$(error DELAY is not set. Example: make $@ DELAY=86400 DEPLOYMENT=BETH RPC_URL=...))
+@echo "$@: $(UPGRADE_MODE)"
+@DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	  $(UPGRADE_DIR)/$(1).s.sol:$(1) --sig 'run(uint256)' "$(DELAY)" --rpc-url "$(RPC_URL)" $(UPGRADE_FLAGS)
+endef
+
+timelock-delay-schedule:
+	$(call TIMELOCK_DELAY_ACTION,ScheduleUpdateDelay)
+
+timelock-delay-execute:
+	$(call TIMELOCK_DELAY_ACTION,ExecuteUpdateDelay)
+
+timelock-delay-cancel:
+	$(call TIMELOCK_DELAY_ACTION,CancelUpdateDelay)
+
 # ---- the signing key --------------------------------------------------------
 #
 # SIGNER must come from the make line. An operator who exports it sets one key
@@ -262,7 +291,7 @@ ifdef MANAGE_NEEDS_SIGNER
 SIGNER_GOALS += $(filter manage,$(MAKECMDGOALS))
 endif
 ifdef UPGRADE_NEEDS_SIGNER
-SIGNER_GOALS += $(filter upgrade-schedule upgrade-execute upgrade-cancel,$(MAKECMDGOALS))
+SIGNER_GOALS += $(filter upgrade-schedule upgrade-execute upgrade-cancel timelock-delay-schedule timelock-delay-execute timelock-delay-cancel,$(MAKECMDGOALS))
 endif
 
 ifneq ($(strip $(SIGNER_GOALS)),)

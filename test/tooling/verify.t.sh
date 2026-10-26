@@ -225,11 +225,11 @@ contains "still verifies the timelock" "$STUB_OUT" "OK   timelock"
 
 echo "== a record from a newer schema =="
 cp "$BAD" "$BAD.bak"
-jq '.schemaVersion = 2' "$BAD.bak" >"$BAD"
+jq '.schemaVersion = 3' "$BAD.bak" >"$BAD"
 run_stub "$NOT_VERIFIED" "$GUID" "$PASSED"
 mv "$BAD.bak" "$BAD"
 check    "exits non-zero on an unknown schema" "$STUB_RC" "1"
-contains "names both versions" "$STUB_OUT" "has schemaVersion '2'; this script reads 1"
+contains "names both versions" "$STUB_OUT" "has schemaVersion '3'; this script reads 2"
 
 echo "== a record missing a field the explorer needs =="
 # jq prints the word "null" for an absent field. A request holding that word

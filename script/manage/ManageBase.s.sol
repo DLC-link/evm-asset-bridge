@@ -14,10 +14,15 @@ import {console2} from "forge-std/console2.sol";
 abstract contract ManageBase is Script {
     string internal constant SAFE_DIR = "deployments/.safe";
 
+    /// A typo with extra zeros sets a delay that later changes must wait
+    /// for. Both delay scripts therefore refuse a value above 7 days.
+    uint256 internal constant MAX_DELAY = 7 days;
+
     error RecordChainMismatch(uint256 recordChainId, uint256 chainId);
     error TargetHasNoCode(address target);
     error DeploymentNotSet();
     error ContractMismatch(string recordContractName, string expectedContractName);
+    error DelayTooLong(uint256 newDelay, uint256 maximum);
 
     /// The deployment name, such as "BETH". The operator sets DEPLOYMENT in
     /// the environment. A test overrides this function instead, because a

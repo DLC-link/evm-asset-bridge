@@ -26,7 +26,7 @@ transaction.
 A second deployment of the same contract needs no new script. It needs one
 set of deployment records and one `.env.{network}.{deployment}` file. This
 promise covers the management scripts only. The deploy script still needs
-one new file for each deployment, and issue #42 tracks that gap.
+one new file for each deployment.
 
 `script/manage/ManageBase.s.sol` holds the shared code.
 `script/manage/BitSafeEvmAssetBridge/BridgeManage.s.sol` binds that base to
@@ -191,10 +191,13 @@ accepts. In Safe mode that sender is the Safe itself.
 | `ScheduleUpgrade` | timelock proposer (`PROXY_OWNER`) | `make upgrade-schedule` (section 12) |
 | `ExecuteUpgrade` | timelock executor (`PROXY_OWNER`) | `make upgrade-execute` (section 12) |
 | `CancelUpgrade` | timelock canceller (`PROXY_OWNER`) | `make upgrade-cancel` (section 12) |
+| `ScheduleUpdateDelay` | timelock proposer (`PROXY_OWNER`) | `make timelock-delay-schedule DELAY=86400` (section 12.9) |
+| `ExecuteUpdateDelay` | timelock executor (`PROXY_OWNER`) | `make timelock-delay-execute DELAY=86400` (section 12.9) |
+| `CancelUpdateDelay` | timelock canceller (`PROXY_OWNER`) | `make timelock-delay-cancel DELAY=86400` (section 12.9) |
 
 Copy one line. Change the `ARGS` value. Send the command.
 
-Read these five notes with the table:
+Read these notes with the table:
 
 - `Status` sends nothing. It therefore needs no `SIGNER` and no `SAFE`.
   `make manage-status RPC_URL=https://...` is the shorter form of the same
@@ -209,9 +212,12 @@ Read these five notes with the table:
   bridged-asset balance above `totalLocked`.
 - `RescueETH` reverts when the bridged asset is ETH. Use `RescueSurplus` on an
   ETH bridge.
+- `ChangeDefaultAdminDelay` refuses a delay above 7 days. The timelock delay
+  scripts use the same maximum.
 - The three upgrade scripts live in `script/manage/upgrade/`, not in the
-  bridge folder. They have their own `make` targets. Section 12 holds the
-  whole sequence.
+  bridge folder. The three delay scripts also live there. All six have their
+  own `make` targets. Section 12 holds the upgrade sequence. Section 12.9
+  holds the delay change.
 
 This example raises the signature threshold to 3:
 
@@ -292,20 +298,25 @@ rounded value falls below `minAmount`. Read `depositUnit` from
 The horizon bounds how far a withdrawal deadline can sit past the current
 time. A horizon of 0 disables the bound.
 
-The attestors read `withdrawalHorizon()` to pick their signing mode. A zero
-value means the fixed sentinel deadline. A non-zero value means derived
-deadlines. One `SetWithdrawalHorizon` transaction therefore activates the
-bound.
-
-A change between two attestor reads splits their digests. The attestors defer
-the request to the next signing tick. They then re-sign the request in the new
-mode. Expect a short delay in withdrawals after this change. Start with a long
+One `SetWithdrawalHorizon` transaction activates the bound. A change
+invalidates every unsubmitted bundle whose deadline lies past the new bound.
+The signers must re-sign those requests. Expect a short delay in withdrawals
+after this change. Start with a long
 horizon, such as 48 hours.
 
 ```bash
 make manage SCRIPT=SetWithdrawalHorizon SIG='run(uint256)' ARGS=172800 \
   RPC_URL=https://... SIGNER="--account bridgeAdmin"
 ```
+
+### Recover after a long pause
+
+A pause longer than the horizon expires every pending bundle. The request ids
+stay unused, so no funds are at risk. Recover in three steps:
+
+1. Raise the horizon above the age of the oldest pending request.
+2. Let the signers re-sign the pending requests.
+3. Lower the horizon after the pending requests clear.
 
 ## 6. The default admin transfer
 
@@ -334,7 +345,10 @@ The two delay scripts are `ChangeDefaultAdminDelay` and
 `RollbackDefaultAdminDelay`. The current admin sends both. A new delay takes
 effect only after its own wait period passes. An increase waits up to
 `defaultAdminDelayIncreaseWait()`. A decrease waits the difference between the
-old delay and the new delay.
+old delay and the new delay. `ChangeDefaultAdminDelay` refuses a delay above
+7 days (`DelayTooLong`). The timelock delay scripts use the same maximum
+(section 12.9). The script prints a `DECREASE` line when the new delay is
+shorter.
 
 ## 7. The complete Safe flow
 
@@ -439,14 +453,16 @@ queue after every warning of this kind.
 ### Safe mode cannot pre-stage a time-gated action
 
 Safe mode simulates the call from the Safe address first. The simulation must
-succeed at the current block. Two actions fail that simulation before their
+succeed at the current block. These actions fail that simulation before their
 time arrives:
 
 - `AcceptDefaultAdminTransfer` reverts until the schedule of the transfer
   passes.
 - `Unpause` reverts while the bridge runs.
+- `ExecuteUpgrade` reverts until the delay of the timelock passes.
+- `ExecuteUpdateDelay` reverts until the delay of the timelock passes.
 
-An operator cannot build these two envelopes in advance. The operator waits for
+An operator cannot build these four envelopes in advance. The operator waits for
 the condition. The operator then writes the envelope. The operator proposes it
 in the same session. Plan the owner confirmations for that later moment.
 
@@ -514,38 +530,20 @@ limit.
 Keep the key out of every tracked file. `.env.sepolia.BETH_DEVNET` holds no
 secret.
 
-## 10. Status of this tooling
+## 10. Tests for this tooling
 
 `script/manage/safe/propose.sh` has offline tests in
 `test/tooling/propose.t.sh`. A fake `curl` answers the service. A fake `cast`
 answers the chain. CI runs the suite on every push.
 
 The upgrade scripts have tests in `test/manage/UpgradeActions.t.sol` and
-`test/manage/DeployNextImplementation.t.sol`. The whole upgrade sequence
-runs against a local anvil in `test/tooling/upgrade-sync.t.sh`. CI runs
-all three. No upgrade has run on a public network yet. Treat the first
-Sepolia upgrade as a test of the tooling.
+`test/manage/DeployNextImplementation.t.sol`. The delay scripts have tests in
+`test/manage/TimelockDelayActions.t.sol`. The whole upgrade sequence and a
+delay change run against a local anvil in `test/tooling/upgrade-sync.t.sh`.
+CI runs all four.
 
-The whole flow also ran against the live Safe Transaction Service. This repo
-becomes public. The record therefore names no address and no transaction hash.
-
-| Field | Value |
-| --- | --- |
-| Date | 2026-09-11 |
-| Network | Sepolia |
-| Action | `setWithdrawRateLimit` |
-| Result | The Safe executed the transaction. |
-| Proposer record | The service set the `proposedByDelegate` field. |
-| Confirmations | The list held the Safe owner only. |
-| Hash agreement | The stored `safeTxHash` matched the computed hash. |
-
-The run proves three points. A delegate proposes a transaction. A delegate
-never confirms a transaction. The hash that the script computes before the
-signature matches the hash that the service stores.
-
-One item stays unproven. The script maps each chain to a Safe short name. Only
-the Sepolia short name `sep` ran live. Treat the first run on another chain as
-a test.
+The script maps each chain to a Safe short name. On a new chain, open the
+queue link that the script prints, and check that it names the correct Safe.
 
 ## 11. Which Safes govern a deployment
 
@@ -555,12 +553,13 @@ describes them for a non-technical reader.
 1. **The multi-organisation Safe.** BitSafe and the operator partners control
    it together. It holds `DEFAULT_ADMIN`, and it is the proposer, canceller,
    and executor of the timelock that owns the `ProxyAdmin`. `DEFAULT_ADMIN`
-   and `PROXY_OWNER` therefore name the same address on mainnet.
+   and `PROXY_OWNER` therefore name the same address in the mainnet deploy
+   inputs.
 2. **The BitSafe Safe.** BitSafe alone controls it. It holds `BRIDGE_ADMIN`.
 
 No Safe owns the `ProxyAdmin` directly. The timelock owns it, and an upgrade
 waits `TIMELOCK_DELAY` seconds between its proposal and its execution. The
-Sepolia instances use one Safe for every authority.
+Sepolia env files name one Safe for every authority.
 
 The tooling does not depend on the shape. `SAFE` names the Safe on every
 invocation. An operator points each action at the Safe that holds its role.
@@ -580,9 +579,10 @@ names a timelock as owner. They read the roles `proxy`, `proxyAdmin`,
 knowledge.
 
 Every target needs `DEPLOYMENT` and `RPC_URL`. Load the environment file
-first, as section 2 describes. Each target runs the sync before it acts,
-and again after a direct broadcast. The records therefore match the chain
-when the command returns.
+first, as section 2 describes. Each upgrade target runs the sync before it
+acts, and again after a direct broadcast. The records therefore match the
+chain when the command returns. The delay targets of section 12.9 run no
+sync.
 
 ### 12.1 Deploy the next implementation
 
@@ -596,8 +596,7 @@ and syncs. `CONTRACT=src/Other.sol:Other` deploys another contract. The
 script refuses a contract whose constructor takes arguments. Every
 implementation we ship only disables its initializers.
 
-The deployer key on Sepolia carries an EIP-7702 delegation, so pass
-`--slow`. Any funded key may deploy an implementation. The deploy grants no
+Pass `--slow` when the deployer key carries an EIP-7702 delegation. Any funded key may deploy an implementation. The deploy grants no
 power; the timelock operation does.
 
 One `nextImplementation` record exists per deployment at a time. The
@@ -746,3 +745,84 @@ a `data` field, and a proxy record whose `implementation` differs from the
 implementation record. It never overwrites an existing
 `previousImplementation_<n>` file. Run one sync at a time per deployment.
 The test `test/tooling/upgrade-sync.t.sh` covers each refusal.
+
+### 12.9 Change the timelock delay
+
+The timelock accepts the call `updateDelay` only from itself. A change of the
+delay therefore needs a schedule, a wait, and an execute. The scripts need
+`DEPLOYMENT`, `RPC_URL` and `DELAY`. `DELAY` is the new delay in seconds. The
+steps below use `86400` as an example value.
+
+1. Schedule the change, and propose the envelope. The schedule prints the
+   operation id. Keep it until the change runs or you cancel it.
+
+   ```bash
+   SAFE=0xProxyOwnerSafe make timelock-delay-schedule DELAY=86400
+   make propose ENVELOPE=deployments/.safe/<name>.<chainId>.scheduleUpdateDelay.json SIGNER="--account proposer"
+   ```
+
+2. The Safe owners execute the schedule. Wait for the current delay from
+   that moment. Safe mode cannot write the execute envelope before the delay
+   passes (section 7). If the execute stops with `OperationNotReady`, wait
+   the seconds that it shows.
+3. Execute the change, and propose the envelope.
+
+   ```bash
+   SAFE=0xProxyOwnerSafe make timelock-delay-execute DELAY=86400
+   make propose ENVELOPE=deployments/.safe/<name>.<chainId>.executeUpdateDelay.json SIGNER="--account proposer"
+   ```
+
+4. The Safe owners execute. `make manage-status` now shows the new
+   `timelockMinDelay`.
+
+In direct mode, pass `SIGNER="--account proxyOwner"` and leave `SAFE` empty.
+
+To cancel a pending change, use the same form as in section 12.7:
+
+```bash
+SAFE=0xProxyOwnerSafe make timelock-delay-cancel DELAY=86400
+make propose ENVELOPE=deployments/.safe/<name>.<chainId>.cancelUpdateDelay.json SIGNER="--account proposer"
+```
+
+These rules apply:
+
+- Use the same `DELAY` on every command. The scripts keep no record, so they
+  find the operation from the deployment name, the live delay and `DELAY`.
+- The scripts do not stop a second schedule. Keep one delay change pending at
+  a time. Cancel an unwanted change while it waits, with
+  `make timelock-delay-cancel DELAY=<its value>`. After one change runs, the
+  scripts cannot find the other one, and they stop with `OperationNotOnChain`.
+  Cancel that change by its id in the Safe web app.
+- A change from one value to another runs once for each timelock. A repeat
+  stops with `OperationDone`. In that case, choose a value that differs by
+  one second, for example `86401`.
+- The script refuses a delay above 7 days (`DelayTooLong`).
+- An upgrade that you scheduled before the change keeps its own ready time.
+- The records keep the delay from the time of the deploy. Read the live delay
+  with `make manage-status`.
+
+## 13. Void a withdraw request
+
+`VoidWithdrawRequest` marks an id as used without a payout. The contract
+emits `WithdrawRequestVoided`. A signed `Withdrawal` bundle stays valid until
+its deadline. Only a used id stops the bundle at once.
+
+Void first, and cancel second:
+
+1. Void the id on the bridge.
+2. Wait for the `WithdrawRequestVoided` event in a **finalized** block.
+3. Cancel the matching Canton withdraw request, which credits the user back.
+
+A `Withdraw` event for the id means that the payout happened. Do not cancel
+the Canton request in that case. A void after the Canton credit leaves a
+period in which an old bundle can still pay the id.
+
+```bash
+make manage SCRIPT=VoidWithdrawRequest SIG='run(bytes)' ARGS=0x0011deadbeef22 \
+  RPC_URL=https://... SIGNER="--account bridgeAdmin"
+```
+
+The void works while the bridge is paused. A pause is the incident response,
+and the void is part of the same response. A wrong void locks no funds. The
+ETH stays in the bridge, and the Canton cancel credits the user back. The
+`WithdrawRequestVoided` event records every void.
