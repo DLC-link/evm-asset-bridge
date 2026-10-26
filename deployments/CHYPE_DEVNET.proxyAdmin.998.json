@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deploymentName": "CHYPE_DEVNET",
   "role": "proxyAdmin",
   "chainId": 998,
@@ -385,6 +385,8 @@
   },
   "gitCommit": "7c4f458",
   "deployedAt": "2026-10-08T14:01:02Z",
-  "owner": "0xb0143a282b93cED4a080379715b3Af80DA576383",
+  "deployTimeConfig": {
+    "owner": "0xb0143a282b93cED4a080379715b3Af80DA576383"
+  },
   "createdBy": "0xfbc38458ffb91d6fd731151d46345e89ffc42358"
 }

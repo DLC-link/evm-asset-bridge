@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deploymentName": "CHYPE_DEVNET",
   "role": "proxy",
   "chainId": 998,
@@ -376,7 +376,7 @@
   "deployedAt": "2026-10-08T14:01:02Z",
   "implementation": "0xeb83dd17bBf4576499F3eC3168b1C799B4ef17F6",
   "proxyAdmin": "0xe7339dCdBE67295C47c94c3df7F80C900e35f44C",
-  "bridgeConfig": {
+  "deployTimeConfig": {
     "asset": "0x0000000000000000000000000000000000000000",
     "assetDecimals": 18,
     "targetDecimals": 10,

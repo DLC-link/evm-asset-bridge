@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deploymentName": "CHYPE_DEVNET",
   "role": "timelock",
   "chainId": 998,
@@ -1114,12 +1114,14 @@
   },
   "gitCommit": "7c4f458",
   "deployedAt": "2026-10-08T14:01:02Z",
-  "minDelay": 60,
-  "proposers": [
-    "0x7038f8a64cE8F879705A48e962B55d56aEcd60D8"
-  ],
-  "executors": [
-    "0x7038f8a64cE8F879705A48e962B55d56aEcd60D8"
-  ],
-  "admin": "0x0000000000000000000000000000000000000000"
+  "deployTimeConfig": {
+    "minDelay": 60,
+    "proposers": [
+      "0x7038f8a64cE8F879705A48e962B55d56aEcd60D8"
+    ],
+    "executors": [
+      "0x7038f8a64cE8F879705A48e962B55d56aEcd60D8"
+    ],
+    "admin": "0x0000000000000000000000000000000000000000"
+  }
 }
