@@ -203,8 +203,8 @@ contract DecimalsTest is BridgeTestBase {
     }
 
     /// Zero is the only value the target rejects. No chain expresses whole units
-    /// only, and the truncating cast in `Deploy_BETH.s.sol` produces a zero from a
-    /// `TARGET_DECIMALS` of 256.
+    /// only. A `TARGET_DECIMALS` of 0 reaches `initialize` directly, and
+    /// `BridgeDeploy.run` refuses any value above 255.
     function test_initialize_targetDecimalsZero_reverts() public {
         vm.expectRevert(BitSafeEvmAssetBridge.DecimalsOutOfRange.selector);
         _deployBridge(address(0), 0);

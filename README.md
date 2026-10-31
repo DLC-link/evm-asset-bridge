@@ -28,13 +28,21 @@ apart. `Deploy_BETH_DEVNET.s.sol` and `Deploy_BETH_TESTNET.s.sol` subclass
 `Deploy_BETH` and change the name only. Every name reads the same
 environment variables, and `.env.sepolia.<NAME>` holds the Sepolia values.
 
+CHYPE bridges native HYPE on HyperEVM. It has three deployment names:
+`CHYPE`, `CHYPE_DEVNET` and `CHYPE_TESTNET`. `Deploy_CHYPE.s.sol` deploys
+`BitSafeEvmAssetBridge`, as `Deploy_BETH.s.sol` does. `.env.hyperevm.CHYPE`
+and `.env.hyperevm-testnet.<NAME>` hold the HyperEVM values.
+
 | Name | Purpose | Network |
 | --- | --- | --- |
 | `BETH` | The production bridge | Ethereum mainnet |
 | `BETH_DEVNET` | The instance whose attestors run against Canton devnet | Sepolia |
 | `BETH_TESTNET` | The instance whose attestors run against Canton testnet | Sepolia |
+| `CHYPE` | The production HYPE bridge | HyperEVM mainnet |
+| `CHYPE_DEVNET` | The HYPE instance whose attestors run against Canton devnet | HyperEVM testnet |
+| `CHYPE_TESTNET` | The HYPE instance whose attestors run against Canton testnet | HyperEVM testnet |
 
-That runs two steps. `forge script` broadcasts the deploy. `script/record.sh`
+`make deploy` runs two steps. `forge script` broadcasts the deploy. `script/record.sh`
 then writes the deployment records. The `make record` target repeats the
 second step on its own:
 
@@ -87,6 +95,106 @@ Prefer a keystore account or a hardware wallet. A raw private key on the
 command line reaches your shell history. Make expands the variable into the
 child process's argument list, where `ps` finds it. Make also exports the
 variable into the child process's environment.
+
+### Deploying on HyperEVM
+
+HyperEVM makes two kinds of block. A small block comes every second and
+holds 3,000,000 gas. A big block comes about once a minute and holds
+30,000,000 gas. The implementation deploy needs about 6,550,000 gas, so only
+a big block can hold it. A HyperCore flag on the deployer address sends every
+transaction from that address to big blocks.
+
+| | Mainnet (999) | Testnet (998) |
+| --- | --- | --- |
+| EVM RPC | `https://rpc.hyperliquid.xyz/evm` | `https://rpc.hyperliquid-testnet.xyz/evm` |
+| HyperCore API | `https://api.hyperliquid.xyz` | `https://api.hyperliquid-testnet.xyz` |
+
+The examples below use testnet. For mainnet, use the mainnet URLs and
+`constants.MAINNET_API_URL`.
+
+**1. Make the deployer a HyperCore user.** Only a HyperCore user can set the
+flag. Check the deployer address:
+
+```
+curl -s https://api.hyperliquid-testnet.xyz/info -H 'content-type: application/json' \
+  -d '{"type":"userRole","user":"0xYourDeployer"}'
+```
+
+The answer `{"role":"user"}` means the address can continue. The answer
+`{"role":"missing"}` means it has no HyperCore account yet. Send at least
+2 USDC to the address on HyperCore from an account that exists. HyperCore
+takes 1 USDC as a fee for a new account. On testnet, the faucet at
+`https://app.hyperliquid-testnet.xyz/drip` gives mock USDC. It serves only an
+address that has deposited on mainnet.
+
+The deployer also needs HYPE on HyperEVM for gas. A testnet deploy cost about
+0.0024 HYPE in a dry run. To move HYPE from HyperCore to HyperEVM, use
+"Transfer to/from EVM" in the Hyperliquid app.
+
+**2. Turn on big blocks.** The flag is the HyperCore action
+`{"type":"evmUserModify","usingBigBlocks":true}`. Send it with the official
+Python SDK, because the signature scheme is easy to get wrong by hand. The
+script reads the Foundry keystore, so the key never enters your shell history:
+
+```
+pip install hyperliquid-python-sdk==0.24.0 eth-account
+python3 - <<'EOF'
+import getpass, json, os, eth_account
+from hyperliquid.exchange import Exchange
+from hyperliquid.utils import constants
+keystore = json.load(open(os.path.expanduser("~/.foundry/keystores/deployer")))
+key = eth_account.Account.decrypt(keystore, getpass.getpass("keystore password: "))
+exchange = Exchange(eth_account.Account.from_key(key), constants.TESTNET_API_URL)
+print(exchange.use_big_blocks(True))
+EOF
+```
+
+Pass `constants.MAINNET_API_URL` or `constants.TESTNET_API_URL` exactly. The
+SDK signs for mainnet only when the URL equals the mainnet constant. Any
+other text, such as a trailing slash, makes a testnet signature. The SDK
+needs a local key, so a Ledger cannot sign this action.
+
+The SDK sends this request. Use it as a reference only:
+
+```
+POST https://api.hyperliquid-testnet.xyz/exchange
+{"action":{"type":"evmUserModify","usingBigBlocks":true},
+ "nonce":<current time in ms>,
+ "signature":{"r":"0x…","s":"0x…","v":27},
+ "vaultAddress":null,"expiresAfter":null}
+```
+
+The signature is EIP-712 over `Agent{source, connectionId}`, in the domain
+`{name:"Exchange", version:"1", chainId:1337, verifyingContract:0x0}`.
+`source` is `"a"` on mainnet and `"b"` on testnet. `connectionId` is
+`keccak256(msgpack(action) ‖ nonce as 8 bytes big-endian ‖ 0x00)`.
+
+**3. Check the flag.** The answer must be `true`:
+
+```
+cast rpc --rpc-url https://rpc.hyperliquid-testnet.xyz/evm eth_usingBigBlocks 0xYourDeployer
+```
+
+**4. Deploy.** Add `--disable-block-gas-limit` to `SIGNER`, because `SIGNER`
+passes every flag to `forge script`. Without it, the simulation runs at the
+latest block's 3,000,000 gas limit, and the implementation deploy reverts.
+Add `--timeout 300`, because each transaction waits for a big block:
+
+```
+make deploy DEPLOYMENT=CHYPE_TESTNET RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm \
+  SIGNER="--account deployer --sender 0xYourDeployer --disable-block-gas-limit --timeout 300"
+```
+
+The deploy sends three transactions. They need about 6.55M, 2.46M and 1.69M
+gas, so one big block can hold all three. A big block can have a different
+base fee from a small block. `cast rpc --rpc-url <url> eth_bigBlockGasPrice`
+returns it. If it is higher than the max fee that `forge` prints, add
+`--with-gas-price <wei>` to `SIGNER`.
+
+**5. Turn off big blocks.** Run step 2 again with `use_big_blocks(False)`.
+Then run step 3 and expect `false`. If the flag stays on, every later
+transaction from the deployer waits up to a minute. Never set the flag on an
+attestor key. Each payout would then wait for a big block.
 
 ### Commit the records
 
