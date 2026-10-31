@@ -78,6 +78,18 @@ contract BridgeTestBase is Test {
         BitSafeEvmAssetBridge.Limits memory withdrawLimits_
     ) internal returns (BitSafeEvmAssetBridge) {
         implementation = new BitSafeEvmAssetBridge();
+        return _deployProxy(address(implementation), asset, targetDecimals_, depositLimits_, withdrawLimits_);
+    }
+
+    /// Deploys a proxy in front of `impl`. The upgrade tests pass an older
+    /// implementation, which takes the same `initialize` arguments.
+    function _deployProxy(
+        address impl,
+        address asset,
+        uint8 targetDecimals_,
+        BitSafeEvmAssetBridge.Limits memory depositLimits_,
+        BitSafeEvmAssetBridge.Limits memory withdrawLimits_
+    ) internal returns (BitSafeEvmAssetBridge) {
         bytes memory initData = abi.encodeCall(
             BitSafeEvmAssetBridge.initialize,
             (
@@ -92,8 +104,7 @@ contract BridgeTestBase is Test {
                 withdrawLimits_
             )
         );
-        TransparentUpgradeableProxy proxy =
-            new TransparentUpgradeableProxy(address(implementation), proxyOwner, initData);
+        TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(impl, proxyOwner, initData);
         return BitSafeEvmAssetBridge(payable(address(proxy)));
     }
 

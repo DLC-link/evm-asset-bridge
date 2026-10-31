@@ -387,20 +387,71 @@ gives the order of the void and the Canton cancel.
 Both `depositETH` and `depositERC20` emit the same event:
 
 ```solidity
-event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
+event Deposit(
+    bytes32 indexed depositAccountIdHash,
+    bytes depositAccountId,
+    address indexed sender,
+    uint256 amount,
+    uint256 prevDepositBlock
+);
 ```
 
 - `topic0` (the event signature hash) is
-  `0xacaea730ea841fae3326f72a7ff746b6e06c646840526bcaf5dabee5fd887ef8`,
-  which is `keccak256("Deposit(bytes32,bytes,address,uint256)")`.
+  `0xf3ca88974ec5963addc617fe6c0c359d7196759e318be6ab0cade940986e30e2`,
+  which is `keccak256("Deposit(bytes32,bytes,address,uint256,uint256)")`.
 - `depositAccountIdHash` (`topic1`) is `keccak256(depositAccountId)`. Filter
   on it to follow one Canton deposit account.
 - `sender` (`topic2`) is the EVM account that paid the deposit.
 - The data part carries the raw `depositAccountId` bytes (the Canton deposit
-  account id) and `amount` (wei for ETH, base units for an ERC20 asset).
+  account id), `amount` (wei for ETH, base units for an ERC20 asset), and
+  `prevDepositBlock`.
 
 The bridge emits the event from the proxy address, never from the
 implementation address.
 
-A consumer filters on the proxy address and `topic0`, and advances its
-start block past the last block it saw.
+### The old event signature
+
+The deployments that ran before the deposit links emitted this event:
+
+```solidity
+event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
+```
+
+Its `topic0` is
+`0xacaea730ea841fae3326f72a7ff746b6e06c646840526bcaf5dabee5fd887ef8`, which
+is `keccak256("Deposit(bytes32,bytes,address,uint256)")`. The logs from
+before the upgrade keep this `topic0`. A consumer that reads those blocks
+reads both signatures.
+
+### The deposit links
+
+`prevDepositBlock` is the block of the previous deposit for the same
+account. It is `0` for the first deposit of an account after the upgrade.
+The bridge does not fill in the deposits from before the upgrade.
+
+Two deposits for one account can share a block. The second deposit then
+emits `prevDepositBlock == block.number`. The first deposit in a block always
+links to an earlier block.
+
+The view `lastDepositBlock(bytes32 depositAccountIdHash)` returns the block
+of the last deposit for an account. It returns `0` for an account with no
+deposit since the upgrade.
+
+A reader finds the deposits of an account after its start block without a
+range scan:
+
+1. Pick a fixed block, for example the finalized block. Read
+   `lastDepositBlock` at that block. The result is the first link.
+2. Stop when the link is at or below the start block. A link of `0` also
+   stops the walk.
+3. Read the `Deposit` logs of the account in the block that the link names.
+   Filter on the proxy address, `topic0` and `topic1`.
+4. Take the lowest `prevDepositBlock` of those logs as the next link. That
+   value is below the block of step 3. Go to step 2.
+
+The reader passes the fixed block to `eth_call` as a number, not as the
+`finalized` tag. Some providers accept the tag only on some chains. The
+reader needs the state at that one block only, not archive state.
+
+A consumer that scans a range instead filters on the proxy address and
+`topic0`, and advances its start block past the last block it saw.

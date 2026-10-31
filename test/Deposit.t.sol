@@ -21,7 +21,7 @@ contract DepositTest is BridgeTestBase {
 
     function test_depositETH_locksAndEmits() public {
         vm.expectEmit(true, true, false, true);
-        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether);
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether, 0);
         vm.prank(user);
         bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
         assertEq(address(bridge).balance, 1 ether);
@@ -49,7 +49,7 @@ contract DepositTest is BridgeTestBase {
         vm.startPrank(user);
         token.approve(address(erc20Bridge), 5 ether);
         vm.expectEmit(true, true, false, true);
-        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 5 ether);
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 5 ether, 0);
         erc20Bridge.depositERC20(5 ether, DEPOSIT_ID);
         vm.stopPrank();
         assertEq(token.balanceOf(address(erc20Bridge)), 5 ether);
@@ -132,6 +132,125 @@ contract DepositTest is BridgeTestBase {
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         erc20Bridge.depositERC20(1 ether, DEPOSIT_ID);
         vm.stopPrank();
+    }
+
+    // ---------------------------------------------------------- deposit links
+
+    /// The README publishes this value for event consumers.
+    function test_depositEvent_topic0() public pure {
+        assertEq(
+            BitSafeEvmAssetBridge.Deposit.selector, 0xf3ca88974ec5963addc617fe6c0c359d7196759e318be6ab0cade940986e30e2
+        );
+    }
+
+    function test_depositETH_firstDeposit_linksToZero() public {
+        vm.roll(100);
+        vm.expectEmit(true, true, false, true, address(bridge));
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether, 0);
+        vm.prank(user);
+        bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
+        assertEq(bridge.lastDepositBlock(keccak256(DEPOSIT_ID)), 100);
+    }
+
+    function test_depositERC20_firstDeposit_linksToZero() public {
+        vm.roll(100);
+        vm.startPrank(user);
+        token.approve(address(erc20Bridge), 1 ether);
+        vm.expectEmit(true, true, false, true, address(erc20Bridge));
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether, 0);
+        erc20Bridge.depositERC20(1 ether, DEPOSIT_ID);
+        vm.stopPrank();
+        assertEq(erc20Bridge.lastDepositBlock(keccak256(DEPOSIT_ID)), 100);
+    }
+
+    function test_depositETH_laterBlock_linksToPreviousDeposit() public {
+        vm.roll(100);
+        vm.prank(user);
+        bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
+
+        vm.roll(105);
+        vm.expectEmit(true, true, false, true, address(bridge));
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 2 ether, 100);
+        vm.prank(user);
+        bridge.depositETH{value: 2 ether}(DEPOSIT_ID);
+        assertEq(bridge.lastDepositBlock(keccak256(DEPOSIT_ID)), 105);
+    }
+
+    function test_depositERC20_laterBlock_linksToPreviousDeposit() public {
+        vm.prank(user);
+        token.approve(address(erc20Bridge), 3 ether);
+
+        vm.roll(100);
+        vm.prank(user);
+        erc20Bridge.depositERC20(1 ether, DEPOSIT_ID);
+
+        vm.roll(105);
+        vm.expectEmit(true, true, false, true, address(erc20Bridge));
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 2 ether, 100);
+        vm.prank(user);
+        erc20Bridge.depositERC20(2 ether, DEPOSIT_ID);
+        assertEq(erc20Bridge.lastDepositBlock(keccak256(DEPOSIT_ID)), 105);
+    }
+
+    /// A reader that sees `prevDepositBlock == block.number` reads the same
+    /// block again, so it must follow the lowest link below that block.
+    function test_deposit_sameBlock_linksToTheSameBlock() public {
+        vm.roll(100);
+        vm.startPrank(user);
+        bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
+        vm.expectEmit(true, true, false, true, address(bridge));
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 2 ether, 100);
+        bridge.depositETH{value: 2 ether}(DEPOSIT_ID);
+        vm.stopPrank();
+        assertEq(bridge.lastDepositBlock(keccak256(DEPOSIT_ID)), 100);
+    }
+
+    function test_deposit_twoAccounts_keepSeparateLinks() public {
+        bytes memory otherId = hex"00ffeedd";
+        vm.startPrank(user);
+        vm.roll(100);
+        bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
+        vm.roll(101);
+        bridge.depositETH{value: 1 ether}(otherId);
+
+        vm.roll(102);
+        vm.expectEmit(true, true, false, true, address(bridge));
+        emit BitSafeEvmAssetBridge.Deposit(keccak256(DEPOSIT_ID), DEPOSIT_ID, user, 1 ether, 100);
+        bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
+        vm.stopPrank();
+
+        assertEq(bridge.lastDepositBlock(keccak256(DEPOSIT_ID)), 102);
+        assertEq(bridge.lastDepositBlock(keccak256(otherId)), 101);
+    }
+
+    function test_deposit_revert_keepsTheLink() public {
+        vm.roll(100);
+        vm.prank(user);
+        bridge.depositETH{value: 1 ether}(DEPOSIT_ID);
+
+        vm.roll(105);
+        uint256 badAmount = 1 ether + 1;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BitSafeEvmAssetBridge.AmountNotRepresentable.selector, badAmount, DEFAULT_DEPOSIT_UNIT
+            )
+        );
+        vm.prank(user);
+        bridge.depositETH{value: badAmount}(DEPOSIT_ID);
+        assertEq(bridge.lastDepositBlock(keccak256(DEPOSIT_ID)), 100);
+    }
+
+    function test_deposit_revertOnFirstDeposit_leavesNoLink() public {
+        vm.roll(100);
+        uint256 badAmount = 1 ether + 1;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BitSafeEvmAssetBridge.AmountNotRepresentable.selector, badAmount, DEFAULT_DEPOSIT_UNIT
+            )
+        );
+        vm.prank(user);
+        bridge.depositETH{value: badAmount}(DEPOSIT_ID);
+        assertEq(bridge.lastDepositBlock(keccak256(DEPOSIT_ID)), 0);
     }
 
     function _deployBridgeWithDepositLimits(uint256 minAmount, uint256 maxAmount)
