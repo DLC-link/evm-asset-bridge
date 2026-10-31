@@ -16,7 +16,7 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
 import {RateLimiter} from "@openzeppelin/contracts/utils/RateLimiter.sol";
 
 /// @title BitSafeEvmAssetBridgeV1
-/// @notice A test fixture: the bridge source that the BETH deployments ran
+/// @notice A test fixture: the bridge source that the BETH mainnet deployment ran
 ///         before the deposit links. The source matches
 ///         `src/BitSafeEvmAssetBridge.sol` at commit d5264f6, the commit of the
 ///         mainnet implementation record. Only the contract name differs.

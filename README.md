@@ -427,7 +427,8 @@ reads both signatures.
 
 `prevDepositBlock` is the block of the previous deposit for the same
 account. It is `0` for the first deposit of an account after the upgrade.
-The bridge does not fill in the deposits from before the upgrade.
+The bridge does not fill in the deposits from before the upgrade. The
+section "Deposits from before the upgrade" says how a reader finds them.
 
 Two deposits for one account can share a block. The second deposit then
 emits `prevDepositBlock == block.number`. The first deposit in a block always
@@ -437,11 +438,12 @@ The view `lastDepositBlock(bytes32 depositAccountIdHash)` returns the block
 of the last deposit for an account. It returns `0` for an account with no
 deposit since the upgrade.
 
-A reader finds the deposits of an account after its start block without a
-range scan:
+A reader keeps a start block for each account. The start block is the last
+block whose deposits for that account the reader fully processed. The reader
+finds the deposits after its start block without a range scan:
 
-1. Pick a fixed block, for example the finalized block. Read
-   `lastDepositBlock` at that block. The result is the first link.
+1. Pick a fixed finalized block. Read `lastDepositBlock` at that block. The
+   result is the first link.
 2. Stop when the link is at or below the start block. A link of `0` also
    stops the walk.
 3. Read the `Deposit` logs of the account in the block that the link names.
@@ -453,5 +455,25 @@ The reader passes the fixed block to `eth_call` as a number, not as the
 `finalized` tag. Some providers accept the tag only on some chains. The
 reader needs the state at that one block only, not archive state.
 
+A linked block always holds at least one `Deposit` log of the account. An
+empty result in step 3 is therefore an error, not the end of the walk. The
+reader retries the call. A filter by `blockHash` makes the node return an
+error for a block that it does not know.
+
+The walk makes one `eth_getLogs` call for each block with a deposit. A
+reader can set a maximum number of steps. Past that maximum, it reads the
+rest of the range with one range scan.
+
+### Deposits from before the upgrade
+
+The links start at the upgrade, so the walk never reads a deposit from
+before it. The upgrade block is the block of the proxy's `Upgraded` event
+that names the new implementation. A reader whose start block is below the
+upgrade block also scans one range for the old `topic0`. The range runs from
+the block after the start block through the upgrade block.
+
+### A range scan
+
 A consumer that scans a range instead filters on the proxy address and
-`topic0`, and advances its start block past the last block it saw.
+both `topic0` values. It advances its start block past the last block it
+saw.
