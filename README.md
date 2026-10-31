@@ -468,12 +468,16 @@ block is below the upgrade block also scans one range for the old `topic0`
 only. The range runs from the block after the start block through the
 upgrade block.
 
-Before the upgrade, the proxy has no `lastDepositBlock` view, and a call to
-it reverts. A reader then uses the range scan for the old `topic0`.
+A call to `lastDepositBlock` reverts on an implementation without links:
+before the upgrade, or during a rollback. The reader then runs no walk. It
+scans both `topic0` values from the block after its start block through the
+fixed finalized block.
 
 A rollback to an implementation without links breaks the chain. A deposit
 during the rollback writes no link, so the walk does not find it. After a
-rollback, a reader scans the old `topic0` over the whole rollback range.
+rollback, a reader also scans the old `topic0` from the block of the
+rollback `Upgraded` event through the block of the next `Upgraded` event to
+an implementation with links.
 
 ### A range scan
 
