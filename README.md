@@ -409,85 +409,32 @@ event Deposit(
 The bridge emits the event from the proxy address, never from the
 implementation address.
 
-### The old event signature
-
-The deployments that ran before the deposit links emitted this event:
-
-```solidity
-event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
-```
-
-Its `topic0` is
-`0xacaea730ea841fae3326f72a7ff746b6e06c646840526bcaf5dabee5fd887ef8`, which
-is `keccak256("Deposit(bytes32,bytes,address,uint256)")`. The logs from
-before the upgrade keep this `topic0`. A consumer that reads those blocks
-reads both signatures.
+A consumer filters on the proxy address and `topic0`, and advances its
+start block past the last block it saw.
 
 ### The deposit links
 
 `prevDepositBlock` is the block of the previous deposit for the same
-account. It is `0` for the first deposit of an account after the upgrade.
-The bridge does not fill in the deposits from before the upgrade. The
-section "Deposits without a link" says how a reader finds them.
-
-Two deposits for one account can share a block. The second deposit then
-emits `prevDepositBlock == block.number`. The first deposit in a block always
-links to an earlier block.
+account. It is `0` when the account has no earlier deposit since the
+deployment, or since the upgrade that added the links. Two deposits for one
+account can share a block. The second deposit then emits
+`prevDepositBlock == block.number`.
 
 The view `lastDepositBlock(bytes32 depositAccountIdHash)` returns the block
-of the last deposit for an account. It returns `0` for an account with no
-deposit since the upgrade.
+of the last deposit for an account, with the same `0` rule.
 
-A reader keeps a start block for each account. The start block is the last
-block whose deposits for that account the reader fully processed. The reader
-finds the deposits after its start block without a range scan:
+A client finds the past deposits of an account without a range scan. It
+walks back from the last deposit:
 
-1. Pick a fixed finalized block. Read `lastDepositBlock` at that block. The
-   result is the first link.
-2. Stop when the link is at or below the start block. A link of `0` also
-   stops the walk.
-3. Read the `Deposit` logs of the account in the block that the link names.
-   Filter on the proxy address, the new `topic0` and `topic1`.
-4. Take the lowest `prevDepositBlock` of those logs as the next link. That
-   value is below the block of step 3. Go to step 2.
+1. Pick a finalized block. Call `lastDepositBlock` at that block. The result
+   is the first link.
+2. Stop when the link is `0`, or at or below the last block that the client
+   already processed.
+3. Read the `Deposit` logs in the block that the link names. Filter on the
+   proxy address, `topic0`, and `topic1`.
+4. Take the lowest `prevDepositBlock` of those logs as the next link. Go to
+   step 2.
 
-The reader passes the fixed block to `eth_call` as a number, not as the
-`finalized` tag. Some providers accept the tag only on some chains. The
-reader needs the state at that one block only, not archive state.
-
-A linked block always holds at least one `Deposit` log of the account. An
-empty result in step 3 is therefore an error, not the end of the walk. The
-reader retries the call.
-
-### Deposits without a link
-
-The walk finds only the deposits that wrote a link. A deposit writes no link
-while the proxy runs an implementation without links. That is the case
-before the upgrade, and during a rollback. Such a deposit emits the old
-`topic0`.
-
-A range without links runs from the deployment through the upgrade block. A
-rollback adds one more range. That range runs from the block of the
-rollback `Upgraded` event through the block of the next `Upgraded` event to
-an implementation with links. The upgrade block is the block of the first
-`Upgraded` event of the proxy to an implementation with links. Both ends of
-a range are inclusive.
-
-In each pass, the reader reads the fixed block with one of two methods:
-
-- **The view call succeeds.** The reader walks. It also scans the old
-  `topic0` over each range without links that ends after its start block.
-  Each such scan starts at the block after the start block or later.
-- **The view call reverts.** The proxy runs an implementation without
-  links. The reader runs no walk. It scans both `topic0` values from the
-  block after its start block through the fixed finalized block.
-
-Every scan ends at the fixed block. The reader counts only the `Upgraded`
-events at or before the fixed block. Every scan starts after the start
-block, so no pass reads a deposit twice.
-
-### A range scan
-
-A consumer that scans a range instead filters on the proxy address and
-both `topic0` values. It sets its start block to the last block that it
-fully processed, and it starts the next scan at the block after it.
+A linked block always holds a `Deposit` log of the account. An empty result
+in step 3 is an error, and the client retries. After the walk, the client
+has processed every deposit of the account up to the block of step 1.
