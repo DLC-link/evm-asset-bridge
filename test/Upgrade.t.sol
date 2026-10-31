@@ -12,6 +12,7 @@ import {ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transp
 
 contract UpgradeTest is BridgeTestBase {
     bytes32 internal constant ADMIN_SLOT = 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
+    bytes32 internal constant OLD_DEPOSIT_TOPIC0 = 0xacaea730ea841fae3326f72a7ff746b6e06c646840526bcaf5dabee5fd887ef8;
 
     address internal destination = makeAddr("destination");
 
@@ -99,8 +100,11 @@ contract UpgradeTest is BridgeTestBase {
 
         // V1 state: deposits, a used request id, and every admin setting.
         vm.roll(100);
+        vm.recordLogs();
         vm.prank(user);
         b.depositETH{value: 10 ether}(DEPOSIT_ID);
+        // The README publishes the old topic0 for the logs from before the upgrade.
+        assertEq(vm.getRecordedLogs()[0].topics[0], OLD_DEPOSIT_TOPIC0);
         vm.startPrank(bridgeAdmin);
         b.setWithdrawRateLimit(30 ether, 1 days);
         b.setWithdrawalHorizon(7 days);
