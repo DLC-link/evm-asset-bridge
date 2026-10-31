@@ -447,7 +447,7 @@ finds the deposits after its start block without a range scan:
 2. Stop when the link is at or below the start block. A link of `0` also
    stops the walk.
 3. Read the `Deposit` logs of the account in the block that the link names.
-   Filter on the proxy address, `topic0` and `topic1`.
+   Filter on the proxy address, the new `topic0` and `topic1`.
 4. Take the lowest `prevDepositBlock` of those logs as the next link. That
    value is below the block of step 3. Go to step 2.
 
@@ -457,23 +457,26 @@ reader needs the state at that one block only, not archive state.
 
 A linked block always holds at least one `Deposit` log of the account. An
 empty result in step 3 is therefore an error, not the end of the walk. The
-reader retries the call. A filter by `blockHash` makes the node return an
-error for a block that it does not know.
-
-The walk makes one `eth_getLogs` call for each block with a deposit. A
-reader can set a maximum number of steps. Past that maximum, it reads the
-rest of the range with one range scan.
+reader retries the call.
 
 ### Deposits from before the upgrade
 
 The links start at the upgrade, so the walk never reads a deposit from
-before it. The upgrade block is the block of the proxy's `Upgraded` event
-that names the new implementation. A reader whose start block is below the
-upgrade block also scans one range for the old `topic0`. The range runs from
-the block after the start block through the upgrade block.
+before it. The upgrade block is the block of the first `Upgraded` event of
+the proxy to an implementation with deposit links. A reader whose start
+block is below the upgrade block also scans one range for the old `topic0`
+only. The range runs from the block after the start block through the
+upgrade block.
+
+Before the upgrade, the proxy has no `lastDepositBlock` view, and a call to
+it reverts. A reader then uses the range scan for the old `topic0`.
+
+A rollback to an implementation without links breaks the chain. A deposit
+during the rollback writes no link, so the walk does not find it. After a
+rollback, a reader scans the old `topic0` over the whole rollback range.
 
 ### A range scan
 
 A consumer that scans a range instead filters on the proxy address and
-both `topic0` values. It advances its start block past the last block it
-saw.
+both `topic0` values. It sets its start block to the last block that it
+fully processed, and it starts the next scan at the block after it.
