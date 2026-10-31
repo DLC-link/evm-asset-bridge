@@ -28,8 +28,8 @@ RPC=http://127.0.0.1:8545
 # This is anvil account 6, the test user. It is a PUBLIC, well-known
 # test key.
 TEST_USER_KEY=0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e
-# keccak256("Deposit(bytes32,bytes,address,uint256)")
-DEPOSIT_TOPIC0=0xacaea730ea841fae3326f72a7ff746b6e06c646840526bcaf5dabee5fd887ef8
+# keccak256("Deposit(bytes32,bytes,address,uint256,uint256)")
+DEPOSIT_TOPIC0=0xf3ca88974ec5963addc617fe6c0c359d7196759e318be6ab0cade940986e30e2
 CONTAINER="evm-asset-bridge-smoke-$$"
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then

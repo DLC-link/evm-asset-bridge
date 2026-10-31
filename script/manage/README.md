@@ -648,6 +648,10 @@ case. The script checks the selector against the new contract's ABI, and it
 runs the whole upgrade as the timelock on a state snapshot. A payload that
 reverts stops the command before anyone signs.
 
+**A changed event.** An upgrade can change the signature of an event that
+an off-chain consumer reads. Confirm that every consumer reads both the old
+and the new signature before you schedule. The attestors read `Deposit`.
+
 **The funded-instance trap.** The simulation proves only that the payload
 runs. It proves nothing about its effect. A reinitializer that resets
 `totalLocked` to zero on a bridge that holds deposits lets `rescueSurplus`

@@ -70,13 +70,25 @@ contract BitSafeEvmAssetBridge is
         RateLimiter.RefillingBucket withdrawRateLimit;
         uint256 totalLocked;
         uint256 withdrawalHorizon;
+        mapping(bytes32 depositAccountIdHash => uint256 blockNumber) lastDepositBlock;
     }
 
     // cast index-erc7201 bitsafe.storage.BitSafeEvmAssetBridge
     bytes32 public constant BRIDGE_STORAGE_LOCATION =
         0xe9e5dc9730c787910ca70d94c5f8cdb143fd0b13ee96336e56e945dc2a3d2500;
 
-    event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
+    /// @dev `prevDepositBlock` is the block of the previous deposit for the
+    ///      same account. It is 0 when the account has no earlier deposit
+    ///      since the deployment, or since the upgrade that added the field.
+    ///      The README section "Deposit events" describes how a reader
+    ///      follows the links.
+    event Deposit(
+        bytes32 indexed depositAccountIdHash,
+        bytes depositAccountId,
+        address indexed sender,
+        uint256 amount,
+        uint256 prevDepositBlock
+    );
     event Withdraw(
         bytes32 indexed withdrawRequestIdHash,
         bytes withdrawRequestId,
@@ -206,6 +218,14 @@ contract BitSafeEvmAssetBridge is
     ///         off.
     function withdrawalHorizon() external view returns (uint256) {
         return _getBridgeStorage().withdrawalHorizon;
+    }
+
+    /// @notice The block of the last deposit for the account whose
+    ///         `keccak256(depositAccountId)` is `depositAccountIdHash`. 0 means
+    ///         no deposit since the deployment, or since the upgrade that
+    ///         added the deposit links.
+    function lastDepositBlock(bytes32 depositAccountIdHash) external view returns (uint256) {
+        return _getBridgeStorage().lastDepositBlock[depositAccountIdHash];
     }
 
     function getAttestors() external view returns (address[] memory) {
@@ -455,7 +475,8 @@ contract BitSafeEvmAssetBridge is
         if ($.asset != address(0)) revert AssetIsNotEther();
         _validateDeposit(depositAccountId, msg.value, $);
         $.totalLocked += msg.value;
-        emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, msg.value);
+        bytes32 idHash = keccak256(depositAccountId);
+        emit Deposit(idHash, depositAccountId, msg.sender, msg.value, _linkDeposit($, idHash));
     }
 
     /// @notice Locks the configured ERC20 asset. Requires prior approval.
@@ -472,7 +493,16 @@ contract BitSafeEvmAssetBridge is
         // After the balance-delta check: the counter records confirmed amounts only.
         $.totalLocked += amount;
         // Emitted after the transfer: the amount is only confirmed by the balance-delta check above.
-        emit Deposit(keccak256(depositAccountId), depositAccountId, msg.sender, amount);
+        bytes32 idHash = keccak256(depositAccountId);
+        emit Deposit(idHash, depositAccountId, msg.sender, amount, _linkDeposit($, idHash));
+    }
+
+    /// @dev Records the current block as the account's last deposit and
+    ///      returns the block it replaces. Every deposit function must call
+    ///      it: the attestors do not see a deposit without a link.
+    function _linkDeposit(BridgeStorage storage $, bytes32 idHash) internal returns (uint256 prev) {
+        prev = $.lastDepositBlock[idHash];
+        $.lastDepositBlock[idHash] = block.number;
     }
 
     function _validateDeposit(bytes calldata depositAccountId, uint256 amount, BridgeStorage storage $) internal view {

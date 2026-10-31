@@ -387,20 +387,54 @@ gives the order of the void and the Canton cancel.
 Both `depositETH` and `depositERC20` emit the same event:
 
 ```solidity
-event Deposit(bytes32 indexed depositAccountIdHash, bytes depositAccountId, address indexed sender, uint256 amount);
+event Deposit(
+    bytes32 indexed depositAccountIdHash,
+    bytes depositAccountId,
+    address indexed sender,
+    uint256 amount,
+    uint256 prevDepositBlock
+);
 ```
 
 - `topic0` (the event signature hash) is
-  `0xacaea730ea841fae3326f72a7ff746b6e06c646840526bcaf5dabee5fd887ef8`,
-  which is `keccak256("Deposit(bytes32,bytes,address,uint256)")`.
+  `0xf3ca88974ec5963addc617fe6c0c359d7196759e318be6ab0cade940986e30e2`,
+  which is `keccak256("Deposit(bytes32,bytes,address,uint256,uint256)")`.
 - `depositAccountIdHash` (`topic1`) is `keccak256(depositAccountId)`. Filter
   on it to follow one Canton deposit account.
 - `sender` (`topic2`) is the EVM account that paid the deposit.
 - The data part carries the raw `depositAccountId` bytes (the Canton deposit
-  account id) and `amount` (wei for ETH, base units for an ERC20 asset).
+  account id), `amount` (wei for ETH, base units for an ERC20 asset), and
+  `prevDepositBlock`.
 
 The bridge emits the event from the proxy address, never from the
 implementation address.
 
 A consumer filters on the proxy address and `topic0`, and advances its
 start block past the last block it saw.
+
+### The deposit links
+
+`prevDepositBlock` is the block of the previous deposit for the same
+account. It is `0` when the account has no earlier deposit since the
+deployment, or since the upgrade that added the links. Two deposits for one
+account can share a block. The second deposit then emits
+`prevDepositBlock == block.number`.
+
+The view `lastDepositBlock(bytes32 depositAccountIdHash)` returns the block
+of the last deposit for an account, with the same `0` rule.
+
+A client finds the past deposits of an account without a range scan. It
+walks back from the last deposit:
+
+1. Pick a finalized block. Call `lastDepositBlock` at that block. The result
+   is the first link.
+2. Stop when the link is `0`, or at or below the last block that the client
+   already processed.
+3. Read the `Deposit` logs in the block that the link names. Filter on the
+   proxy address, `topic0`, and `topic1`.
+4. Take the lowest `prevDepositBlock` of those logs as the next link. Go to
+   step 2.
+
+A linked block always holds a `Deposit` log of the account. An empty result
+in step 3 is an error, and the client retries. After the walk, the client
+has processed every deposit of the account up to the block of step 1.
