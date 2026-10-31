@@ -428,7 +428,7 @@ reads both signatures.
 `prevDepositBlock` is the block of the previous deposit for the same
 account. It is `0` for the first deposit of an account after the upgrade.
 The bridge does not fill in the deposits from before the upgrade. The
-section "Deposits from before the upgrade" says how a reader finds them.
+section "Deposits without a link" says how a reader finds them.
 
 Two deposits for one account can share a block. The second deposit then
 emits `prevDepositBlock == block.number`. The first deposit in a block always
@@ -459,25 +459,30 @@ A linked block always holds at least one `Deposit` log of the account. An
 empty result in step 3 is therefore an error, not the end of the walk. The
 reader retries the call.
 
-### Deposits from before the upgrade
+### Deposits without a link
 
-The links start at the upgrade, so the walk never reads a deposit from
-before it. The upgrade block is the block of the first `Upgraded` event of
-the proxy to an implementation with deposit links. A reader whose start
-block is below the upgrade block also scans one range for the old `topic0`
-only. The range runs from the block after the start block through the
-upgrade block.
+The walk finds only the deposits that wrote a link. A deposit writes no link
+while the proxy runs an implementation without links. That is the case
+before the upgrade, and during a rollback. Such a deposit emits the old
+`topic0`.
 
-A call to `lastDepositBlock` reverts on an implementation without links:
-before the upgrade, or during a rollback. The reader then runs no walk. It
-scans both `topic0` values from the block after its start block through the
-fixed finalized block.
-
-A rollback to an implementation without links breaks the chain. A deposit
-during the rollback writes no link, so the walk does not find it. After a
-rollback, a reader also scans the old `topic0` from the block of the
+A range without links runs from the deployment through the upgrade block. A
+rollback adds one more range. That range runs from the block of the
 rollback `Upgraded` event through the block of the next `Upgraded` event to
-an implementation with links.
+an implementation with links. The upgrade block is the block of the first
+`Upgraded` event of the proxy to an implementation with links. Both ends of
+a range are inclusive.
+
+In each pass, the reader reads the fixed block with one of two methods:
+
+- **The view call succeeds.** The reader walks. It also scans the old
+  `topic0` over each range without links that ends after its start block.
+  Each such scan starts at the block after the start block or later.
+- **The view call reverts.** The proxy runs an implementation without
+  links. The reader runs no walk. It scans both `topic0` values from the
+  block after its start block through the fixed finalized block.
+
+Every scan starts after the start block, so no pass reads a deposit twice.
 
 ### A range scan
 
