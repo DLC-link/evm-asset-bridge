@@ -78,9 +78,10 @@ contract BitSafeEvmAssetBridge is
         0xe9e5dc9730c787910ca70d94c5f8cdb143fd0b13ee96336e56e945dc2a3d2500;
 
     /// @dev `prevDepositBlock` is the block of the previous deposit for the
-    ///      same account, or 0 when the account has no deposit since the
-    ///      upgrade that added the field. The README section "Deposit events"
-    ///      describes how a reader follows the links.
+    ///      same account. It is 0 when the account has no earlier deposit
+    ///      since the deployment, or since the upgrade that added the field.
+    ///      The README section "Deposit events" describes how a reader
+    ///      follows the links.
     event Deposit(
         bytes32 indexed depositAccountIdHash,
         bytes depositAccountId,
@@ -221,7 +222,8 @@ contract BitSafeEvmAssetBridge is
 
     /// @notice The block of the last deposit for the account whose
     ///         `keccak256(depositAccountId)` is `depositAccountIdHash`. 0 means
-    ///         no deposit since the upgrade that added the deposit links.
+    ///         no deposit since the deployment, or since the upgrade that
+    ///         added the deposit links.
     function lastDepositBlock(bytes32 depositAccountIdHash) external view returns (uint256) {
         return _getBridgeStorage().lastDepositBlock[depositAccountIdHash];
     }
