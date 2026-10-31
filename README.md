@@ -482,7 +482,9 @@ In each pass, the reader reads the fixed block with one of two methods:
   links. The reader runs no walk. It scans both `topic0` values from the
   block after its start block through the fixed finalized block.
 
-Every scan starts after the start block, so no pass reads a deposit twice.
+Every scan ends at the fixed block. The reader counts only the `Upgraded`
+events at or before the fixed block. Every scan starts after the start
+block, so no pass reads a deposit twice.
 
 ### A range scan
 
