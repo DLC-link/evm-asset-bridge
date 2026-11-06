@@ -37,7 +37,8 @@ it-verify: it-build
 # make deploy DEPLOYMENT=BETH RPC_URL=https://... SIGNER="--account deployer"
 #   The target runs the deploy script. It then writes the deployment records.
 #   DEPLOYMENT names the script and the records. BETH is the production
-#   bridge. BETH_DEVNET and BETH_TESTNET are the two Sepolia instances:
+#   bridge. CHYPE, CHYPE_DEVNET and CHYPE_TESTNET are the HyperEVM bridges.
+#   BETH_DEVNET and BETH_TESTNET are the two Sepolia instances:
 #
 #   make deploy DEPLOYMENT=BETH_TESTNET RPC_URL=https://... SIGNER="--account deployer"
 #
