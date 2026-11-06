@@ -3,41 +3,41 @@
   "deploymentName": "CHYPE_DEVNET",
   "role": "implementation",
   "chainId": 998,
-  "address": "0xeb83dd17bBf4576499F3eC3168b1C799B4ef17F6",
+  "address": "0x6C5670d13DAa3389CC487f4EC3327B875E0cc5DB",
   "contractName": "BitSafeEvmAssetBridge",
   "sourcePath": "src/BitSafeEvmAssetBridge.sol",
   "encodedConstructorArgs": "0x",
-  "transactionHash": "0x5069a0f64d24bb2c7bf8c3f502a81c58757d1ec2ae0cc64007b3a2fad1f7ea46",
+  "transactionHash": "0x9e4476a14944c8516f25e9e3e464fe8c12f6efcdc4c245a214d77b7a48cf5c60",
   "receipt": {
     "type": "0x2",
     "status": "0x1",
-    "cumulativeGasUsed": "0x517488",
+    "cumulativeGasUsed": "0x6aa0d6",
     "logs": [
       {
-        "address": "0xeb83dd17bbf4576499f3ec3168b1c799b4ef17f6",
+        "address": "0x6c5670d13daa3389cc487f4ec3327b875e0cc5db",
         "topics": [
           "0xc7f505b2f371ae2175ee4913f4499e1f2633a7b5936321eed1cdaeb6115181d2"
         ],
         "data": "0x000000000000000000000000000000000000000000000000ffffffffffffffff",
-        "blockHash": "0xe2debb55947608f66d2ec6902c6adf247f57137c6201596886cccd7f6a2ff619",
-        "blockNumber": "0x3f49618",
-        "blockTimestamp": "0x6ac7a21c",
-        "transactionHash": "0x5069a0f64d24bb2c7bf8c3f502a81c58757d1ec2ae0cc64007b3a2fad1f7ea46",
+        "blockHash": "0x159604324a0a2f7ba2dc5c71a310f7033caa07435b0a102e9f81c16618081831",
+        "blockNumber": "0x41b669b",
+        "blockTimestamp": "0x6aede120",
+        "transactionHash": "0x9e4476a14944c8516f25e9e3e464fe8c12f6efcdc4c245a214d77b7a48cf5c60",
         "transactionIndex": "0x1",
-        "logIndex": "0x2",
+        "logIndex": "0x1",
         "removed": false
       }
     ],
-    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000080000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000004000000000000000000000200000000000000000000000000000000000000000000000000000000000000",
-    "transactionHash": "0x5069a0f64d24bb2c7bf8c3f502a81c58757d1ec2ae0cc64007b3a2fad1f7ea46",
+    "logsBloom": "0x00000000000800000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000080000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "transactionHash": "0x9e4476a14944c8516f25e9e3e464fe8c12f6efcdc4c245a214d77b7a48cf5c60",
     "transactionIndex": "0x1",
-    "blockHash": "0xe2debb55947608f66d2ec6902c6adf247f57137c6201596886cccd7f6a2ff619",
-    "blockNumber": "0x3f49618",
-    "gasUsed": "0x4c551f",
+    "blockHash": "0x159604324a0a2f7ba2dc5c71a310f7033caa07435b0a102e9f81c16618081831",
+    "blockNumber": "0x41b669b",
+    "gasUsed": "0x4cbdde",
     "effectiveGasPrice": "0x5f5e101",
     "from": "0x7038f8a64ce8f879705a48e962b55d56aecd60d8",
     "to": null,
-    "contractAddress": "0xeb83dd17bbf4576499f3ec3168b1c799b4ef17f6"
+    "contractAddress": "0x6c5670d13daa3389cc487f4ec3327b875e0cc5db"
   },
   "abi": [
     {
@@ -553,6 +553,25 @@
           "name": "",
           "type": "bool",
           "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "lastDepositBlock",
+      "inputs": [
+        {
+          "name": "depositAccountIdHash",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
         }
       ],
       "stateMutability": "view"
@@ -1134,6 +1153,12 @@
         },
         {
           "name": "amount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "prevDepositBlock",
           "type": "uint256",
           "indexed": false,
           "internalType": "uint256"
@@ -1767,13 +1792,26 @@
       "inputs": []
     }
   ],
-  "solcInputHash": "8ad071476d8929ba",
+  "solcInputHash": "3978f038403f471c",
   "compiler": {
     "version": "0.8.34+commit.80d5c536",
     "optimizer": true,
     "runs": 10000,
     "evmVersion": "prague"
   },
-  "gitCommit": "7c4f458",
-  "deployedAt": "2026-10-08T14:01:02Z"
+  "gitCommit": "b7f7727",
+  "deployedAt": "2026-11-06T14:16:02Z",
+  "upgrade": {
+    "calldata": "0x9623609d000000000000000000000000fbc38458ffb91d6fd731151d46345e89ffc423580000000000000000000000006c5670d13daa3389cc487f4ec3327b875e0cc5db00000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000000",
+    "data": "0x",
+    "delay": 60,
+    "operationId": "0x670a75a8b946fac2a28bde610e5983e26c62ecb8d7d971ca33a1a1758e788f3e",
+    "predecessor": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "proposedAt": 1793974631,
+    "proposer": "0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38",
+    "salt": "0x55cab64f30f42d937253b5e0f38e7b23cbd28ece628e1c332ec5572e699d3ab5",
+    "target": "0xe7339dCdBE67295C47c94c3df7F80C900e35f44C",
+    "timelock": "0xb0143a282b93cED4a080379715b3Af80DA576383",
+    "readyAt": 1793974729
+  }
 }
