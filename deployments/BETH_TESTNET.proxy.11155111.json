@@ -374,7 +374,7 @@
   },
   "gitCommit": "bf5449e",
   "deployedAt": "2026-09-17T13:57:25Z",
-  "implementation": "0xAE4Bd5836f6bFb337F1cefE42141Fe0c3a5F865a",
+  "implementation": "0xD2536dE8487E3376BA9C6D1eFCE59f160507dE10",
   "proxyAdmin": "0xCe94834E4a0F26D2183E157c3A5423f1294AA277",
   "deployTimeConfig": {
     "asset": "0x0000000000000000000000000000000000000000",
@@ -402,6 +402,16 @@
       "max": "115792089237316195423570985008687907853269984665640564039457584007913129639935"
     }
   },
-  "numDeployments": 1,
-  "history": []
+  "numDeployments": 2,
+  "history": [
+    {
+      "implementation": "0xAE4Bd5836f6bFb337F1cefE42141Fe0c3a5F865a",
+      "contractName": "BitSafeEvmAssetBridge",
+      "solcInputHash": "cc57df3556e754a5",
+      "gitCommit": "bf5449e",
+      "transactionHash": "0x8a919bff598b7c994141e75e0c2935294de7a4c4cf818cabbbf94667d6011dd4",
+      "deployedAt": "2026-09-17T13:57:25Z",
+      "record": "BETH_TESTNET.previousImplementation_1.11155111.json"
+    }
+  ]
 }
