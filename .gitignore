@@ -17,3 +17,5 @@ deployments/.safe/
 # private keys. The per-network .env.<network> files hold no secret and stay
 # tracked.
 .env
+# Claude Code local permission rules can contain approved secrets
+**/.claude/settings.local.json
