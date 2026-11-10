@@ -19,3 +19,7 @@ deployments/.safe/
 .env
 # Claude Code local permission rules can contain approved secrets
 **/.claude/settings.local.json
+
+# Python environments for operator tooling
+.venv/
+__pycache__/

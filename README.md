@@ -136,23 +136,16 @@ The deployer also needs HYPE on HyperEVM for gas. A testnet deploy cost about
 Python SDK, because the signature scheme is easy to get wrong by hand. The
 script reads the Foundry keystore, so the key never enters your shell history:
 
-```
-pip install hyperliquid-python-sdk==0.24.0 eth-account
-python3 - <<'EOF'
-import getpass, json, os, eth_account
-from hyperliquid.exchange import Exchange
-from hyperliquid.utils import constants
-keystore = json.load(open(os.path.expanduser("~/.foundry/keystores/deployer")))
-key = eth_account.Account.decrypt(keystore, getpass.getpass("keystore password: "))
-exchange = Exchange(eth_account.Account.from_key(key), constants.TESTNET_API_URL)
-print(exchange.use_big_blocks(True))
-EOF
+```bash
+./script/hyperliquid/big-blocks.sh on --network testnet --account deployer
 ```
 
-Pass `constants.MAINNET_API_URL` or `constants.TESTNET_API_URL` exactly. The
-SDK signs for mainnet only when the URL equals the mainnet constant. Any
-other text, such as a trailing slash, makes a testnet signature. The SDK
-needs a local key, so a Ledger cannot sign this action.
+The launcher creates `.venv/hyperliquid` and installs the pinned SDK there.
+The script prompts for the keystore password and verifies the flag through the RPC.
+The script reads the key from `~/.foundry/keystores/<account>` and keeps it in memory.
+`FOUNDRY_ACCOUNT=deployer` supplies the account when `--account` is absent.
+`--network mainnet` selects mainnet explicitly.
+The SDK needs a local key, so a Ledger cannot sign this action.
 
 The SDK sends this request. Use it as a reference only:
 
@@ -191,7 +184,12 @@ base fee from a small block. `cast rpc --rpc-url <url> eth_bigBlockGasPrice`
 returns it. If it is higher than the max fee that `forge` prints, add
 `--with-gas-price <wei>` to `SIGNER`.
 
-**5. Turn off big blocks.** Run step 2 again with `use_big_blocks(False)`.
+**5. Turn off big blocks.** The operator runs:
+
+```bash
+./script/hyperliquid/big-blocks.sh off --network testnet --account deployer
+```
+
 Then run step 3 and expect `false`. If the flag stays on, every later
 transaction from the deployer waits up to a minute. Never set the flag on an
 attestor key. Each payout would then wait for a big block.
