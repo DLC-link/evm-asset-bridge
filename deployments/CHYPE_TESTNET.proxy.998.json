@@ -374,7 +374,7 @@
   },
   "gitCommit": "1af095d",
   "deployedAt": "2026-10-26T13:42:02Z",
-  "implementation": "0x90bbD0A5B129Ef58dd46c2903Ec58A787Ca15378",
+  "implementation": "0xb8168CAC61A2d49b9B431795DeD77Fda3864eB5E",
   "proxyAdmin": "0x5700f88005F3927030908142b197bd3c06a9CA88",
   "deployTimeConfig": {
     "asset": "0x0000000000000000000000000000000000000000",
@@ -402,6 +402,16 @@
       "max": "115792089237316195423570985008687907853269984665640564039457584007913129639935"
     }
   },
-  "numDeployments": 1,
-  "history": []
+  "numDeployments": 2,
+  "history": [
+    {
+      "implementation": "0x90bbD0A5B129Ef58dd46c2903Ec58A787Ca15378",
+      "contractName": "BitSafeEvmAssetBridge",
+      "solcInputHash": "8ad071476d8929ba",
+      "gitCommit": "1af095d",
+      "transactionHash": "0xa6c893c8ea186b0e3ce2fca1b6763250f197a908764c7b86449c4021d34fc906",
+      "deployedAt": "2026-10-26T13:42:02Z",
+      "record": "CHYPE_TESTNET.previousImplementation_1.998.json"
+    }
+  ]
 }
