@@ -235,8 +235,11 @@ The horizon bounds how far a withdrawal `deadline` can lie past
 bound. The bridge admin sets the horizon with `setWithdrawalHorizon(horizon)`.
 `initialize` does not set the horizon.
 
-A new horizon invalidates every unsubmitted bundle whose deadline lies past
-the new bound. The signers must then re-sign those requests.
+A lower horizon rejects every unsubmitted bundle whose deadline lies past the
+new bound. The rejection lasts only until the deadline falls inside the bound.
+A higher horizon, or a horizon of `0`, can let such a bundle pass at once. A
+horizon change never makes a bundle invalid. A bundle expires only after its
+signed `deadline`.
 [The withdrawal horizon rule](script/manage/README.md#5-the-withdrawal-horizon-rule)
 gives the procedure.
 
@@ -476,8 +479,10 @@ Rules the contract enforces on submission (`withdraw`):
   the bound.
 
 The signers choose the `deadline`. A lower horizon can reject a bundle that
-the signers signed under the old horizon. The signers then sign the request
-again.
+the signers signed under the old horizon. The bundle stays valid, and it
+passes again when its deadline falls inside the horizon. A new bundle for the
+same request id leaves both bundles valid. The contract pays only one of
+them.
 
 A signer checks its encoding against the live contract. The view
 `withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline)`
