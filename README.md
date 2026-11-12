@@ -501,6 +501,10 @@ works while the bridge is paused.
 [Void a withdraw request](script/manage/README.md#13-void-a-withdraw-request)
 gives the order of the void and the Canton cancel.
 
+`isWithdrawRequestUsed` returns `true` for a paid id and for a voided id. The
+contract state does not record which of the two happened. Read the `Withdraw`
+and `WithdrawRequestVoided` events to tell them apart.
+
 ## Deposit events
 
 Both `depositETH` and `depositERC20` emit the same event:
