@@ -222,6 +222,12 @@ bucket that holds at most `capacity` base units. The bucket refills at
 `capacity` of `0` disables the check. `initialize` does not set the rate
 limit.
 
+A new `capacity` acts at once, and the bucket keeps the use that it already
+counted. A `capacity` below that use stops all withdrawals. Withdrawals start
+again after the bucket refills enough, or after the bridge admin raises
+`capacity`. The refill can take longer than one `window`. While the check is
+on, every withdrawal above `capacity` fails.
+
 ### Post-deploy: the withdrawal horizon
 
 The horizon bounds how far a withdrawal `deadline` can lie past
