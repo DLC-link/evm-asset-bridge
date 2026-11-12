@@ -61,7 +61,7 @@ The bridge admin can:
 - Unpause the bridge.
 - Set the minimum and maximum amount for one deposit.
 - Set the minimum and maximum amount for one withdrawal.
-- Set the withdrawal rate limit, which caps the total released in a time window.
+- Set the withdrawal rate limit.
 - Set the withdrawal horizon, which caps how far ahead a withdrawal deadline can be.
 - Void a withdrawal request, so no signed approval for it can ever pay out.
 - Rescue tokens other than the bridged asset that someone sent to the bridge by mistake.

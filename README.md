@@ -217,8 +217,10 @@ The bridge admin sets the withdrawal rate limit with
 `setWithdrawRateLimit(capacity, window)`. Withdrawals draw from a token
 bucket that holds at most `capacity` base units. The bucket refills at
 `capacity / window` per second, so an empty bucket is full again after
-`window` seconds. A `capacity` of `0` disables the check. `initialize` does
-not set the rate limit.
+`window` seconds. Close to twice `capacity` can therefore leave in one
+`window`: the full bucket at the start, and a full refill by the end. A
+`capacity` of `0` disables the check. `initialize` does not set the rate
+limit.
 
 ### Post-deploy: the withdrawal horizon
 
