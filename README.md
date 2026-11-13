@@ -64,7 +64,7 @@ The deploy reads its configuration from the environment:
 | `ADMIN_DELAY` | Default-admin transfer delay, in seconds |
 | `BRIDGE_ADMIN` | Address granted `BRIDGE_ADMIN_ROLE` (pause, limits, rescue) |
 | `PROXY_OWNER` | Proposer, canceller, and executor of the timelock that owns the `ProxyAdmin`; in the mainnet deploy inputs, the multi-organisation Safe, same as `DEFAULT_ADMIN` |
-| `TIMELOCK_DELAY` | Upgrade timelock delay, in seconds; an upgrade waits this long after its proposal |
+| `TIMELOCK_DELAY` | Upgrade timelock delay, in seconds; an upgrade waits this long after its proposal. The minimum is 48 hours, or 60 seconds on a test chain (31337, Sepolia, HyperEVM testnet) |
 | `ATTESTORS` | Comma-separated attestor addresses granted `ATTESTOR_ROLE` |
 | `THRESHOLD` | Number of attestor signatures required per withdrawal |
 | `DEPOSIT_MIN` | Minimum deposit amount (0 = no minimum) |
