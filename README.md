@@ -217,8 +217,16 @@ The bridge admin sets the withdrawal rate limit with
 `setWithdrawRateLimit(capacity, window)`. Withdrawals draw from a token
 bucket that holds at most `capacity` base units. The bucket refills at
 `capacity / window` per second, so an empty bucket is full again after
-`window` seconds. A `capacity` of `0` disables the check. `initialize` does
-not set the rate limit.
+`window` seconds. Close to twice `capacity` can therefore leave in one
+`window`: the full bucket at the start, and a full refill by the end. A
+`capacity` of `0` disables the check. `initialize` does not set the rate
+limit.
+
+A new `capacity` acts at once, and the bucket keeps the use that it already
+counted. A `capacity` below that use stops all withdrawals. Withdrawals start
+again after the bucket refills enough, or after the bridge admin raises
+`capacity`. The refill can take longer than one `window`. While the check is
+on, every withdrawal above `capacity` fails.
 
 ### Post-deploy: the withdrawal horizon
 
@@ -227,8 +235,11 @@ The horizon bounds how far a withdrawal `deadline` can lie past
 bound. The bridge admin sets the horizon with `setWithdrawalHorizon(horizon)`.
 `initialize` does not set the horizon.
 
-A new horizon invalidates every unsubmitted bundle whose deadline lies past
-the new bound. The signers must then re-sign those requests.
+A lower horizon rejects every unsubmitted bundle whose deadline lies past the
+new bound. The rejection lasts only until the deadline falls inside the bound.
+A higher horizon, or a horizon of `0`, can let such a bundle pass at once. A
+horizon change never makes a bundle invalid. A bundle expires only after its
+signed `deadline`.
 [The withdrawal horizon rule](script/manage/README.md#5-the-withdrawal-horizon-rule)
 gives the procedure.
 
@@ -468,8 +479,10 @@ Rules the contract enforces on submission (`withdraw`):
   the bound.
 
 The signers choose the `deadline`. A lower horizon can reject a bundle that
-the signers signed under the old horizon. The signers then sign the request
-again.
+the signers signed under the old horizon. The bundle stays valid, and it
+passes again when its deadline falls inside the horizon. A new bundle for the
+same request id leaves both bundles valid. The contract pays only one of
+them.
 
 A signer checks its encoding against the live contract. The view
 `withdrawalDigest(withdrawRequestId, destinationAddress, amount, deadline)`
@@ -487,6 +500,10 @@ id therefore cannot be voided, and a voided id cannot be paid. The function
 works while the bridge is paused.
 [Void a withdraw request](script/manage/README.md#13-void-a-withdraw-request)
 gives the order of the void and the Canton cancel.
+
+`isWithdrawRequestUsed` returns `true` for a paid id and for a voided id. The
+contract state does not record which of the two happened. Read the `Withdraw`
+and `WithdrawRequestVoided` events to tell them apart.
 
 ## Deposit events
 
