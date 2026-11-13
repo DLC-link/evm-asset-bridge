@@ -187,7 +187,9 @@ echo "== the explorer never concludes =="
 # The fake sleep makes this case fast. The real loop waits 150 seconds.
 run_stub "$NOT_VERIFIED" "$GUID" '{"status":"1","result":"Pending in queue"}'
 check    "exits non-zero on a timeout" "$STUB_RC" "1"
-contains "reports the timeout"         "$STUB_OUT" "timed out after 150 seconds"
+contains "reports the pending timeout" "$STUB_OUT" "still pending after"
+contains "reports the verification ticket" "$STUB_OUT" "GUID stubguid"
+contains "reports the pending reply" "$STUB_OUT" "result=Pending in queue"
 
 echo "== the explorer sends no JSON =="
 # A rate-limit page or an empty body must fail one role with a readable reason.
@@ -202,7 +204,7 @@ contains "quotes the page it got" "$STUB_OUT" "the explorer sent no JSON: <html>
 
 run_stub "$NOT_VERIFIED" "$GUID" '<html>429 Too Many Requests</html>'
 check    "exits non-zero on a non-JSON poll reply" "$STUB_RC" "1"
-contains "names the timeout"      "$STUB_OUT" "timed out after 150 seconds"
+contains "names the timeout"      "$STUB_OUT" "polling ended after"
 contains "quotes the poll page"   "$STUB_OUT" "the explorer sent no JSON: <html>429 Too Many Requests</html>"
 
 echo "== the explorer accepts the submit but sends no guid =="
