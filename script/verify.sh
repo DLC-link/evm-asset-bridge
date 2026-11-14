@@ -303,6 +303,7 @@ CFG
     FAILED=$((FAILED + 1))
     continue
   fi
+  echo "  QUEUED $ROLE: verification GUID ${GUID//"$KEY"/[redacted]} (chain $CHAIN)"
 
   # ---- poll -----------------------------------------------------------------
   # TEXT holds the poll's result field. The loop keeps polling while TEXT is
@@ -313,10 +314,15 @@ CFG
   RESULT=""
   RESULT_STATUS=""
   POLL_NOTE=""
-  for _ in $(seq 1 30); do
+  POLL_STARTED=$SECONDS
+  for ATTEMPT in $(seq 1 30); do
     sleep 5
     POLL=$(curl_get "$HOST$(sep "$HOST")module=contract&action=checkverifystatus&guid=$GUID&apikey=$KEY" 30)
     TEXT=$(json_field "$POLL" .result "")
+    POLL_STATUS=$(json_field "$POLL" .status "missing")
+    POLL_MESSAGE=$(json_field "$POLL" .message "missing")
+    POLL_SUMMARY="status=$POLL_STATUS message=$POLL_MESSAGE result=${TEXT:-<empty>}"
+    echo "  POLL $ROLE $ATTEMPT/30 ($((SECONDS - POLL_STARTED))s): ${POLL_SUMMARY//"$KEY"/[redacted]}"
     if [ -z "$TEXT" ]; then
       # An empty body, or a body this script cannot read, is not a verdict. The
       # loop keeps polling and keeps the reason for the timeout message.
@@ -339,10 +345,10 @@ CFG
   # An empty RESULT means every poll timed out or pended. That counts as a
   # failure. The explorer's last "still pending" reply can still carry status "1".
   if [ -z "$RESULT" ] && [ -n "$POLL_NOTE" ]; then
-    echo "  FAIL $ROLE $ADDRESS: timed out after 150 seconds. $POLL_NOTE"
+    echo "  FAIL $ROLE $ADDRESS: polling ended after $((SECONDS - POLL_STARTED)) seconds. $POLL_NOTE"
     FAILED=$((FAILED + 1))
   elif [ -z "$RESULT" ]; then
-    echo "  FAIL $ROLE $ADDRESS: timed out after 150 seconds"
+    echo "  FAIL $ROLE $ADDRESS: still pending after $((SECONDS - POLL_STARTED)) seconds; GUID ${GUID//"$KEY"/[redacted]}"
     FAILED=$((FAILED + 1))
   elif [ "$RESULT_STATUS" = "1" ]; then
     echo "  OK   $ROLE $ADDRESS: $RESULT"
