@@ -50,6 +50,13 @@ A handover completes only when the new holder accepts it after the delay.
 The default admin can remove an attestor at any time, even below the signature threshold.
 An attestor cannot give up the role on its own.
 
+The default admin acts at once, without the upgrade timelock.
+A new attestor or a new threshold takes effect in the same transaction.
+The Multi-org Safe holds the default admin role and also drives the upgrade timelock.
+The same signer quorum therefore controls both paths, but only an upgrade waits for a public delay.
+An attacker who controls that quorum can appoint their own attestors and release the locked funds without a delay.
+The bridge relies on the multi-organisation quorum of that Safe to prevent this.
+
 ## Bridge admin
 
 The bridge admin runs the bridge from day to day.
@@ -61,7 +68,7 @@ The bridge admin can:
 - Unpause the bridge.
 - Set the minimum and maximum amount for one deposit.
 - Set the minimum and maximum amount for one withdrawal.
-- Set the withdrawal rate limit, which caps the total released in a time window.
+- Set the withdrawal rate limit.
 - Set the withdrawal horizon, which caps how far ahead a withdrawal deadline can be.
 - Void a withdrawal request, so no signed approval for it can ever pay out.
 - Rescue tokens other than the bridged asset that someone sent to the bridge by mistake.

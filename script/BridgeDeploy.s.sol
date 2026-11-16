@@ -21,9 +21,13 @@ abstract contract BridgeDeploy is DeployBase {
     string internal constant OZ_TIMELOCK_PATH =
         "lib/openzeppelin-contracts/contracts/governance/TimelockController.sol";
 
-    /// A delay below one minute gives no real review window. A zero delay
-    /// lets the proxy owner schedule and execute an upgrade in one block.
-    uint256 internal constant MIN_TIMELOCK_DELAY = 60;
+    /// Users need time to see a pending upgrade and to exit before it runs.
+    uint256 internal constant MIN_TIMELOCK_DELAY = 48 hours;
+
+    /// A test chain keeps a one-minute floor, so testnet upgrades stay fast.
+    /// A zero delay would let the proxy owner schedule and execute an upgrade
+    /// in one block.
+    uint256 internal constant MIN_TIMELOCK_DELAY_TEST_CHAIN = 60;
 
     /// One struct keeps `run` inside the EVM stack limit.
     struct Params {
@@ -60,7 +64,7 @@ abstract contract BridgeDeploy is DeployBase {
         p.bridgeAdmin = vm.envAddress("BRIDGE_ADMIN");
         p.proxyOwner = vm.envAddress("PROXY_OWNER");
         p.timelockDelay = vm.envUint("TIMELOCK_DELAY");
-        require(p.timelockDelay >= MIN_TIMELOCK_DELAY, "TIMELOCK_DELAY too low");
+        require(p.timelockDelay >= _minTimelockDelay(), "TIMELOCK_DELAY too low");
         p.attestors = vm.envAddress("ATTESTORS", ",");
         // A bridge with no attestor can release nothing. Foundry stops on an
         // empty ATTESTORS before this line today. The require states the intent
@@ -123,13 +127,26 @@ abstract contract BridgeDeploy is DeployBase {
     /// itself. The zero admin argument adds no second admin, so a role or delay
     /// change has to pass through the timelock and waits the delay.
     function _deployTimelock(uint256 delay, address proxyOwner) internal returns (TimelockController) {
-        require(delay >= MIN_TIMELOCK_DELAY, "TIMELOCK_DELAY too low");
+        require(delay >= _minTimelockDelay(), "TIMELOCK_DELAY too low");
         require(proxyOwner != address(0), "PROXY_OWNER is zero");
         address[] memory proposers = new address[](1);
         proposers[0] = proxyOwner;
         address[] memory executors = new address[](1);
         executors[0] = proxyOwner;
         return new TimelockController(delay, proposers, executors, address(0));
+    }
+
+    /// An unknown chain counts as production, so a new mainnet gets the
+    /// 48-hour floor without a code change.
+    function _isTestChain() internal view returns (bool) {
+        return
+            block.chainid == 31337 // anvil and forge test
+                || block.chainid == 11155111 // Sepolia
+                || block.chainid == 998; // HyperEVM testnet
+    }
+
+    function _minTimelockDelay() internal view returns (uint256) {
+        return _isTestChain() ? MIN_TIMELOCK_DELAY_TEST_CHAIN : MIN_TIMELOCK_DELAY;
     }
 
     /// Writes the bridge configuration into the pending file.

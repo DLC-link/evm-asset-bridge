@@ -103,6 +103,26 @@ contract DeployTest is Test {
         vm.expectRevert(bytes("TIMELOCK_DELAY too low"));
         shortTimelock.run();
 
+        // Every chain outside the test-chain list needs 48 hours. Chain 1 shows
+        // the boundary.
+        uint256 localChain = block.chainid;
+        vm.chainId(1);
+        vm.setEnv("TIMELOCK_DELAY", "172799");
+        Deploy_BETH shortMainnetTimelock = new Deploy_BETH();
+        vm.expectRevert(bytes("TIMELOCK_DELAY too low"));
+        shortMainnetTimelock.run();
+
+        vm.setEnv("TIMELOCK_DELAY", "172800");
+        new Deploy_BETH().run();
+        vm.removeFile("deployments/.pending/BETH.1.json");
+
+        // The HyperEVM testnet keeps the one-minute floor.
+        vm.chainId(998);
+        vm.setEnv("TIMELOCK_DELAY", "60");
+        new Deploy_CHYPE_TESTNET().run();
+        vm.removeFile("deployments/.pending/CHYPE_TESTNET.998.json");
+        vm.chainId(localChain);
+
         // Each instance carries its own name. Two instances with one
         // name would write the same record files.
         assertEq(new Deploy_BETH_DEVNET().deploymentName(), "BETH_DEVNET");

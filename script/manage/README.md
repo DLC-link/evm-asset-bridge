@@ -298,10 +298,15 @@ rounded value falls below `minAmount`. Read `depositUnit` from
 The horizon bounds how far a withdrawal deadline can sit past the current
 time. A horizon of 0 disables the bound.
 
-One `SetWithdrawalHorizon` transaction activates the bound. A change
-invalidates every unsubmitted bundle whose deadline lies past the new bound.
-The signers must re-sign those requests. Expect a short delay in withdrawals
-after this change. Start with a long
+One `SetWithdrawalHorizon` transaction activates the bound. A lower horizon
+rejects every unsubmitted bundle whose deadline lies past the new bound. The
+rejection lasts until the deadline falls inside the bound. A higher horizon
+can let those bundles pass again at once. A horizon change never makes a
+bundle invalid. Only a void or the signed deadline stops a bundle permanently.
+
+Expect a short delay in withdrawals after you lower the horizon. The signers
+can sign the delayed requests again with a nearer deadline. The old bundles
+stay valid, but the contract pays each request id only once. Start with a long
 horizon, such as 48 hours.
 
 ```bash
@@ -311,12 +316,15 @@ make manage SCRIPT=SetWithdrawalHorizon SIG='run(uint256)' ARGS=172800 \
 
 ### Recover after a long pause
 
-A pause longer than the horizon expires every pending bundle. The request ids
-stay unused, so no funds are at risk. Recover in three steps:
+A pause does not change any bundle. A bundle expires only after its signed
+deadline, whatever the length of the pause. A bundle whose deadline is still
+ahead stays valid, and an attestor can submit it after the unpause. Recover in
+two steps:
 
-1. Raise the horizon above the age of the oldest pending request.
-2. Let the signers re-sign the pending requests.
-3. Lower the horizon after the pending requests clear.
+1. Before the unpause, void each request that must not pay, as
+   [Void a withdraw request](#13-void-a-withdraw-request) describes.
+2. Let the signers sign each expired request again with a new deadline. The
+   ids of expired bundles stay unused, so no funds are at risk.
 
 ## 6. The default admin transfer
 
