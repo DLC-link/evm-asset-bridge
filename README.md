@@ -41,6 +41,28 @@ and `.env.hyperevm-testnet.<NAME>` hold the HyperEVM values.
 | `CHYPE` | The production HYPE bridge | HyperEVM mainnet |
 | `CHYPE_DEVNET` | The HYPE instance whose attestors run against Canton devnet | HyperEVM testnet |
 | `CHYPE_TESTNET` | The HYPE instance whose attestors run against Canton testnet | HyperEVM testnet |
+| `CBNB` | The production BNB bridge | BSC mainnet |
+
+CBNB locks native BNB on BSC mainnet (chain ID 56).
+`script/Deploy_CBNB.s.sol` uses the shared bridge deployment script.
+`.env.bsc.CBNB` holds its public configuration.
+Both deposits and withdrawals allow 0.03–300 BNB per transaction.
+Both attestors must sign each withdrawal.
+The admin-transfer delay and upgrade delay are each 48 hours.
+The governance Safes temporarily use an operator-approved 1-of-3 threshold.
+
+```bash
+set -a
+source .env.bsc.CBNB
+set +a
+make deploy DEPLOYMENT=CBNB RPC_URL=https://bsc-dataseed.bnbchain.org \
+  SIGNER="--account mainnetDeployer --sender 0x9506Ea24038609679732855F757041a3C1C06623"
+make verify DEPLOYMENT=CBNB CHAIN_ID=56
+```
+
+The verification command needs `ETHERSCAN_API_KEY_56` or `ETHERSCAN_API_KEY`.
+The bridge admin configures the withdrawal rate limit and horizon separately.
+Both settings start disabled.
 
 `make deploy` runs two steps. `forge script` broadcasts the deploy. `script/record.sh`
 then writes the deployment records. The `make record` target repeats the
