@@ -1,5 +1,18 @@
 version: 2
 updates:
+  - package-ecosystem: pip
+    directory: /script/hyperliquid
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      pip-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
