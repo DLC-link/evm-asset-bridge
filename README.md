@@ -9,6 +9,10 @@ BitSafeEvmAssetBridge: an upgradeable EVM contract that locks one asset
 - Integration-test image: `make it-verify` (see `infra/docker/README.md`)
 - Upgrade through the timelock: `make upgrade-deploy`, `upgrade-schedule`, `upgrade-status`, `upgrade-execute`, `upgrade-cancel`, `upgrade-sync` (see [Upgrade through the timelock](script/manage/README.md#12-upgrade-through-the-timelock))
 
+## Security audit
+
+See [Quantstamp’s November 2026 audit report](audits/nov_2026/BitSafe_EVM_Asset_Bridge_Updated_Final_Report.pdf) for the BitSafe EVM Asset Bridge.
+
 ## Production deploy
 
 `script/Deploy_BETH.s.sol` deploys the implementation behind a
