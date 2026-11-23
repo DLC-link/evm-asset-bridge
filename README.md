@@ -11,7 +11,7 @@ BitSafeEvmAssetBridge: an upgradeable EVM contract that locks one asset
 
 ## Security audit
 
-See [Quantstamp’s November 2026 audit report](audits/nov_2026/Quantstamp_final.pdf) for the BitSafe EVM Asset Bridge.
+See [Quantstamp’s November 2026 audit report](docs/audits/Quantstamp_final.pdf) for the BitSafe EVM Asset Bridge.
 
 ## Production deploy
 
