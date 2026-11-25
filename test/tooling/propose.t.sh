@@ -88,6 +88,45 @@ contains "prints the calldata" "$OUT" \
   "propose.sh: data 0x960bfe0400000000000000000000000000000000000000000000000000000000000003"
 contains "prints the nonce and its source" "$OUT" "nonce 7 from the on-chain nonce"
 
+echo "== an envelope with no simulation field still proposes =="
+# The template carries no simulation field, like an envelope from an older
+# script. The run above therefore covers this case.
+contains "says the field is missing" "$OUT" "propose.sh: simulation not recorded"
+
+echo "== a passed simulation proposes with no warning =="
+fresh_envelope
+queue_reply empty
+printf '\n201' >"$WORK/post.txt"
+: >"$FAKE_CURL_LOG"
+jq '.simulation = "passed" | .revertData = "0x"' "$ENVELOPE" >"$WORK/passed.json"
+OUT=$(./script/manage/safe/propose.sh "$WORK/passed.json" 2>&1)
+check "exit status" "$?" "0"
+contains "prints the result" "$OUT" "propose.sh: simulation passed"
+case "$OUT" in
+  *"reverts at the current block"*) echo "  FAIL prints no revert warning"; FAILURES=$((FAILURES + 1)) ;;
+  *) echo "  ok   prints no revert warning" ;;
+esac
+BODY_JSON=$(awk '/^\{$/,/^\}$/' "$FAKE_CURL_LOG")
+check "the origin carries the result" \
+  "$(printf '%s' "$BODY_JSON" | jq -r '.origin | fromjson | .simulation')" "passed"
+
+echo "== a reverted simulation warns before it signs =="
+# ThresholdOutOfBounds(), the revert of a threshold above the attestor count.
+fresh_envelope
+queue_reply empty
+printf '\n201' >"$WORK/post.txt"
+: >"$FAKE_CURL_LOG"
+jq '.simulation = "reverted" | .revertData = "0xbe80e347"' "$ENVELOPE" >"$WORK/reverted.json"
+OUT=$(./script/manage/safe/propose.sh "$WORK/reverted.json" 2>&1)
+check "exit status" "$?" "0"
+contains "prints the result" "$OUT" "propose.sh: simulation reverted"
+contains "warns loudly" "$OUT" "WARNING. This call reverts at the current block."
+contains "prints the revert data" "$OUT" "propose.sh: revert data 0xbe80e347"
+contains "prints a reason line" "$OUT" "propose.sh: revert reason "
+BODY_JSON=$(awk '/^\{$/,/^\}$/' "$FAKE_CURL_LOG")
+check "the origin carries the result" \
+  "$(printf '%s' "$BODY_JSON" | jq -r '.origin | fromjson | .simulation')" "reverted"
+
 echo "== the hashed transaction matches the posted transaction =="
 # The owners sign the hash that getTransactionHash returns. The service shows
 # the fields that the body carries. A difference between the two lets an owner
@@ -372,6 +411,27 @@ for SIG_SHAPE in \
       FAILURES=$((FAILURES + 1)) ;;
   esac
 done
+
+echo "== SKIP_SIMULATION holds for one make line only =="
+# An exported SKIP_SIMULATION would apply to every later run. make and forge
+# also read loose boolean words in different ways. make therefore takes the
+# option from the make line only, and it accepts only "true".
+skip_run() { # skip_run <make args...>
+  make -n manage DEPLOYMENT=BETH SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3 \
+    RPC_URL="$RPC_URL" SAFE=0x1 FOUNDRY_BIN="$ROOT/test/tooling/fake" "$@" 2>&1 || true
+}
+OUT=$(SKIP_SIMULATION=true skip_run)
+contains "refuses an export" "$OUT" "SKIP_SIMULATION comes from your environment"
+OUT=$(skip_run SKIP_SIMULATION=yes)
+contains "refuses a word other than true" "$OUT" 'SKIP_SIMULATION accepts only "true"'
+OUT=$(skip_run SKIP_SIMULATION=true)
+contains "names the skip on the mode line" "$OUT" "It writes the envelope even if the call reverts."
+contains "passes the value to forge" "$OUT" 'SKIP_SIMULATION="true"'
+OUT=$(skip_run)
+case "$OUT" in
+  *"even if the call reverts"*) echo "  FAIL a run without the option names no skip"; FAILURES=$((FAILURES + 1)) ;;
+  *) echo "  ok   a run without the option names no skip" ;;
+esac
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

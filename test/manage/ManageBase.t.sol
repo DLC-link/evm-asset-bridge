@@ -157,6 +157,17 @@ contract DummySkipAction is DummyAction {
     }
 }
 
+/// Used by the test that records a role revert under the skip.
+contract DummySkipRoleAction is DummyAction {
+    function action() public pure override returns (string memory) {
+        return "dummySkipRole";
+    }
+
+    function deploymentName() public pure override returns (string memory) {
+        return "MANAGESKIPROLE";
+    }
+}
+
 /// Used by the test that rejects a skip in direct mode.
 contract DummySkipDirectAction is DummyAction {
     function action() public pure override returns (string memory) {
@@ -350,6 +361,8 @@ contract ManageBaseTest is BridgeTestBase {
         assertEq(vm.parseJsonString(json, ".value"), "0");
         assertEq(vm.parseJsonString(json, ".action"), "dummyWrite");
         assertEq(vm.parseJsonBytes(json, ".data"), abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
+        assertEq(vm.parseJsonString(json, ".simulation"), "passed");
+        assertEq(vm.parseJsonBytes(json, ".revertData"), "");
         vm.removeFile(path);
         _removeImplRecord("MANAGEWRITE");
     }
@@ -407,14 +420,11 @@ contract ManageBaseTest is BridgeTestBase {
 
     function test_safeMode_skipSimulation_writesAnEnvelopeForACallThatRevertsToday() public {
         // A threshold above the attestor count reverts at the current block.
-        // The skip writes the envelope anyway, and the call never runs.
+        // The skip writes the envelope anyway, and it records the revert.
         _writeImplRecord("MANAGESKIP", "BitSafeEvmAssetBridge");
         uint256 before = bridge.threshold();
         uint256 tooHigh = bridge.getAttestors().length + 1;
         bytes memory data = abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (tooHigh));
-        vm.prank(defaultAdmin);
-        (bool ok,) = address(bridge).call(data);
-        assertFalse(ok);
 
         DummySkipAction dummy = new DummySkipAction();
         dummy.configure(address(bridge), defaultAdmin);
@@ -427,8 +437,36 @@ contract ManageBaseTest is BridgeTestBase {
         assertEq(vm.parseJsonAddress(json, ".safe"), defaultAdmin);
         assertEq(vm.parseJsonAddress(json, ".to"), address(bridge));
         assertEq(vm.parseJsonBytes(json, ".data"), data);
+        assertEq(vm.parseJsonString(json, ".simulation"), "reverted");
+        assertEq(
+            vm.parseJsonBytes(json, ".revertData"),
+            abi.encodeWithSelector(BitSafeEvmAssetBridge.ThresholdOutOfBounds.selector)
+        );
         vm.removeFile(path);
         _removeImplRecord("MANAGESKIP");
+    }
+
+    function test_safeMode_skipSimulation_recordsTheRoleRevertOfAWrongSafe() public {
+        // `user` stands for a Safe that lacks DEFAULT_ADMIN, such as the
+        // BRIDGE_ADMIN Safe. The envelope must carry the role revert, so the
+        // proposer sees it before anybody signs.
+        _writeImplRecord("MANAGESKIPROLE", "BitSafeEvmAssetBridge");
+        DummySkipRoleAction dummy = new DummySkipRoleAction();
+        dummy.configure(address(bridge), user);
+        dummy.configureSkip(true);
+        dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
+
+        string memory path = "deployments/.safe/MANAGESKIPROLE.31337.dummySkipRole.json";
+        string memory json = vm.readFile(path);
+        assertEq(vm.parseJsonString(json, ".simulation"), "reverted");
+        assertEq(
+            vm.parseJsonBytes(json, ".revertData"),
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, user, bridge.DEFAULT_ADMIN_ROLE()
+            )
+        );
+        vm.removeFile(path);
+        _removeImplRecord("MANAGESKIPROLE");
     }
 
     function test_directMode_skipSimulation_reverts() public {

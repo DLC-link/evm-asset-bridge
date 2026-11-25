@@ -44,6 +44,6 @@ contract ExecuteUpdateDelay is UpdateDelayManage {
         console2.log("new delay (s)", newDelay);
         console2.log("operation id");
         console2.logBytes32(id);
-        console2.log("delay after the call (s)", currentDelay());
+        console2.log("delay at the end of this run (s)", currentDelay());
     }
 }

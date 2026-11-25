@@ -364,6 +364,7 @@ contract UpgradeActionsTest is UpgradeFixture {
         assertTrue(timelock.isOperationPending(id));
         string memory envelope = vm.readFile(_envelope(name, "executeUpgrade"));
         assertEq(vm.parseJsonAddress(envelope, ".to"), address(timelock));
+        assertEq(vm.parseJsonString(envelope, ".simulation"), "reverted");
         assertEq(
             vm.parseJsonBytes(envelope, ".data"),
             abi.encodeCall(

@@ -126,10 +126,11 @@ endif
 #   SAFE=0xYourSafe make manage DEPLOYMENT=BETH SCRIPT=Pause SIG='run()' \
 #     RPC_URL=https://...
 #
-# SKIP_SIMULATION=true skips that simulation in Safe mode. Use it for a call
-# that reverts today but succeeds after earlier Safe transactions run:
+# SKIP_SIMULATION=true on the make line keeps a revert in that simulation
+# from stopping the run. Use it for a call that reverts today but succeeds
+# after earlier Safe transactions run:
 #
-#   SKIP_SIMULATION=true SAFE=0xYourSafe make manage DEPLOYMENT=BETH \
+#   SAFE=0xYourSafe make manage DEPLOYMENT=BETH SKIP_SIMULATION=true \
 #     SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3 RPC_URL=https://...
 #
 # Several arguments need one pair of quotes. The shell splits them again:
@@ -165,9 +166,11 @@ MANAGE_READ_ONLY := Status
 # --password, and a terminal log keeps whatever a command prints. The operator
 # passes SIGNER on the make line, so the line would only repeat what the
 # command already shows.
-# SKIP_SIMULATION writes the envelope without the simulation. The mode line
-# names it, because the operator must know that nothing proves the call.
-SKIP_NOTE := $(if $(filter-out false 0,$(strip $(SKIP_SIMULATION))), It skips the simulation.,)
+# SKIP_SIMULATION=true writes the envelope even when the call reverts today.
+# It must come from the make line, so it holds for one run only. An export
+# would keep it for every later run. The rule further down enforces both
+# points, and it accepts only "true". make and forge therefore read one value.
+SKIP_NOTE := $(if $(SKIP_SIMULATION), It writes the envelope even if the call reverts.,)
 
 ifneq ($(strip $(SAFE)),)
 MANAGE_FLAGS :=
@@ -245,7 +248,7 @@ define UPGRADE_ACTION
 $(call upgrade_require,$@)
 $(UPGRADE_SYNC)
 @echo "$@: $(UPGRADE_MODE)"
-@DEPLOYMENT="$(DEPLOYMENT)" DATA="$(DATA)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+@DEPLOYMENT="$(DEPLOYMENT)" DATA="$(DATA)" SKIP_SIMULATION="$(SKIP_SIMULATION)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  $(UPGRADE_DIR)/$(1).s.sol:$(1) --sig 'run()' --rpc-url "$(RPC_URL)" $(UPGRADE_FLAGS)
 $(UPGRADE_POST_SYNC)
 endef
@@ -270,7 +273,7 @@ define TIMELOCK_DELAY_ACTION
 $(call upgrade_require,$@)
 $(if $(DELAY),,$(error DELAY is not set. Example: make $@ DELAY=86400 DEPLOYMENT=BETH RPC_URL=...))
 @echo "$@: $(UPGRADE_MODE)"
-@DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+@DEPLOYMENT="$(DEPLOYMENT)" SKIP_SIMULATION="$(SKIP_SIMULATION)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  $(UPGRADE_DIR)/$(1).s.sol:$(1) --sig 'run(uint256)' "$(DELAY)" --rpc-url "$(RPC_URL)" $(UPGRADE_FLAGS)
 endef
 
@@ -304,6 +307,18 @@ ifdef UPGRADE_NEEDS_SIGNER
 SIGNER_GOALS += $(filter upgrade-schedule upgrade-execute upgrade-cancel timelock-delay-schedule timelock-delay-execute timelock-delay-cancel,$(MAKECMDGOALS))
 endif
 
+SKIP_GOALS := $(filter manage upgrade-schedule upgrade-execute upgrade-cancel timelock-delay-schedule timelock-delay-execute timelock-delay-cancel,$(MAKECMDGOALS))
+ifneq ($(strip $(SKIP_GOALS)),)
+ifneq ($(strip $(SKIP_SIMULATION)),)
+ifeq ($(origin SKIP_SIMULATION),environment)
+$(error SKIP_SIMULATION comes from your environment. Unset it, and pass it on the make line for one run: make $(firstword $(SKIP_GOALS)) SKIP_SIMULATION=true ...)
+endif
+ifneq ($(SKIP_SIMULATION),true)
+$(error SKIP_SIMULATION accepts only "true". Leave it out to keep the simulation)
+endif
+endif
+endif
+
 ifneq ($(strip $(SIGNER_GOALS)),)
 ifeq ($(origin SIGNER),environment)
 $(error SIGNER comes from your environment. Pass it on the make line instead: make $(firstword $(SIGNER_GOALS)) SIGNER="--account <name>" ...)
@@ -329,7 +344,7 @@ ifndef RPC_URL
 	$(error RPC_URL is not set. Example: make manage SCRIPT=Pause SIG='run()' RPC_URL=...)
 endif
 	@echo "manage: $(MANAGE_MODE)"
-	@DEPLOYMENT="$(DEPLOYMENT)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
+	@DEPLOYMENT="$(DEPLOYMENT)" SKIP_SIMULATION="$(SKIP_SIMULATION)" PATH="$(FOUNDRY_BIN):$$PATH" forge script \
 	  script/manage/$(MANAGE_CONTRACT)/$(SCRIPT).s.sol:$(SCRIPT) \
 	  --sig '$(SIG)' $(ARGS) --rpc-url "$(RPC_URL)" $(MANAGE_FLAGS)
 

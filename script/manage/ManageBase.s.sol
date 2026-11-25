@@ -3,6 +3,7 @@ pragma solidity 0.8.34;
 
 import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 /// @title ManageBase
 /// @notice The shared half of every management script. It finds the deployed
@@ -91,8 +92,8 @@ abstract contract ManageBase is Script {
     }
 
     /// True when the operator sets SKIP_SIMULATION. Safe mode then writes the
-    /// envelope without the prank call. The operator uses it for an action
-    /// that reverts today but succeeds after earlier Safe transactions run.
+    /// envelope even when the call reverts today. The operator uses it for an
+    /// action that succeeds only after earlier Safe transactions run.
     /// A test overrides it, for the same reason as `safeAddress`.
     function skipSimulation() internal view virtual returns (bool) {
         return vm.envOr("SKIP_SIMULATION", false);
@@ -128,8 +129,7 @@ abstract contract ManageBase is Script {
 
     /// @dev A direct broadcast cannot skip the simulation: forge simulates
     ///      every broadcast itself, and a reverting call would only burn gas.
-    ///      The skip therefore needs a Safe, and it still rejects a target
-    ///      with no code.
+    ///      The skip therefore needs a Safe.
     function _dispatch(address to, bytes memory data) private {
         address safe = safeAddress();
         bool skip = skipSimulation();
@@ -140,17 +140,43 @@ abstract contract ManageBase is Script {
             vm.startBroadcast();
             _call(to, data);
             vm.stopBroadcast();
-        } else if (skip) {
-            _requireCode(to);
-            console2.log("WARNING: SKIP_SIMULATION is set. Nothing proves that this call succeeds.");
-            _writeEnvelope(safe, to, data);
+            return;
+        }
+
+        // The prank proves the Safe holds the role and the arguments are
+        // valid. It runs before anybody signs, and it costs nothing. The skip
+        // still runs it, and records a revert instead of stopping on it.
+        bool reverted;
+        bytes memory revertData;
+        if (skip) {
+            (reverted, revertData) = _simulate(safe, to, data);
         } else {
-            // The prank proves the Safe holds the role and the arguments are
-            // valid. It runs before anybody signs, and it costs nothing.
             vm.prank(safe);
             _call(to, data);
-            _writeEnvelope(safe, to, data);
         }
+        _writeEnvelope(safe, to, data, reverted, revertData);
+    }
+
+    /// Runs the call from the Safe and returns its revert instead of raising
+    /// it. A role revert names the most likely cause: SAFE names a Safe that
+    /// lacks the role, and no earlier transaction changes that.
+    function _simulate(address safe, address to, bytes memory data)
+        private
+        returns (bool reverted, bytes memory revertData)
+    {
+        _requireCode(to);
+        vm.prank(safe);
+        (bool ok, bytes memory ret) = to.call(data);
+        if (ok) {
+            return (false, "");
+        }
+        console2.log("WARNING: SKIP_SIMULATION is set, and the call reverts at the current block.");
+        console2.log("revert data:");
+        console2.logBytes(ret);
+        if (ret.length >= 4 && bytes4(ret) == IAccessControl.AccessControlUnauthorizedAccount.selector) {
+            console2.log("WARNING: the Safe does not hold the role for this call. Check SAFE.");
+        }
+        return (true, ret);
     }
 
     /// Bubbles the target's own revert data, so a role failure reports the
@@ -177,7 +203,11 @@ abstract contract ManageBase is Script {
     /// Writes the transaction envelope that script/manage/safe/propose.sh
     /// reads. The envelope carries no bridge knowledge, so a later upgrade
     /// script reuses the same proposer.
-    function _writeEnvelope(address safe, address to, bytes memory data) private {
+    /// `simulation` tells the proposer whether the call passed or reverted
+    /// at the current block. `revertData` holds the revert, or "0x".
+    function _writeEnvelope(address safe, address to, bytes memory data, bool reverted, bytes memory revertData)
+        private
+    {
         string memory key = "safeTx";
         vm.serializeString(key, "deployment", deploymentName());
         vm.serializeUint(key, "chainId", block.chainid);
@@ -188,6 +218,8 @@ abstract contract ManageBase is Script {
         // reaches the Safe API travels as a string.
         vm.serializeString(key, "value", "0");
         vm.serializeBytes(key, "data", data);
+        vm.serializeString(key, "simulation", reverted ? "reverted" : "passed");
+        vm.serializeBytes(key, "revertData", revertData);
         string memory out = vm.serializeUint(key, "operation", 0);
 
         string memory path =
