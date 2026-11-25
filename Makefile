@@ -126,6 +126,12 @@ endif
 #   SAFE=0xYourSafe make manage DEPLOYMENT=BETH SCRIPT=Pause SIG='run()' \
 #     RPC_URL=https://...
 #
+# SKIP_SIMULATION=true skips that simulation in Safe mode. Use it for a call
+# that reverts today but succeeds after earlier Safe transactions run:
+#
+#   SKIP_SIMULATION=true SAFE=0xYourSafe make manage DEPLOYMENT=BETH \
+#     SCRIPT=SetThreshold SIG='run(uint256)' ARGS=3 RPC_URL=https://...
+#
 # Several arguments need one pair of quotes. The shell splits them again:
 #
 #   ARGS='10000000000000000000 3600'
@@ -159,9 +165,13 @@ MANAGE_READ_ONLY := Status
 # --password, and a terminal log keeps whatever a command prints. The operator
 # passes SIGNER on the make line, so the line would only repeat what the
 # command already shows.
+# SKIP_SIMULATION writes the envelope without the simulation. The mode line
+# names it, because the operator must know that nothing proves the call.
+SKIP_NOTE := $(if $(filter-out false 0,$(strip $(SKIP_SIMULATION))), It skips the simulation.,)
+
 ifneq ($(strip $(SAFE)),)
 MANAGE_FLAGS :=
-MANAGE_MODE := Safe mode. It writes an envelope for $(SAFE) and broadcasts nothing.
+MANAGE_MODE := Safe mode. It writes an envelope for $(SAFE) and broadcasts nothing.$(SKIP_NOTE)
 else ifneq ($(filter $(MANAGE_READ_ONLY),$(SCRIPT)),)
 MANAGE_FLAGS :=
 MANAGE_MODE := read only. It sends no transaction.
@@ -202,7 +212,7 @@ endef
 
 ifneq ($(strip $(SAFE)),)
 UPGRADE_FLAGS :=
-UPGRADE_MODE := Safe mode. It writes an envelope for $(SAFE) and broadcasts nothing.
+UPGRADE_MODE := Safe mode. It writes an envelope for $(SAFE) and broadcasts nothing.$(SKIP_NOTE)
 define UPGRADE_POST_SYNC
 @echo "Safe mode: propose the envelope with make propose. Then run make upgrade-sync after the Safe executes, or run the next upgrade command, which syncs first."
 endef

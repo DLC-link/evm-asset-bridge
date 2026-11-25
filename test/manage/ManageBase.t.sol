@@ -42,6 +42,7 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 abstract contract DummyAction is ManageBase {
     address private _target;
     address private _safe;
+    bool private _skip;
 
     function contractName() public pure override returns (string memory) {
         return "BitSafeEvmAssetBridge";
@@ -58,6 +59,14 @@ abstract contract DummyAction is ManageBase {
 
     function safeAddress() internal view override returns (address) {
         return _safe;
+    }
+
+    function configureSkip(bool skip_) external {
+        _skip = skip_;
+    }
+
+    function skipSimulation() internal view override returns (bool) {
+        return _skip;
     }
 
     function run(bytes calldata data) external {
@@ -134,6 +143,39 @@ contract DummyToOverrideAction is DummyAction {
 
     function deploymentName() public pure override returns (string memory) {
         return "MANAGETO";
+    }
+}
+
+/// Used by the test that writes an envelope with the simulation skipped.
+contract DummySkipAction is DummyAction {
+    function action() public pure override returns (string memory) {
+        return "dummySkip";
+    }
+
+    function deploymentName() public pure override returns (string memory) {
+        return "MANAGESKIP";
+    }
+}
+
+/// Used by the test that rejects a skip in direct mode.
+contract DummySkipDirectAction is DummyAction {
+    function action() public pure override returns (string memory) {
+        return "dummySkipDirect";
+    }
+
+    function deploymentName() public pure override returns (string memory) {
+        return "MANAGESKIPDIRECT";
+    }
+}
+
+/// Used by the test that rejects a skip against a target with no code.
+contract DummySkipNoCodeAction is DummyAction {
+    function action() public pure override returns (string memory) {
+        return "dummySkipNoCode";
+    }
+
+    function deploymentName() public pure override returns (string memory) {
+        return "MANAGESKIPNOCODE";
     }
 }
 
@@ -361,6 +403,55 @@ contract ManageBaseTest is BridgeTestBase {
         } catch {}
         assertFalse(vm.exists("deployments/.safe/MANAGENOFILE.31337.dummyNoFile.json"));
         _removeImplRecord("MANAGENOFILE");
+    }
+
+    function test_safeMode_skipSimulation_writesAnEnvelopeForACallThatRevertsToday() public {
+        // A threshold above the attestor count reverts at the current block.
+        // The skip writes the envelope anyway, and the call never runs.
+        _writeImplRecord("MANAGESKIP", "BitSafeEvmAssetBridge");
+        uint256 before = bridge.threshold();
+        uint256 tooHigh = bridge.getAttestors().length + 1;
+        bytes memory data = abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (tooHigh));
+        vm.prank(defaultAdmin);
+        (bool ok,) = address(bridge).call(data);
+        assertFalse(ok);
+
+        DummySkipAction dummy = new DummySkipAction();
+        dummy.configure(address(bridge), defaultAdmin);
+        dummy.configureSkip(true);
+        dummy.run(data);
+
+        assertEq(bridge.threshold(), before);
+        string memory path = "deployments/.safe/MANAGESKIP.31337.dummySkip.json";
+        string memory json = vm.readFile(path);
+        assertEq(vm.parseJsonAddress(json, ".safe"), defaultAdmin);
+        assertEq(vm.parseJsonAddress(json, ".to"), address(bridge));
+        assertEq(vm.parseJsonBytes(json, ".data"), data);
+        vm.removeFile(path);
+        _removeImplRecord("MANAGESKIP");
+    }
+
+    function test_directMode_skipSimulation_reverts() public {
+        _writeImplRecord("MANAGESKIPDIRECT", "BitSafeEvmAssetBridge");
+        DummySkipDirectAction dummy = new DummySkipDirectAction();
+        dummy.configure(address(bridge), address(0));
+        dummy.configureSkip(true);
+        vm.expectRevert(ManageBase.SkipSimulationNeedsSafe.selector);
+        dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.pause, ()));
+        assertFalse(bridge.paused());
+        _removeImplRecord("MANAGESKIPDIRECT");
+    }
+
+    function test_safeMode_skipSimulation_stillRejectsATargetWithNoCode() public {
+        _writeImplRecord("MANAGESKIPNOCODE", "BitSafeEvmAssetBridge");
+        address noCode = makeAddr("noCodeSkip");
+        DummySkipNoCodeAction dummy = new DummySkipNoCodeAction();
+        dummy.configure(noCode, defaultAdmin);
+        dummy.configureSkip(true);
+        vm.expectRevert(abi.encodeWithSelector(ManageBase.TargetHasNoCode.selector, noCode));
+        dummy.run(abi.encodeCall(BitSafeEvmAssetBridge.setThreshold, (3)));
+        assertFalse(vm.exists("deployments/.safe/MANAGESKIPNOCODE.31337.dummySkipNoCode.json"));
+        _removeImplRecord("MANAGESKIPNOCODE");
     }
 
     function test_directMode_sendsTheCallFromTheBroadcaster() public {

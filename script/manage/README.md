@@ -70,6 +70,7 @@ command.
 A Safe-mode run sends nothing. The script first simulates the call from the
 Safe address. The simulation proves that the Safe holds the role. It also
 proves that the arguments are valid. The script then writes the envelope file.
+Section 7 shows how to skip the simulation for an action that reverts today.
 
 The envelope path is `deployments/.safe/<DEPLOYMENT>.<chainId>.<action>.json`.
 
@@ -458,21 +459,44 @@ run then continues with the on-chain nonce. A queued proposal can hold that
 nonce already. The Safe interface shows such a conflict to the owners. Open the
 queue after every warning of this kind.
 
-### Safe mode cannot pre-stage a time-gated action
+### Propose an action that reverts today
 
 Safe mode simulates the call from the Safe address first. The simulation must
-succeed at the current block. These actions fail that simulation before their
-time arrives:
+succeed at the current block. Some actions revert now and succeed later:
 
+- `SetThreshold` reverts above the attestor count. It succeeds after the
+  `GrantRole ATTESTOR` transactions run.
 - `AcceptDefaultAdminTransfer` reverts until the schedule of the transfer
   passes.
 - `Unpause` reverts while the bridge runs.
 - `ExecuteUpgrade` reverts until the delay of the timelock passes.
 - `ExecuteUpdateDelay` reverts until the delay of the timelock passes.
 
-An operator cannot build these four envelopes in advance. The operator waits for
-the condition. The operator then writes the envelope. The operator proposes it
-in the same session. Plan the owner confirmations for that later moment.
+Set `SKIP_SIMULATION=true` to write the envelope without the simulation. The
+owners can then sign now, and execute later:
+
+```bash
+SKIP_SIMULATION=true SAFE=0xYourSafe make manage SCRIPT=SetThreshold \
+  SIG='run(uint256)' ARGS=3 RPC_URL=https://...
+```
+
+The mode line ends with `It skips the simulation.` The script prints a warning.
+The option has these rules:
+
+- The option works in Safe mode only. A direct broadcast stops with
+  `SkipSimulationNeedsSafe()`.
+- The script still rejects a target with no code.
+- `ExecuteUpgrade` and `ExecuteUpdateDelay` accept a waiting operation. They
+  still reject an operation that is not scheduled, or that is done.
+- Nothing proves the role or the arguments. Read the calldata before you sign.
+
+`propose.sh` sends `safeTxGas` 0. A Safe execution with a reverting call
+therefore reverts as a whole. The Safe keeps the nonce, and the owners can
+execute again after the condition holds.
+
+The Safe executes nonces in order. A proposal that waits for its condition
+blocks every later nonce. Propose it after the transactions it depends on. To
+free the nonce, the owners reject the proposal in the Safe interface.
 
 ## 8. Delegate registration stays manual
 

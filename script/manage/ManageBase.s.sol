@@ -23,6 +23,7 @@ abstract contract ManageBase is Script {
     error DeploymentNotSet();
     error ContractMismatch(string recordContractName, string expectedContractName);
     error DelayTooLong(uint256 newDelay, uint256 maximum);
+    error SkipSimulationNeedsSafe();
 
     /// The deployment name, such as "BETH". The operator sets DEPLOYMENT in
     /// the environment. A test overrides this function instead, because a
@@ -89,6 +90,14 @@ abstract contract ManageBase is Script {
         return vm.envOr("SAFE", address(0));
     }
 
+    /// True when the operator sets SKIP_SIMULATION. Safe mode then writes the
+    /// envelope without the prank call. The operator uses it for an action
+    /// that reverts today but succeeds after earlier Safe transactions run.
+    /// A test overrides it, for the same reason as `safeAddress`.
+    function skipSimulation() internal view virtual returns (bool) {
+        return vm.envOr("SKIP_SIMULATION", false);
+    }
+
     /// Reads one recorded address for the current chain. The record's own
     /// chain id must agree, so a record copied to the wrong file name stops
     /// the run instead of pointing at a foreign contract.
@@ -117,12 +126,24 @@ abstract contract ManageBase is Script {
         _dispatch(to, data);
     }
 
+    /// @dev A direct broadcast cannot skip the simulation: forge simulates
+    ///      every broadcast itself, and a reverting call would only burn gas.
+    ///      The skip therefore needs a Safe, and it still rejects a target
+    ///      with no code.
     function _dispatch(address to, bytes memory data) private {
         address safe = safeAddress();
+        bool skip = skipSimulation();
         if (safe == address(0)) {
+            if (skip) {
+                revert SkipSimulationNeedsSafe();
+            }
             vm.startBroadcast();
             _call(to, data);
             vm.stopBroadcast();
+        } else if (skip) {
+            _requireCode(to);
+            console2.log("WARNING: SKIP_SIMULATION is set. Nothing proves that this call succeeds.");
+            _writeEnvelope(safe, to, data);
         } else {
             // The prank proves the Safe holds the role and the arguments are
             // valid. It runs before anybody signs, and it costs nothing.
@@ -138,14 +159,18 @@ abstract contract ManageBase is Script {
     ///      address returns success with no data. A stale record or a wrong
     ///      chain would then report a false success.
     function _call(address to, bytes memory data) private {
-        if (to.code.length == 0) {
-            revert TargetHasNoCode(to);
-        }
+        _requireCode(to);
         (bool ok, bytes memory ret) = to.call(data);
         if (!ok) {
             assembly ("memory-safe") {
                 revert(add(ret, 0x20), mload(ret))
             }
+        }
+    }
+
+    function _requireCode(address to) private view {
+        if (to.code.length == 0) {
+            revert TargetHasNoCode(to);
         }
     }
 
