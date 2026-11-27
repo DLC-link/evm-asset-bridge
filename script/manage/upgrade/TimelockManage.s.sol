@@ -43,7 +43,8 @@ abstract contract TimelockManage is ManageBase {
 
     /// Reads the live state of an operation. It rejects `Unset` and `Done`
     /// always, and `Waiting` when the caller needs `Ready`. The errors tell
-    /// the operator what to do next.
+    /// the operator what to do next. SKIP_SIMULATION accepts `Waiting`, so
+    /// an operator can propose the execute before the delay passes.
     function _requireLive(bytes32 id, bool needReady) internal view {
         TimelockController tl = TimelockController(payable(timelock()));
         TimelockController.OperationState state = tl.getOperationState(id);
@@ -53,7 +54,7 @@ abstract contract TimelockManage is ManageBase {
         if (state == TimelockController.OperationState.Done) {
             revert OperationDone(id);
         }
-        if (needReady && state == TimelockController.OperationState.Waiting) {
+        if (needReady && !skipSimulation() && state == TimelockController.OperationState.Waiting) {
             uint256 readyAt = tl.getTimestamp(id);
             revert OperationNotReady(id, readyAt, readyAt - block.timestamp);
         }

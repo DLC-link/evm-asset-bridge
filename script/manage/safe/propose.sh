@@ -85,6 +85,11 @@ DATA=$(field data)
 OPERATION=$(field operation)
 ACTION=$(field action)
 
+# The two simulation fields are optional. An envelope from an older script
+# carries neither, and the proposer still accepts it.
+SIMULATION=$(jq -r '.simulation // "not recorded"' "$ENVELOPE")
+REVERT_DATA=$(jq -r '.revertData // ""' "$ENVELOPE")
+
 # ---- check the envelope describes a plain call ------------------------------
 # ManageBase writes value "0" and operation 0 for every action. Any other
 # value means the envelope no longer describes the call that the simulation
@@ -261,6 +266,23 @@ echo "propose.sh: value $VALUE, operation $OPERATION"
 echo "propose.sh: data $DATA"
 echo "propose.sh: nonce $NONCE from $NONCE_REASON. The on-chain nonce is $ONCHAIN_NONCE"
 echo "propose.sh: safeTxHash $SAFE_TX_HASH"
+echo "propose.sh: simulation $SIMULATION"
+
+# A SKIP_SIMULATION run writes an envelope for a call that reverts today. The
+# owners sign it only when an earlier transaction removes the cause. The
+# proposer therefore reads the cause here, before the signature exists.
+if [ "$SIMULATION" = "reverted" ]; then
+  REASON=""
+  if [[ "$REVERT_DATA" =~ ^0x[0-9a-fA-F]{8,}$ ]]; then
+    REASON=$(cast decode-error "$REVERT_DATA" 2>/dev/null | tr '\n' ' ') || REASON=""
+  fi
+  echo "propose.sh: ##########################################################" >&2
+  echo "propose.sh: ## WARNING. This call reverts at the current block.     ##" >&2
+  echo "propose.sh: ## Sign it only when an earlier transaction fixes that. ##" >&2
+  echo "propose.sh: ##########################################################" >&2
+  echo "propose.sh: revert data ${REVERT_DATA:-0x}" >&2
+  echo "propose.sh: revert reason ${REASON:-unknown}" >&2
+fi
 
 # ---- sign -------------------------------------------------------------------
 # --no-hash is mandatory. Without it, cast adds the EIP-191 prefix. The
@@ -291,12 +313,12 @@ jq -n \
   --argjson operation "$OPERATION" \
   --arg nonce "$NONCE" --arg hash "$SAFE_TX_HASH" \
   --arg sender "$SENDER" --arg signature "$SIGNATURE" \
-  --arg origin "$ACTION" --arg zero "$ZERO" \
+  --arg origin "$ACTION" --arg simulation "$SIMULATION" --arg zero "$ZERO" \
   '{to: $to, value: $value, data: $data, operation: $operation,
     safeTxGas: "0", baseGas: "0", gasPrice: "0",
     gasToken: $zero, refundReceiver: $zero, nonce: $nonce,
     contractTransactionHash: $hash, sender: $sender, signature: $signature,
-    origin: ({name: "evm-asset-bridge", action: $origin} | tojson)}' \
+    origin: ({name: "evm-asset-bridge", action: $origin, simulation: $simulation} | tojson)}' \
   >"$BODY"
 
 URL="https://api.safe.global/tx-service/$SHORT/api/v2/safes/$SAFE/multisig-transactions/"

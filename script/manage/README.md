@@ -70,6 +70,7 @@ command.
 A Safe-mode run sends nothing. The script first simulates the call from the
 Safe address. The simulation proves that the Safe holds the role. It also
 proves that the arguments are valid. The script then writes the envelope file.
+Section 7 shows how to propose an action that reverts today.
 
 The envelope path is `deployments/.safe/<DEPLOYMENT>.<chainId>.<action>.json`.
 
@@ -458,21 +459,81 @@ run then continues with the on-chain nonce. A queued proposal can hold that
 nonce already. The Safe interface shows such a conflict to the owners. Open the
 queue after every warning of this kind.
 
-### Safe mode cannot pre-stage a time-gated action
+### Propose an action that reverts today
 
 Safe mode simulates the call from the Safe address first. The simulation must
-succeed at the current block. These actions fail that simulation before their
-time arrives:
+succeed at the current block. Some actions revert now and succeed later:
 
+- `SetThreshold` reverts above the attestor count. It succeeds after the
+  `GrantRole ATTESTOR` transactions run.
 - `AcceptDefaultAdminTransfer` reverts until the schedule of the transfer
   passes.
 - `Unpause` reverts while the bridge runs.
 - `ExecuteUpgrade` reverts until the delay of the timelock passes.
 - `ExecuteUpdateDelay` reverts until the delay of the timelock passes.
 
-An operator cannot build these four envelopes in advance. The operator waits for
-the condition. The operator then writes the envelope. The operator proposes it
-in the same session. Plan the owner confirmations for that later moment.
+Pass `SKIP_SIMULATION=true` on the make line to write the envelope anyway. The
+owners can then sign now, and execute later. The script still runs the
+simulation. A revert no longer stops the run. The script prints the revert
+and records it in the envelope.
+
+These rules apply:
+
+- Pass the option on the make line. `make` refuses an exported value, because
+  an export keeps the option for every later run. `make` accepts only `true`.
+- The option works in Safe mode only. A direct broadcast stops with
+  `SkipSimulationNeedsSafe()`.
+- The script still rejects a target with no code.
+- `ExecuteUpgrade` and `ExecuteUpdateDelay` accept an operation that waits for
+  its delay. They still reject an operation that is not on chain or that is
+  done. The Safe must therefore execute the schedule first.
+- `ScheduleUpgrade` still simulates the upgrade itself. That check proves the
+  new code and the payload, and no earlier transaction changes it.
+
+The envelope carries two fields for the proposer. `simulation` is `passed` or
+`reverted`. `revertData` holds the revert. `make propose` prints both before
+it signs, and it decodes the revert. It also adds the `simulation` value to
+the origin of the Safe proposal.
+
+Read the revert before you sign. It must name the reason that you expect. An
+`AccessControlUnauthorizedAccount` revert means that `SAFE` names a Safe that
+lacks the role. No earlier transaction fixes that. Write the envelope again
+with the right Safe.
+
+This example raises the threshold to 3 after two attestor grants. The Safe
+then holds the grants at nonces N and N+1:
+
+```bash
+SAFE=0xDefaultAdminSafe make manage SCRIPT=GrantRole SIG='run(string,address)' \
+  ARGS='ATTESTOR 0xNewAttestorA' RPC_URL=https://...
+make propose ENVELOPE=deployments/.safe/<name>.<chainId>.grantRole.json \
+  RPC_URL=https://... SIGNER="--account proposer"
+
+SAFE=0xDefaultAdminSafe make manage SCRIPT=GrantRole SIG='run(string,address)' \
+  ARGS='ATTESTOR 0xNewAttestorB' RPC_URL=https://...
+make propose ENVELOPE=deployments/.safe/<name>.<chainId>.grantRole.json \
+  RPC_URL=https://... SIGNER="--account proposer"
+
+SAFE=0xDefaultAdminSafe make manage SCRIPT=SetThreshold SIG='run(uint256)' \
+  ARGS=3 SKIP_SIMULATION=true RPC_URL=https://...
+make propose ENVELOPE=deployments/.safe/<name>.<chainId>.setThreshold.json \
+  RPC_URL=https://... SIGNER="--account proposer"
+```
+
+The last `make propose` must print `simulation reverted` and the reason
+`ThresholdOutOfBounds()`. It must also print nonce N+2. The owners execute
+N and N+1 first. The threshold change at N+2 then succeeds.
+
+`propose.sh` sends `safeTxGas` 0. A Safe execution with a reverting call
+therefore reverts as a whole. The Safe keeps the nonce, and the owners can
+execute again after the condition holds.
+
+The Safe executes nonces in order. A proposal that waits for its condition
+blocks every later nonce. Propose it after the transactions that it depends
+on. To free its nonce, the owners must execute a replacement at that nonce. A
+rejection in the Safe interface is such a replacement. It needs the
+signatures of the Safe threshold and an on-chain execution, like any other
+transaction.
 
 ## 8. Delegate registration stays manual
 
@@ -708,6 +769,10 @@ timelock for the live state. `OperationNotReady` names the seconds left.
 `OperationNotOnChain` means the schedule never landed. `OperationDone` means
 the upgrade already ran.
 
+The owners can sign the execute before the delay passes. Run the execute with
+`SKIP_SIMULATION=true` after the Safe executes the schedule, and propose it
+(section 7). The Safe can execute it once the delay passes.
+
 After the Safe executes, run the sync:
 
 ```bash
@@ -774,9 +839,10 @@ steps below use `86400` as an example value.
    ```
 
 2. The Safe owners execute the schedule. Wait for the current delay from
-   that moment. Safe mode cannot write the execute envelope before the delay
-   passes (section 7). If the execute stops with `OperationNotReady`, wait
-   the seconds that it shows.
+   that moment. If the execute stops with `OperationNotReady`, wait the
+   seconds that it shows. To let the owners sign earlier, add
+   `SKIP_SIMULATION=true` to the execute in step 3 (section 7). The Safe can
+   execute that envelope once the delay passes.
 3. Execute the change, and propose the envelope.
 
    ```bash

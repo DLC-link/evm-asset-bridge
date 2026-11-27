@@ -45,10 +45,15 @@ contract DummySchedule is ScheduleUpgrade {
 contract DummyExecute is ExecuteUpgrade {
     string private _name;
     address private _safe;
+    bool private _skip;
 
     function configure(string memory name, address safe_) external {
         _name = name;
         _safe = safe_;
+    }
+
+    function configureSkip(bool skip_) external {
+        _skip = skip_;
     }
 
     function deploymentName() public view override returns (string memory) {
@@ -57,6 +62,10 @@ contract DummyExecute is ExecuteUpgrade {
 
     function safeAddress() internal view override returns (address) {
         return _safe;
+    }
+
+    function skipSimulation() internal view override returns (bool) {
+        return _skip;
     }
 }
 
@@ -336,6 +345,39 @@ contract UpgradeActionsTest is UpgradeFixture {
 
         assertEq(_implementationOf(proxy), oldImpl);
         assertFalse(vm.exists(_envelope(name, "executeUpgrade")));
+        _removeRecords(name);
+    }
+
+    function test_execute_skipSimulation_writesTheEnvelopeBeforeTheDelayPasses() public {
+        string memory name = "UPGSKIP";
+        _writeRecords(name);
+        DummySchedule s = _schedule(name, "");
+        bytes32 id = s.operationId(nextImpl, "");
+        DummyExecute e = new DummyExecute();
+        e.configure(name, safe);
+        e.configureSkip(true);
+
+        vm.warp(timelock.getTimestamp(id) - 100);
+        e.run();
+
+        assertEq(_implementationOf(proxy), oldImpl);
+        assertTrue(timelock.isOperationPending(id));
+        string memory envelope = vm.readFile(_envelope(name, "executeUpgrade"));
+        assertEq(vm.parseJsonAddress(envelope, ".to"), address(timelock));
+        assertEq(vm.parseJsonString(envelope, ".simulation"), "reverted");
+        assertEq(
+            vm.parseJsonBytes(envelope, ".data"),
+            abi.encodeCall(
+                TimelockController.execute, (proxyAdmin, 0, s.upgradeCall(nextImpl, ""), bytes32(0), s.salt(nextImpl))
+            )
+        );
+
+        // The envelope executes once the delay passes.
+        vm.warp(timelock.getTimestamp(id));
+        vm.prank(safe);
+        (bool ok,) = address(timelock).call(vm.parseJsonBytes(envelope, ".data"));
+        assertTrue(ok);
+        assertEq(_implementationOf(proxy), nextImpl);
         _removeRecords(name);
     }
 
